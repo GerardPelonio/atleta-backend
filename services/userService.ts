@@ -392,26 +392,107 @@ export async function socialLoginService(
   provider: 'google' | 'facebook' = 'google',
   roleInput: string = 'Athlete'
 ) {
-  let uid: string;
-  let email: string;
-  let fullName: string;
-  let avatarUrl: string;
+  let uid = '';
+  let email = '';
+  let fullName = '';
+  let avatarUrl = '';
 
-  if (idToken.startsWith('ya29.')) {
-    try {
-      const res = await fetch(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${idToken}`);
-      if (!res.ok) {
-        throw new Error('Failed to fetch userinfo from Google');
+  if (provider === 'google') {
+    let authSuccess = false;
+
+    // 1. If it explicitly looks like a Google Access Token (e.g. starts with 'ya29.'), try Google UserInfo API first
+    if (idToken.startsWith('ya29.')) {
+      try {
+        const res = await fetch(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${encodeURIComponent(idToken)}`, {
+          headers: { Authorization: `Bearer ${idToken}` },
+        });
+        if (res.ok) {
+          const googleUser = (await res.json()) as any;
+          if (googleUser && (googleUser.sub || googleUser.id) && googleUser.email) {
+            uid = `google_${googleUser.sub || googleUser.id}`;
+            email = googleUser.email;
+            fullName = googleUser.name || 'Google User';
+            avatarUrl = googleUser.picture || '';
+            authSuccess = true;
+          }
+        }
+      } catch (_) {
+        // Fall through to other verification methods
       }
-      const googleUser = (await res.json()) as any;
-      uid = `google_${googleUser.sub}`;
-      email = googleUser.email;
-      fullName = googleUser.name || 'Google User';
-      avatarUrl = googleUser.picture || '';
-    } catch (googleErr) {
-      throw { code: 'INVALID_TOKEN', message: 'Invalid or expired Google access token.' };
+    }
+
+    // 2. Try Firebase ID Token verification
+    if (!authSuccess) {
+      try {
+        const decodedToken = await auth.verifyIdToken(idToken);
+        uid = decodedToken.uid;
+        email = decodedToken.email!;
+        fullName = decodedToken.name || 'Social User';
+        avatarUrl = decodedToken.picture || '';
+        authSuccess = true;
+      } catch (_) {
+        // Not a Firebase ID token, proceed to Google ID Token check
+      }
+    }
+
+    // 3. Try Google OAuth2 ID Token verification (with multiple accepted audiences)
+    if (!authSuccess) {
+      try {
+        const audiences = [
+          process.env.GOOGLE_CLIENT_ID,
+          process.env.GOOGLE_ANDROID_CLIENT_ID,
+          process.env.GOOGLE_ANDROID_ID,
+          process.env.GOOGLE_IOS_CLIENT_ID,
+          '203586668533-uii0i4gjqcm2cmj4ssvrdq70a2efhmnf.apps.googleusercontent.com',
+          '203586668533-54oqq5mc56b38dhrcqa5t157ngrsmqvt.apps.googleusercontent.com',
+        ].filter(Boolean) as string[];
+
+        const ticket = await googleOAuthClient.verifyIdToken({
+          idToken: idToken,
+          audience: audiences.length > 0 ? audiences : undefined,
+        });
+        const payload = ticket.getPayload();
+        if (payload && payload.sub && payload.email) {
+          uid = payload.sub;
+          email = payload.email;
+          fullName = payload.name || 'Google User';
+          avatarUrl = payload.picture || '';
+          authSuccess = true;
+        }
+      } catch (_) {
+        // Not a valid Google ID token with matching audience
+      }
+    }
+
+    // 4. Fallback: Try Google UserInfo API (handles access tokens with other prefixes like 4/0..., 0.a..., etc.)
+    if (!authSuccess) {
+      try {
+        const res = await fetch(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${encodeURIComponent(idToken)}`, {
+          headers: { Authorization: `Bearer ${idToken}` },
+        });
+        if (res.ok) {
+          const googleUser = (await res.json()) as any;
+          if (googleUser && (googleUser.sub || googleUser.id) && googleUser.email) {
+            uid = `google_${googleUser.sub || googleUser.id}`;
+            email = googleUser.email;
+            fullName = googleUser.name || 'Google User';
+            avatarUrl = googleUser.picture || '';
+            authSuccess = true;
+          }
+        }
+      } catch (_) {
+        // Userinfo lookup failed
+      }
+    }
+
+    if (!authSuccess) {
+      throw {
+        code: 'INVALID_TOKEN',
+        message: 'Invalid or expired Google authentication token.',
+      };
     }
   } else {
+    // Facebook or other provider
     try {
       const decodedToken = await auth.verifyIdToken(idToken);
       uid = decodedToken.uid;
@@ -419,34 +500,7 @@ export async function socialLoginService(
       fullName = decodedToken.name || 'Social User';
       avatarUrl = decodedToken.picture || '';
     } catch (err: any) {
-      if (provider === 'google') {
-        try {
-          const audiences = [
-            process.env.GOOGLE_CLIENT_ID,
-            process.env.GOOGLE_ANDROID_CLIENT_ID,
-            process.env.GOOGLE_IOS_CLIENT_ID,
-          ].filter(Boolean) as string[];
-
-          const ticket = await googleOAuthClient.verifyIdToken({
-            idToken: idToken,
-            audience: audiences.length > 0 ? audiences : undefined,
-          });
-          const payload = ticket.getPayload();
-          if (!payload) throw new Error('Invalid Google payload');
-
-          uid = payload.sub;
-          email = payload.email!;
-          fullName = payload.name || 'Google User';
-          avatarUrl = payload.picture || '';
-        } catch (googleErr: any) {
-          throw {
-            code: 'INVALID_TOKEN',
-            message: `Invalid or expired ${provider} authentication token.`,
-          };
-        }
-      } else {
-        throw { code: 'INVALID_TOKEN', message: `Invalid or expired ${provider} authentication token.` };
-      }
+      throw { code: 'INVALID_TOKEN', message: `Invalid or expired ${provider} authentication token.` };
     }
   }
 
