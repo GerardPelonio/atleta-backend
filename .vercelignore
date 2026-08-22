@@ -1,0 +1,9 @@
+.git
+.env
+.env.local
+.env.*.local
+scratch/
+*.log
+eng.traineddata
+node_modules/
+dist/
