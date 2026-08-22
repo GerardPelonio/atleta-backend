@@ -337,13 +337,7 @@ export async function loginUserService(email: string, password: string) {
     firebaseIdToken = await userCredential.user.getIdToken();
     uid = userCredential.user.uid;
   } catch (err: any) {
-    const isApiKeyError =
-      err?.code === 'auth/api-key-not-valid.-please-pass-a-valid-api-key.' ||
-      err?.code === 'auth/invalid-api-key' ||
-      err?.code === 'auth/api-key-not-valid' ||
-      err?.message?.includes('api-key-not-valid');
-
-    if (isApiKeyError && userDoc) {
+    if (userDoc) {
       const userData = userDoc.data();
       if (userData.password && userData.password === password) {
         uid = userDoc.id;
@@ -367,13 +361,14 @@ export async function loginUserService(email: string, password: string) {
     userDoc = docRef as any;
   }
 
+  const canonicalUid = userDoc!.id;
   const userData = (userDoc as any).data()!;
   const role = userData.role as UserRole;
-  const token = generateToken(uid, userData.email, role);
+  const token = generateToken(canonicalUid, userData.email, role);
 
   return {
     user: {
-      user_id: uid,
+      user_id: canonicalUid,
       first_name: userData.first_name,
       last_name: userData.last_name,
       email: userData.email,
@@ -505,17 +500,38 @@ export async function socialLoginService(
   }
 
   const nameParts = fullName.split(' ');
-  const firstName = nameParts[0] || 'User';
-  const lastName = nameParts.slice(1).join(' ') || 'Social';
+  let firstName = nameParts[0] || 'User';
+  let lastName = nameParts.slice(1).join(' ') || 'Social';
 
-  const userRef = db.collection('Users').doc(uid);
-  const userDoc = await userRef.get();
+  let userRef = db.collection('Users').doc(uid);
+  let userDoc = await userRef.get();
+
+  // Cross-reference Firestore Users collection (Picture 2) by email if not found by direct doc(uid)
+  if (!userDoc.exists && email) {
+    const cleanEmail = email.trim().toLowerCase();
+    const snap = await db.collection('Users').where('email', '==', cleanEmail).limit(1).get();
+    if (!snap.empty) {
+      userDoc = snap.docs[0];
+      userRef = userDoc.ref;
+      uid = userDoc.id;
+    } else {
+      const snapRaw = await db.collection('Users').where('email', '==', email.trim()).limit(1).get();
+      if (!snapRaw.empty) {
+        userDoc = snapRaw.docs[0];
+        userRef = userDoc.ref;
+        uid = userDoc.id;
+      }
+    }
+  }
 
   let userRole: UserRole;
 
   if (userDoc.exists) {
     const userData = userDoc.data()!;
     userRole = userData.role || 'Athlete';
+    firstName = userData.first_name || firstName;
+    lastName = userData.last_name || lastName;
+    avatarUrl = userData.avatar_url || avatarUrl;
   } else {
     // New social user: provision User and Athlete Subtype records atomically
     userRole = normalizeRole(roleInput);
@@ -580,7 +596,30 @@ export async function socialLoginService(
  * Fetch authenticated user profile, role, permissions, and subtype document.
  */
 export async function getUserProfileService(uid: string) {
-  const userDoc = await db.collection('Users').doc(uid).get();
+  let userDoc = await db.collection('Users').doc(uid).get();
+
+  if (!userDoc.exists) {
+    // Cross-check: check if uid is a Firebase Auth UID corresponding to a Firestore Users record
+    try {
+      const authUser = await auth.getUser(uid);
+      if (authUser && authUser.email) {
+        const snap = await db.collection('Users').where('email', '==', authUser.email.trim().toLowerCase()).limit(1).get();
+        if (!snap.empty) {
+          userDoc = snap.docs[0];
+          uid = userDoc.id;
+        } else {
+          const rawSnap = await db.collection('Users').where('email', '==', authUser.email.trim()).limit(1).get();
+          if (!rawSnap.empty) {
+            userDoc = rawSnap.docs[0];
+            uid = userDoc.id;
+          }
+        }
+      }
+    } catch (_) {
+      // Ignore auth error
+    }
+  }
+
   if (!userDoc.exists) {
     throw { code: 'USER_NOT_FOUND', message: 'User not found.' };
   }
@@ -613,8 +652,48 @@ export async function getUserProfileService(uid: string) {
  * Generate password reset token and send email.
  */
 export async function requestPasswordResetService(email: string) {
-  const userRecord = await auth.getUserByEmail(email);
-  const uid = userRecord.uid;
+  let emailToReset = email;
+  let uid: string | undefined;
+
+  // 1. Try Firebase Auth (Picture 1)
+  try {
+    const userRecord = await auth.getUserByEmail(email);
+    uid = userRecord.uid;
+    if (userRecord.email) {
+      emailToReset = userRecord.email;
+    }
+  } catch (authErr) {
+    // 2. Fallback: Check Firestore Users collection (Picture 2)
+    const snap = await db.collection('Users').where('email', '==', email.trim().toLowerCase()).limit(1).get();
+    if (!snap.empty) {
+      const doc = snap.docs[0];
+      uid = doc.id;
+      const data = doc.data();
+      if (data && data.email) {
+        emailToReset = data.email;
+      }
+    } else {
+      const snapRaw = await db.collection('Users').where('email', '==', email.trim()).limit(1).get();
+      if (!snapRaw.empty) {
+        const doc = snapRaw.docs[0];
+        uid = doc.id;
+        const data = doc.data();
+        if (data && data.email) {
+          emailToReset = data.email;
+        }
+      } else {
+        throw { code: 'USER_NOT_FOUND', message: 'No registered account found with this email.' };
+      }
+    }
+  }
+
+  // Cross-reference: If email exists in Firestore Users collection (Picture 2), use that document ID as canonical uid
+  if (emailToReset) {
+    const firestoreSnap = await db.collection('Users').where('email', '==', emailToReset.trim().toLowerCase()).limit(1).get();
+    if (!firestoreSnap.empty) {
+      uid = firestoreSnap.docs[0].id;
+    }
+  }
 
   const hasCustomMailConfig = Boolean(process.env.EMAIL_USER && process.env.EMAIL_PASS);
 
@@ -630,13 +709,13 @@ export async function requestPasswordResetService(email: string) {
           url: frontendUrl!,
           handleCodeInApp: true,
         };
-        await sendPasswordResetEmail(clientAuth, email, actionCodeSettings);
+        await sendPasswordResetEmail(clientAuth, emailToReset, actionCodeSettings);
       } else {
-        await sendPasswordResetEmail(clientAuth, email);
+        await sendPasswordResetEmail(clientAuth, emailToReset);
       }
     } catch (err: any) {
       if (err?.code === 'auth/unauthorized-continue-uri') {
-        await sendPasswordResetEmail(clientAuth, email);
+        await sendPasswordResetEmail(clientAuth, emailToReset);
       } else {
         throw err;
       }
@@ -649,7 +728,7 @@ export async function requestPasswordResetService(email: string) {
   }
 
   const secret = process.env.JWT_SECRET!;
-  const resetToken = jwt.sign({ uid, email, purpose: 'reset-password' }, secret, { expiresIn: '15m' as any });
+  const resetToken = jwt.sign({ uid, email: emailToReset, purpose: 'reset-password' }, secret, { expiresIn: '15m' as any });
 
   const rawBaseUrl = process.env.FRONTEND_RESET_URL;
   const baseUrl = (rawBaseUrl && (rawBaseUrl.startsWith('http://') || rawBaseUrl.startsWith('https://')))
@@ -658,7 +737,7 @@ export async function requestPasswordResetService(email: string) {
 
   const resetLink = `${baseUrl}?token=${resetToken}`;
 
-  const mailResult = await sendPasswordResetEmailService(email, resetLink);
+  const mailResult = await sendPasswordResetEmailService(emailToReset, resetLink);
 
   return {
     sent: mailResult.sent,
@@ -685,7 +764,19 @@ export async function resetPasswordConfirmService(token: string, newPassword: st
     throw { code: 'INVALID_TOKEN', message: 'Token is not valid for password reset.' };
   }
 
-  await auth.updateUser(decoded.uid, { password: newPassword });
+  try {
+    await auth.updateUser(decoded.uid, { password: newPassword });
+  } catch (authErr: any) {
+    if (authErr?.code === 'auth/user-not-found') {
+      await auth.createUser({
+        uid: decoded.uid,
+        email: decoded.email,
+        password: newPassword,
+      });
+    } else {
+      throw authErr;
+    }
+  }
 
   return { message: 'Password has been successfully updated.' };
 }

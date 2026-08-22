@@ -163,10 +163,12 @@ export async function requestPasswordReset(req: AuthRequest, res: Response): Pro
     const result = await requestPasswordResetService(email);
     res.status(200).json(result);
   } catch (error: any) {
+    if (error.code === 'USER_NOT_FOUND') {
+      res.status(404).json({ error: error.message });
+      return;
+    }
     if (error.code === 'auth/user-not-found') {
-      res.status(200).json({
-        message: 'If an account with that email exists, a password reset link has been sent.',
-      });
+      res.status(404).json({ error: 'No registered account found with this email.' });
       return;
     }
     console.error('RequestPasswordReset error:', error);
