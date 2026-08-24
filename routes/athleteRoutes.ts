@@ -12,7 +12,7 @@ import {
   getAthleteMatchHistoryHandler,
 } from '../controllers/athleteController';
 import { getAthleteTeamHandler } from '../controllers/teamController';
-import { postSrpeLog, getAthleteWorkloadHandler } from '../controllers/workloadController';
+import { postSrpeLog, getAthleteWorkloadHandler, setWorkloadTargetHandler } from '../controllers/workloadController';
 import { syncAthleteOfflineBatchHandler, getAthleteOfflineSnapshotHandler } from '../controllers/syncController';
 
 const router = Router();
@@ -38,6 +38,7 @@ router.get('/stats', authenticate, getAthleteAllStatsHandler);
 router.get('/matches', authenticate, getAthleteMatchHistoryHandler);
 router.get('/workload', authenticate, getAthleteWorkloadHandler);
 router.post('/workload', authenticate, postSrpeLog);
+router.put('/workload/target', authenticate, setWorkloadTargetHandler);
 router.post('/sync-offline', authenticate, syncAthleteOfflineBatchHandler);
 router.get('/offline-snapshot', authenticate, getAthleteOfflineSnapshotHandler);
 router.get('/profile', authenticate, getAthlete);
@@ -54,6 +55,7 @@ router.get('/:athleteId/stats', authenticate, getAthleteAllStatsHandler);
 router.get('/:athleteId/matches', authenticate, getAthleteMatchHistoryHandler);
 router.get('/:athleteId/workload', authenticate, getAthleteWorkloadHandler);
 router.post('/:athleteId/workload', authenticate, postSrpeLog);
+router.put('/:athleteId/workload/target', authenticate, setWorkloadTargetHandler);
 router.post('/:athleteId/sync-offline', authenticate, syncAthleteOfflineBatchHandler);
 router.get('/:athleteId/offline-snapshot', authenticate, getAthleteOfflineSnapshotHandler);
 router.get('/:athleteId', getAthlete);

@@ -45,6 +45,9 @@ export interface AthleteProfile {
     year: string;
     content: string;
   }[] | null;
+  workload_analytics?: any;
+  workload?: any;
+  workload_target?: any;
   created_at: Date;
   updated_at: Date;
 }

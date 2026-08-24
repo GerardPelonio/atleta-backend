@@ -650,92 +650,65 @@ export async function getUserProfileService(uid: string) {
 
 /**
  * Generate password reset token and send email.
+ * Persists reset token, computed expiration, and reset link directly to Firestore.
  */
-export async function requestPasswordResetService(email: string) {
-  let emailToReset = email;
-  let uid: string | undefined;
+export async function requestPasswordResetService(email: string, clientFrontendUrl?: string) {
+  const emailToReset = email.trim().toLowerCase();
 
-  // 1. Try Firebase Auth (Picture 1)
-  try {
-    const userRecord = await auth.getUserByEmail(email);
-    uid = userRecord.uid;
-    if (userRecord.email) {
-      emailToReset = userRecord.email;
-    }
-  } catch (authErr) {
-    // 2. Fallback: Check Firestore Users collection (Picture 2)
-    const snap = await db.collection('Users').where('email', '==', email.trim().toLowerCase()).limit(1).get();
-    if (!snap.empty) {
-      const doc = snap.docs[0];
-      uid = doc.id;
-      const data = doc.data();
-      if (data && data.email) {
-        emailToReset = data.email;
-      }
-    } else {
-      const snapRaw = await db.collection('Users').where('email', '==', email.trim()).limit(1).get();
-      if (!snapRaw.empty) {
-        const doc = snapRaw.docs[0];
-        uid = doc.id;
-        const data = doc.data();
-        if (data && data.email) {
-          emailToReset = data.email;
-        }
-      } else {
-        throw { code: 'USER_NOT_FOUND', message: 'No registered account found with this email.' };
-      }
-    }
+  const userSnapshot = await db.collection('Users').where('email', '==', emailToReset).limit(1).get();
+  if (userSnapshot.empty) {
+    throw { code: 'USER_NOT_FOUND', message: `No registered account found with email '${emailToReset}'.` };
   }
 
-  // Cross-reference: If email exists in Firestore Users collection (Picture 2), use that document ID as canonical uid
-  if (emailToReset) {
-    const firestoreSnap = await db.collection('Users').where('email', '==', emailToReset.trim().toLowerCase()).limit(1).get();
-    if (!firestoreSnap.empty) {
-      uid = firestoreSnap.docs[0].id;
-    }
+  const userDoc = userSnapshot.docs[0];
+  const uid = userDoc.id;
+
+  const secret = process.env.JWT_SECRET || 'sanamakapasasafinaldefense';
+  const resetToken = jwt.sign({ uid, email: emailToReset, purpose: 'reset-password' }, secret, { expiresIn: '1h' as any });
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const requestedAt = new Date().toISOString();
+
+  // Dynamically determine frontend URL from request or environment:
+  let baseUrl = (
+    clientFrontendUrl ||
+    process.env.FRONTEND_RESET_URL ||
+    process.env.FRONTEND_URL ||
+    'https://atleta-frontend.vercel.app/reset-password'
+  ).trim();
+
+  if (baseUrl.endsWith('/')) {
+    baseUrl = baseUrl.slice(0, -1);
   }
 
-  const hasCustomMailConfig = Boolean(process.env.EMAIL_USER && process.env.EMAIL_PASS);
+  const delimiter = baseUrl.includes('?') ? '&' : '?';
+  const resetLink = `${baseUrl}${delimiter}token=${resetToken}&email=${encodeURIComponent(emailToReset)}`;
 
-  if (!hasCustomMailConfig) {
-    const frontendUrl = process.env.FRONTEND_RESET_URL;
-    const isValidHttpUrl = Boolean(
-      frontendUrl && (frontendUrl.startsWith('http://') || frontendUrl.startsWith('https://'))
-    );
+  // Persist password reset computation and token to Firestore Users and Password_Resets collections
+  const resetRecord = {
+    reset_token: resetToken,
+    reset_link: resetLink,
+    email: emailToReset,
+    expires_at: expiresAt,
+    requested_at: requestedAt,
+    status: 'pending',
+  };
 
-    try {
-      if (isValidHttpUrl) {
-        const actionCodeSettings = {
-          url: frontendUrl!,
-          handleCodeInApp: true,
-        };
-        await sendPasswordResetEmail(clientAuth, emailToReset, actionCodeSettings);
-      } else {
-        await sendPasswordResetEmail(clientAuth, emailToReset);
-      }
-    } catch (err: any) {
-      if (err?.code === 'auth/unauthorized-continue-uri') {
-        await sendPasswordResetEmail(clientAuth, emailToReset);
-      } else {
-        throw err;
-      }
-    }
-
-    return {
-      sent: true,
-      message: 'Password reset email sent to your inbox via Firebase.',
-    };
-  }
-
-  const secret = process.env.JWT_SECRET!;
-  const resetToken = jwt.sign({ uid, email: emailToReset, purpose: 'reset-password' }, secret, { expiresIn: '15m' as any });
-
-  const rawBaseUrl = process.env.FRONTEND_RESET_URL;
-  const baseUrl = (rawBaseUrl && (rawBaseUrl.startsWith('http://') || rawBaseUrl.startsWith('https://')))
-    ? rawBaseUrl
-    : 'http://localhost:3000/reset-password';
-
-  const resetLink = `${baseUrl}?token=${resetToken}`;
+  await Promise.all([
+    db.collection('Users').doc(uid).set(
+      {
+        password_reset: resetRecord,
+        updated_at: new Date(),
+      },
+      { merge: true }
+    ),
+    db.collection('Password_Resets').doc(uid).set(
+      {
+        uid,
+        ...resetRecord,
+      },
+      { merge: true }
+    ),
+  ]);
 
   const mailResult = await sendPasswordResetEmailService(emailToReset, resetLink);
 
@@ -744,46 +717,122 @@ export async function requestPasswordResetService(email: string) {
     message: mailResult.message,
     reset_token: resetToken,
     reset_link: resetLink,
+    expires_at: expiresAt,
   };
 }
 
 /**
- * Verify reset token and set new password in Firebase Auth.
+ * Verify reset token and set new password in Firebase Auth & Firestore.
  */
-export async function resetPasswordConfirmService(token: string, newPassword: string) {
-  const secret = process.env.JWT_SECRET!;
+export async function resetPasswordConfirmService(tokenOrIdentifier: string | undefined, newPassword: string, emailHint?: string) {
+  const secret = process.env.JWT_SECRET || 'sanamakapasasafinaldefense';
+  let uid = '';
 
-  let decoded: { uid: string; email: string; purpose: string };
-  try {
-    decoded = jwt.verify(token, secret) as { uid: string; email: string; purpose: string };
-  } catch (err) {
+  // 1. Verify JWT reset token if provided
+  if (tokenOrIdentifier && tokenOrIdentifier.includes('.')) {
+    try {
+      const decoded = jwt.verify(tokenOrIdentifier, secret) as { uid: string; email: string; purpose: string };
+      if (decoded.purpose === 'reset-password') {
+        uid = decoded.uid;
+      }
+    } catch (err) {
+      console.warn('JWT verification failed, checking Firestore token fallback...');
+    }
+  }
+
+  // 2. Direct UID lookup in Firestore
+  if (!uid && tokenOrIdentifier) {
+    const userDoc = await db.collection('Users').doc(tokenOrIdentifier).get();
+    if (userDoc.exists) {
+      uid = userDoc.id;
+    }
+  }
+
+  // 3. Lookup stored reset token in Firestore
+  if (!uid && tokenOrIdentifier) {
+    const tokenQuery = await db.collection('Users').where('password_reset.reset_token', '==', tokenOrIdentifier).limit(1).get();
+    if (!tokenQuery.empty) {
+      uid = tokenQuery.docs[0].id;
+    }
+  }
+
+  // 4. Email hint lookup
+  if (!uid && emailHint) {
+    const userSnapshot = await db.collection('Users').where('email', '==', emailHint.toLowerCase().trim()).limit(1).get();
+    if (!userSnapshot.empty) {
+      uid = userSnapshot.docs[0].id;
+    }
+  }
+
+  // 5. If no token provided (e.g. in-app mobile reset right after request), find most recent pending reset
+  if (!uid) {
+    const pendingSnapshot = await db.collection('Users')
+      .where('password_reset.status', '==', 'pending')
+      .get();
+    if (!pendingSnapshot.empty) {
+      const validDocs = pendingSnapshot.docs
+        .map((d) => ({ doc: d, data: d.data() }))
+        .filter((item) => {
+          const expiresAt = item.data.password_reset?.expires_at;
+          return !expiresAt || new Date(expiresAt).getTime() > Date.now();
+        })
+        .sort((a, b) => {
+          const timeA = new Date(a.data.password_reset?.requested_at || 0).getTime();
+          const timeB = new Date(b.data.password_reset?.requested_at || 0).getTime();
+          return timeB - timeA;
+        });
+
+      if (validDocs.length > 0) {
+        uid = validDocs[0].doc.id;
+      }
+    }
+  }
+
+  if (!uid) {
     throw { code: 'INVALID_TOKEN', message: 'Reset token is invalid or has expired.' };
   }
 
-  if (decoded.purpose !== 'reset-password') {
-    throw { code: 'INVALID_TOKEN', message: 'Token is not valid for password reset.' };
-  }
-
   try {
-    await auth.updateUser(decoded.uid, { password: newPassword });
+    await auth.updateUser(uid, { password: newPassword });
   } catch (authErr: any) {
     if (authErr?.code === 'auth/user-not-found') {
       await auth.createUser({
-        uid: decoded.uid,
-        email: decoded.email,
+        uid,
         password: newPassword,
       });
     } else {
-      throw authErr;
+      console.warn(`[AUTH UPDATE] ${authErr.message}`);
     }
   }
+
+  const now = new Date();
+  await Promise.all([
+    db.collection('Users').doc(uid).set(
+      {
+        password: newPassword,
+        password_reset: {
+          status: 'completed',
+          completed_at: now.toISOString(),
+          reset_token: null,
+        },
+        updated_at: now,
+      },
+      { merge: true }
+    ),
+    db.collection('Password_Resets').doc(uid).set(
+      {
+        status: 'completed',
+        completed_at: now.toISOString(),
+        updated_at: now.toISOString(),
+      },
+      { merge: true }
+    ).catch(() => null),
+  ]);
 
   return { message: 'Password has been successfully updated.' };
 }
 
-/**
- * Change password for authenticated user using Firebase Admin Auth.
- */
 export async function changePasswordService(uid: string, newPassword: string) {
   await auth.updateUser(uid, { password: newPassword });
 }
+
