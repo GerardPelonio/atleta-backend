@@ -12,14 +12,29 @@ import {
 
 const router = Router();
 
-router.get('/official', authenticate, getOfficialNotificationsHandler);
-router.get('/', authenticate, getNotifications);
-router.patch('/read-all', authenticate, (req: any, res: any) => {
+const handleReadAll = (req: any, res: any) => {
   if (req.user && req.user.role === 'Official') {
     return markAllOfficialNotificationsAsReadHandler(req, res);
   }
   return markAllAsRead(req, res);
-});
+};
+
+// Official Notifications
+router.get('/official', authenticate, getOfficialNotificationsHandler);
+
+// Notification Inbox (Named and Root Routes)
+router.get('/me', authenticate, getNotifications);
+router.get('/list', authenticate, getNotifications);
+router.get('/all', authenticate, getNotifications);
+router.get('/', authenticate, getNotifications);
+
+// Mark All As Read
+router.patch('/read-all', authenticate, handleReadAll);
+router.post('/read-all', authenticate, handleReadAll);
+
+// Mark Specific Notification As Read
 router.patch('/:notificationId/read', authenticate, markAsRead);
+router.post('/:notificationId/read', authenticate, markAsRead);
 
 export default router;
+

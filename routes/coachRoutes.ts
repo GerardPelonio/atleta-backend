@@ -21,17 +21,33 @@ const upload = multer({
   limits: { fileSize: 25 * 1024 * 1024 },
 });
 
+// Coach Registration & Auth (Named and Root Routes)
 router.post('/register-coach', authRateLimiter, upload.single('professional_documents'), registerCoach);
+router.post('/register', authRateLimiter, upload.single('professional_documents'), registerCoach);
 router.post('/coach', authRateLimiter, upload.single('professional_documents'), registerCoach);
+router.post('/', authRateLimiter, upload.single('professional_documents'), registerCoach);
 router.post('/login', authRateLimiter, loginUser);
 
 // Clean Token-Based Routes (No Coach ID required)
 router.get('/me', authenticate, getCoachProfileHandler);
 router.get('/profile', authenticate, getCoachProfileHandler);
+
+// Coach Settings
 router.get('/me/settings', authenticate, getCoachSettingsHandler);
+router.get('/settings', authenticate, getCoachSettingsHandler);
 router.patch('/me/settings', authenticate, updateCoachSettingsHandler);
+router.patch('/settings', authenticate, updateCoachSettingsHandler);
+
+// Coach Profile Update
 router.patch('/me/profile', authenticate, updateCoachProfileHandler);
+router.patch('/profile', authenticate, updateCoachProfileHandler);
+
+// Coach Password Change
 router.patch('/me/password', authenticate, changeCoachPasswordHandler);
+router.patch('/password', authenticate, changeCoachPasswordHandler);
+router.post('/change-password', authenticate, changeCoachPasswordHandler);
+
+// Offline Synchronization
 router.post('/sync-offline', authenticate, requireCoach, syncCoachOfflineBatchHandler);
 router.get('/offline-snapshot', authenticate, requireCoach, getCoachOfflineSnapshotHandler);
 
@@ -44,3 +60,4 @@ router.get('/athletes/:athleteId/workload', authenticate, requireCoach, getAthle
 router.get('/:coachId', getCoachProfileHandler);
 
 export default router;
+

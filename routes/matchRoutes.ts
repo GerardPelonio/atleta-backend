@@ -29,14 +29,25 @@ router.post('/scan-scoresheet', authenticate, upload.any(), scanStandaloneScores
 router.post('/ocr/scan', authenticate, upload.any(), scanStandaloneScoresheet);
 router.post('/scoresheet', authenticate, upload.any(), scanStandaloneScoresheet);
 
-// Match Endpoints
-router.post('/official', authenticate, createOfficialMatchHandler);
+// Match Endpoints (Named and Root Routes)
+router.post('/submit', authenticate, submitMatch);
+router.post('/create', authenticate, submitMatch);
+router.post('/log', authenticate, submitMatch);
+router.post('/log-match', authenticate, submitMatch);
 router.post('/', authenticate, submitMatch);
+
+// Official Match Endpoints
+router.post('/official', authenticate, createOfficialMatchHandler);
+router.post('/create-official', authenticate, createOfficialMatchHandler);
+
+// Single Match Lookup & Artifacts
 router.post('/:matchId/scoresheet', authenticate, upload.any(), uploadScoresheet);
 router.get('/:matchId/boxscore', authenticate, getBoxscore);
 router.get('/:matchId/details', authenticate, getMatchDetailsHandler);
+router.get('/:matchId', authenticate, getMatchDetailsHandler);
 router.post('/:matchId/audit-request', authenticate, requireCoach, submitAuditRequestController);
 router.get('/:matchId/pdf', authenticate, requireCoach, exportMatchPdfController);
 router.delete('/:matchId', authenticate, deleteMatchHandler);
 
 export default router;
+

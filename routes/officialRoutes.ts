@@ -14,9 +14,10 @@ import {
 
 const router = Router();
 
-// Profile & Identity
+// Profile & Identity (Named and Root Routes)
 router.get('/profile', authenticate, getOfficialProfileHandler);
 router.get('/me', authenticate, getOfficialProfileHandler);
+router.get('/', authenticate, getOfficialProfileHandler);
 
 // Tournament Management Operations & Dashboard
 router.get('/dashboard', authenticate, getDashboardHandler);
@@ -25,10 +26,14 @@ router.get('/schedules', authenticate, getSchedulesHandler);
 // Tournament Official Notifications
 router.get('/notifications', authenticate, getOfficialNotificationsHandler);
 router.patch('/notifications/read-all', authenticate, markAllOfficialNotificationsAsReadHandler);
+router.post('/notifications/read-all', authenticate, markAllOfficialNotificationsAsReadHandler);
 router.patch('/notifications/read', authenticate, markAllOfficialNotificationsAsReadHandler);
 
 // Tournament Official Settings
 router.get('/me/settings', authenticate, getOfficialSettingsHandler);
+router.get('/settings', authenticate, getOfficialSettingsHandler);
 router.patch('/me/settings', authenticate, updateOfficialSettingsHandler);
+router.patch('/settings', authenticate, updateOfficialSettingsHandler);
 
 export default router;
+

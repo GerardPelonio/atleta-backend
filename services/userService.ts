@@ -11,7 +11,9 @@ import {
 } from '../models/userModel';
 import { sendPasswordResetEmailService } from './emailService';
 
-const googleOAuthClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+const googleOAuthClient = new OAuth2Client(
+  process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_ANDROID_CLIENT_ID
+);
 
 /**
  * Maps lowercase or mixed case role string to canonical UserRole enum value.
@@ -335,13 +337,7 @@ export async function loginUserService(email: string, password: string) {
     firebaseIdToken = await userCredential.user.getIdToken();
     uid = userCredential.user.uid;
   } catch (err: any) {
-    const isApiKeyError =
-      err?.code === 'auth/api-key-not-valid.-please-pass-a-valid-api-key.' ||
-      err?.code === 'auth/invalid-api-key' ||
-      err?.code === 'auth/api-key-not-valid' ||
-      err?.message?.includes('api-key-not-valid');
-
-    if (isApiKeyError && userDoc) {
+    if (userDoc) {
       const userData = userDoc.data();
       if (userData.password && userData.password === password) {
         uid = userDoc.id;
@@ -365,13 +361,14 @@ export async function loginUserService(email: string, password: string) {
     userDoc = docRef as any;
   }
 
+  const canonicalUid = userDoc!.id;
   const userData = (userDoc as any).data()!;
   const role = userData.role as UserRole;
-  const token = generateToken(uid, userData.email, role);
+  const token = generateToken(canonicalUid, userData.email, role);
 
   return {
     user: {
-      user_id: uid,
+      user_id: canonicalUid,
       first_name: userData.first_name,
       last_name: userData.last_name,
       email: userData.email,
@@ -390,26 +387,107 @@ export async function socialLoginService(
   provider: 'google' | 'facebook' = 'google',
   roleInput: string = 'Athlete'
 ) {
-  let uid: string;
-  let email: string;
-  let fullName: string;
-  let avatarUrl: string;
+  let uid = '';
+  let email = '';
+  let fullName = '';
+  let avatarUrl = '';
 
-  if (idToken.startsWith('ya29.')) {
-    try {
-      const res = await fetch(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${idToken}`);
-      if (!res.ok) {
-        throw new Error('Failed to fetch userinfo from Google');
+  if (provider === 'google') {
+    let authSuccess = false;
+
+    // 1. If it explicitly looks like a Google Access Token (e.g. starts with 'ya29.'), try Google UserInfo API first
+    if (idToken.startsWith('ya29.')) {
+      try {
+        const res = await fetch(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${encodeURIComponent(idToken)}`, {
+          headers: { Authorization: `Bearer ${idToken}` },
+        });
+        if (res.ok) {
+          const googleUser = (await res.json()) as any;
+          if (googleUser && (googleUser.sub || googleUser.id) && googleUser.email) {
+            uid = `google_${googleUser.sub || googleUser.id}`;
+            email = googleUser.email;
+            fullName = googleUser.name || 'Google User';
+            avatarUrl = googleUser.picture || '';
+            authSuccess = true;
+          }
+        }
+      } catch (_) {
+        // Fall through to other verification methods
       }
-      const googleUser = (await res.json()) as any;
-      uid = `google_${googleUser.sub}`;
-      email = googleUser.email;
-      fullName = googleUser.name || 'Google User';
-      avatarUrl = googleUser.picture || '';
-    } catch (googleErr) {
-      throw { code: 'INVALID_TOKEN', message: 'Invalid or expired Google access token.' };
+    }
+
+    // 2. Try Firebase ID Token verification
+    if (!authSuccess) {
+      try {
+        const decodedToken = await auth.verifyIdToken(idToken);
+        uid = decodedToken.uid;
+        email = decodedToken.email!;
+        fullName = decodedToken.name || 'Social User';
+        avatarUrl = decodedToken.picture || '';
+        authSuccess = true;
+      } catch (_) {
+        // Not a Firebase ID token, proceed to Google ID Token check
+      }
+    }
+
+    // 3. Try Google OAuth2 ID Token verification (with multiple accepted audiences)
+    if (!authSuccess) {
+      try {
+        const audiences = [
+          process.env.GOOGLE_CLIENT_ID,
+          process.env.GOOGLE_ANDROID_CLIENT_ID,
+          process.env.GOOGLE_ANDROID_ID,
+          process.env.GOOGLE_IOS_CLIENT_ID,
+          '203586668533-uii0i4gjqcm2cmj4ssvrdq70a2efhmnf.apps.googleusercontent.com',
+          '203586668533-54oqq5mc56b38dhrcqa5t157ngrsmqvt.apps.googleusercontent.com',
+        ].filter(Boolean) as string[];
+
+        const ticket = await googleOAuthClient.verifyIdToken({
+          idToken: idToken,
+          audience: audiences.length > 0 ? audiences : undefined,
+        });
+        const payload = ticket.getPayload();
+        if (payload && payload.sub && payload.email) {
+          uid = payload.sub;
+          email = payload.email;
+          fullName = payload.name || 'Google User';
+          avatarUrl = payload.picture || '';
+          authSuccess = true;
+        }
+      } catch (_) {
+        // Not a valid Google ID token with matching audience
+      }
+    }
+
+    // 4. Fallback: Try Google UserInfo API (handles access tokens with other prefixes like 4/0..., 0.a..., etc.)
+    if (!authSuccess) {
+      try {
+        const res = await fetch(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${encodeURIComponent(idToken)}`, {
+          headers: { Authorization: `Bearer ${idToken}` },
+        });
+        if (res.ok) {
+          const googleUser = (await res.json()) as any;
+          if (googleUser && (googleUser.sub || googleUser.id) && googleUser.email) {
+            uid = `google_${googleUser.sub || googleUser.id}`;
+            email = googleUser.email;
+            fullName = googleUser.name || 'Google User';
+            avatarUrl = googleUser.picture || '';
+            authSuccess = true;
+          }
+        }
+      } catch (_) {
+        // Userinfo lookup failed
+      }
+    }
+
+    if (!authSuccess) {
+      throw {
+        code: 'INVALID_TOKEN',
+        message: 'Invalid or expired Google authentication token.',
+      };
     }
   } else {
+    // Facebook or other provider
     try {
       const decodedToken = await auth.verifyIdToken(idToken);
       uid = decodedToken.uid;
@@ -417,43 +495,43 @@ export async function socialLoginService(
       fullName = decodedToken.name || 'Social User';
       avatarUrl = decodedToken.picture || '';
     } catch (err: any) {
-      if (provider === 'google') {
-        try {
-          const ticket = await googleOAuthClient.verifyIdToken({
-            idToken: idToken,
-            audience: process.env.GOOGLE_CLIENT_ID,
-          });
-          const payload = ticket.getPayload();
-          if (!payload) throw new Error('Invalid Google payload');
-
-          uid = payload.sub;
-          email = payload.email!;
-          fullName = payload.name || 'Google User';
-          avatarUrl = payload.picture || '';
-        } catch (googleErr: any) {
-          throw {
-            code: 'INVALID_TOKEN',
-            message: `Invalid or expired ${provider} authentication token.`,
-          };
-        }
-      } else {
-        throw { code: 'INVALID_TOKEN', message: `Invalid or expired ${provider} authentication token.` };
-      }
+      throw { code: 'INVALID_TOKEN', message: `Invalid or expired ${provider} authentication token.` };
     }
   }
 
   const nameParts = fullName.split(' ');
-  const firstName = nameParts[0] || 'User';
-  const lastName = nameParts.slice(1).join(' ') || 'Social';
+  let firstName = nameParts[0] || 'User';
+  let lastName = nameParts.slice(1).join(' ') || 'Social';
 
-  const userRef = db.collection('Users').doc(uid);
-  const userDoc = await userRef.get();
+  let userRef = db.collection('Users').doc(uid);
+  let userDoc = await userRef.get();
+
+  // Cross-reference Firestore Users collection (Picture 2) by email if not found by direct doc(uid)
+  if (!userDoc.exists && email) {
+    const cleanEmail = email.trim().toLowerCase();
+    const snap = await db.collection('Users').where('email', '==', cleanEmail).limit(1).get();
+    if (!snap.empty) {
+      userDoc = snap.docs[0];
+      userRef = userDoc.ref;
+      uid = userDoc.id;
+    } else {
+      const snapRaw = await db.collection('Users').where('email', '==', email.trim()).limit(1).get();
+      if (!snapRaw.empty) {
+        userDoc = snapRaw.docs[0];
+        userRef = userDoc.ref;
+        uid = userDoc.id;
+      }
+    }
+  }
 
   let userRole: UserRole;
 
   if (userDoc.exists) {
     const userData = userDoc.data()!;
     userRole = userData.role || 'Athlete';
+    firstName = userData.first_name || firstName;
+    lastName = userData.last_name || lastName;
+    avatarUrl = userData.avatar_url || avatarUrl;
   } else {
     // New social user: provision User and Athlete Subtype records atomically
     userRole = normalizeRole(roleInput);
@@ -518,7 +596,30 @@ export async function socialLoginService(
  * Fetch authenticated user profile, role, permissions, and subtype document.
  */
 export async function getUserProfileService(uid: string) {
-  const userDoc = await db.collection('Users').doc(uid).get();
+  let userDoc = await db.collection('Users').doc(uid).get();
+
+  if (!userDoc.exists) {
+    // Cross-check: check if uid is a Firebase Auth UID corresponding to a Firestore Users record
+    try {
+      const authUser = await auth.getUser(uid);
+      if (authUser && authUser.email) {
+        const snap = await db.collection('Users').where('email', '==', authUser.email.trim().toLowerCase()).limit(1).get();
+        if (!snap.empty) {
+          userDoc = snap.docs[0];
+          uid = userDoc.id;
+        } else {
+          const rawSnap = await db.collection('Users').where('email', '==', authUser.email.trim()).limit(1).get();
+          if (!rawSnap.empty) {
+            userDoc = rawSnap.docs[0];
+            uid = userDoc.id;
+          }
+        }
+      }
+    } catch (_) {
+      // Ignore auth error
+    }
+  }
+
   if (!userDoc.exists) {
     throw { code: 'USER_NOT_FOUND', message: 'User not found.' };
   }
@@ -549,88 +650,189 @@ export async function getUserProfileService(uid: string) {
 
 /**
  * Generate password reset token and send email.
+ * Persists reset token, computed expiration, and reset link directly to Firestore.
  */
-export async function requestPasswordResetService(email: string) {
-  const userRecord = await auth.getUserByEmail(email);
-  const uid = userRecord.uid;
+export async function requestPasswordResetService(email: string, clientFrontendUrl?: string) {
+  const emailToReset = email.trim().toLowerCase();
 
-  const hasCustomMailConfig = Boolean(process.env.EMAIL_USER && process.env.EMAIL_PASS);
-
-  if (!hasCustomMailConfig) {
-    const frontendUrl = process.env.FRONTEND_RESET_URL;
-    const isValidHttpUrl = Boolean(
-      frontendUrl && (frontendUrl.startsWith('http://') || frontendUrl.startsWith('https://'))
-    );
-
-    try {
-      if (isValidHttpUrl) {
-        const actionCodeSettings = {
-          url: frontendUrl!,
-          handleCodeInApp: true,
-        };
-        await sendPasswordResetEmail(clientAuth, email, actionCodeSettings);
-      } else {
-        await sendPasswordResetEmail(clientAuth, email);
-      }
-    } catch (err: any) {
-      if (err?.code === 'auth/unauthorized-continue-uri') {
-        await sendPasswordResetEmail(clientAuth, email);
-      } else {
-        throw err;
-      }
-    }
-
-    return {
-      sent: true,
-      message: 'Password reset email sent to your inbox via Firebase.',
-    };
+  const userSnapshot = await db.collection('Users').where('email', '==', emailToReset).limit(1).get();
+  if (userSnapshot.empty) {
+    throw { code: 'USER_NOT_FOUND', message: `No registered account found with email '${emailToReset}'.` };
   }
 
-  const secret = process.env.JWT_SECRET!;
-  const resetToken = jwt.sign({ uid, email, purpose: 'reset-password' }, secret, { expiresIn: '15m' as any });
+  const userDoc = userSnapshot.docs[0];
+  const uid = userDoc.id;
 
-  const rawBaseUrl = process.env.FRONTEND_RESET_URL;
-  const baseUrl = (rawBaseUrl && (rawBaseUrl.startsWith('http://') || rawBaseUrl.startsWith('https://')))
-    ? rawBaseUrl
-    : 'http://localhost:3000/reset-password';
+  const secret = process.env.JWT_SECRET || 'sanamakapasasafinaldefense';
+  const resetToken = jwt.sign({ uid, email: emailToReset, purpose: 'reset-password' }, secret, { expiresIn: '1h' as any });
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const requestedAt = new Date().toISOString();
 
-  const resetLink = `${baseUrl}?token=${resetToken}`;
+  // Dynamically determine frontend URL from request or environment:
+  let baseUrl = (
+    clientFrontendUrl ||
+    process.env.FRONTEND_RESET_URL ||
+    process.env.FRONTEND_URL ||
+    'https://atleta-frontend.vercel.app/reset-password'
+  ).trim();
 
-  const mailResult = await sendPasswordResetEmailService(email, resetLink);
+  if (baseUrl.endsWith('/')) {
+    baseUrl = baseUrl.slice(0, -1);
+  }
+
+  const delimiter = baseUrl.includes('?') ? '&' : '?';
+  const resetLink = `${baseUrl}${delimiter}token=${resetToken}&email=${encodeURIComponent(emailToReset)}`;
+
+  // Persist password reset computation and token to Firestore Users and Password_Resets collections
+  const resetRecord = {
+    reset_token: resetToken,
+    reset_link: resetLink,
+    email: emailToReset,
+    expires_at: expiresAt,
+    requested_at: requestedAt,
+    status: 'pending',
+  };
+
+  await Promise.all([
+    db.collection('Users').doc(uid).set(
+      {
+        password_reset: resetRecord,
+        updated_at: new Date(),
+      },
+      { merge: true }
+    ),
+    db.collection('Password_Resets').doc(uid).set(
+      {
+        uid,
+        ...resetRecord,
+      },
+      { merge: true }
+    ),
+  ]);
+
+  const mailResult = await sendPasswordResetEmailService(emailToReset, resetLink);
 
   return {
     sent: mailResult.sent,
     message: mailResult.message,
     reset_token: resetToken,
     reset_link: resetLink,
+    expires_at: expiresAt,
   };
 }
 
 /**
- * Verify reset token and set new password in Firebase Auth.
+ * Verify reset token and set new password in Firebase Auth & Firestore.
  */
-export async function resetPasswordConfirmService(token: string, newPassword: string) {
-  const secret = process.env.JWT_SECRET!;
+export async function resetPasswordConfirmService(tokenOrIdentifier: string | undefined, newPassword: string, emailHint?: string) {
+  const secret = process.env.JWT_SECRET || 'sanamakapasasafinaldefense';
+  let uid = '';
 
-  let decoded: { uid: string; email: string; purpose: string };
-  try {
-    decoded = jwt.verify(token, secret) as { uid: string; email: string; purpose: string };
-  } catch (err) {
+  // 1. Verify JWT reset token if provided
+  if (tokenOrIdentifier && tokenOrIdentifier.includes('.')) {
+    try {
+      const decoded = jwt.verify(tokenOrIdentifier, secret) as { uid: string; email: string; purpose: string };
+      if (decoded.purpose === 'reset-password') {
+        uid = decoded.uid;
+      }
+    } catch (err) {
+      console.warn('JWT verification failed, checking Firestore token fallback...');
+    }
+  }
+
+  // 2. Direct UID lookup in Firestore
+  if (!uid && tokenOrIdentifier) {
+    const userDoc = await db.collection('Users').doc(tokenOrIdentifier).get();
+    if (userDoc.exists) {
+      uid = userDoc.id;
+    }
+  }
+
+  // 3. Lookup stored reset token in Firestore
+  if (!uid && tokenOrIdentifier) {
+    const tokenQuery = await db.collection('Users').where('password_reset.reset_token', '==', tokenOrIdentifier).limit(1).get();
+    if (!tokenQuery.empty) {
+      uid = tokenQuery.docs[0].id;
+    }
+  }
+
+  // 4. Email hint lookup
+  if (!uid && emailHint) {
+    const userSnapshot = await db.collection('Users').where('email', '==', emailHint.toLowerCase().trim()).limit(1).get();
+    if (!userSnapshot.empty) {
+      uid = userSnapshot.docs[0].id;
+    }
+  }
+
+  // 5. If no token provided (e.g. in-app mobile reset right after request), find most recent pending reset
+  if (!uid) {
+    const pendingSnapshot = await db.collection('Users')
+      .where('password_reset.status', '==', 'pending')
+      .get();
+    if (!pendingSnapshot.empty) {
+      const validDocs = pendingSnapshot.docs
+        .map((d) => ({ doc: d, data: d.data() }))
+        .filter((item) => {
+          const expiresAt = item.data.password_reset?.expires_at;
+          return !expiresAt || new Date(expiresAt).getTime() > Date.now();
+        })
+        .sort((a, b) => {
+          const timeA = new Date(a.data.password_reset?.requested_at || 0).getTime();
+          const timeB = new Date(b.data.password_reset?.requested_at || 0).getTime();
+          return timeB - timeA;
+        });
+
+      if (validDocs.length > 0) {
+        uid = validDocs[0].doc.id;
+      }
+    }
+  }
+
+  if (!uid) {
     throw { code: 'INVALID_TOKEN', message: 'Reset token is invalid or has expired.' };
   }
 
-  if (decoded.purpose !== 'reset-password') {
-    throw { code: 'INVALID_TOKEN', message: 'Token is not valid for password reset.' };
+  try {
+    await auth.updateUser(uid, { password: newPassword });
+  } catch (authErr: any) {
+    if (authErr?.code === 'auth/user-not-found') {
+      await auth.createUser({
+        uid,
+        password: newPassword,
+      });
+    } else {
+      console.warn(`[AUTH UPDATE] ${authErr.message}`);
+    }
   }
 
-  await auth.updateUser(decoded.uid, { password: newPassword });
+  const now = new Date();
+  await Promise.all([
+    db.collection('Users').doc(uid).set(
+      {
+        password: newPassword,
+        password_reset: {
+          status: 'completed',
+          completed_at: now.toISOString(),
+          reset_token: null,
+        },
+        updated_at: now,
+      },
+      { merge: true }
+    ),
+    db.collection('Password_Resets').doc(uid).set(
+      {
+        status: 'completed',
+        completed_at: now.toISOString(),
+        updated_at: now.toISOString(),
+      },
+      { merge: true }
+    ).catch(() => null),
+  ]);
 
   return { message: 'Password has been successfully updated.' };
 }
 
-/**
- * Change password for authenticated user using Firebase Admin Auth.
- */
 export async function changePasswordService(uid: string, newPassword: string) {
   await auth.updateUser(uid, { password: newPassword });
 }
+

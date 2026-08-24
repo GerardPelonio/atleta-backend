@@ -1,6 +1,6 @@
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
-import { getAuth } from 'firebase-admin/auth';
+import { getFirestore, Firestore } from 'firebase-admin/firestore';
+import { getAuth, Auth } from 'firebase-admin/auth';
 import path from 'path';
 import fs from 'fs';
 
@@ -67,18 +67,39 @@ function getFirebaseCredential() {
 
 // Initialize Firebase Admin SDK (only if not already initialized)
 if (!getApps().length) {
-  const credential = getFirebaseCredential();
-  if (credential) {
-    initializeApp({
-      credential,
-    });
-  } else {
-    initializeApp({
-      projectId: process.env.FIREBASE_PROJECT_ID || 'atleta-v1',
-    });
+  try {
+    const credential = getFirebaseCredential();
+    if (credential) {
+      initializeApp({
+        credential,
+      });
+    } else {
+      initializeApp({
+        projectId: process.env.FIREBASE_PROJECT_ID || 'atleta-v1',
+      });
+    }
+  } catch (err: any) {
+    console.warn('⚠️ Firebase Admin initializeApp warning:', err?.message || err);
   }
 }
 
+let dbInstance: Firestore;
+let authInstance: Auth;
+
+try {
+  dbInstance = getFirestore();
+} catch (e: any) {
+  console.warn('⚠️ Firestore initialization warning:', e?.message || e);
+  dbInstance = {} as Firestore;
+}
+
+try {
+  authInstance = getAuth();
+} catch (e: any) {
+  console.warn('⚠️ Firebase Auth initialization warning:', e?.message || e);
+  authInstance = {} as Auth;
+}
+
 // Export Firestore and Auth instances
-export const db = getFirestore();
-export const auth = getAuth();
+export const db: Firestore = dbInstance;
+export const auth: Auth = authInstance;

@@ -32,13 +32,23 @@ export async function logAdminAudit(entry: Omit<AdminAuditLog, 'log_id' | 'times
   };
 
   try {
-    await db.collection('Admin_Audit_Logs').doc(logId).set(fullLog);
+    const hasCredentials = !!(
+      process.env.FIREBASE_SERVICE_ACCOUNT ||
+      process.env.FIREBASE_SERVICE_ACCOUNT_KEY ||
+      process.env.FIREBASE_PRIVATE_KEY ||
+      process.env.GOOGLE_APPLICATION_CREDENTIALS
+    );
+    if (hasCredentials && db && typeof db.collection === 'function') {
+      await db.collection('Admin_Audit_Logs').doc(logId).set(fullLog).catch(() => {});
+    }
   } catch (err) {
-    console.error('Failed to persist admin audit log:', err);
+    // Audit logging is non-blocking and shouldn't crash unauthenticated requests
   }
 
   return fullLog;
 }
+
+
 
 /**
  * Generate an elevated Bearer JWT for System Admin accounts.

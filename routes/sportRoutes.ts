@@ -10,9 +10,20 @@ import {
 
 const router = Router();
 
+// Sports Directory Catalog (Named and Root Routes)
+router.get('/list', authenticate, getSportsHandler);
+router.get('/all', authenticate, getSportsHandler);
+router.get('/browse', authenticate, getSportsHandler);
 router.get('/', authenticate, getSportsHandler);
-router.get('/:sportId', authenticate, getSportByIdHandler);
+
+// Sport Creation (Admin)
+router.post('/create', requireSystemAdmin, createSportHandler);
 router.post('/', requireSystemAdmin, createSportHandler);
+
+// Sport Detail & Modification
+router.get('/:sportId', authenticate, getSportByIdHandler);
 router.patch('/:sportId', requireSystemAdmin, updateSportHandler);
+router.put('/:sportId', requireSystemAdmin, updateSportHandler);
 
 export default router;
+

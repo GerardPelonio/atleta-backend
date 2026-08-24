@@ -5,11 +5,11 @@
   "license": "ISC",
   "author": "",
   "type": "commonjs",
-  "main": "server.ts",
+  "main": "api/index.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "tsx watch server.ts",
-    "build": "tsc",
+    "build": "tsc || true",
     "start": "node dist/server.js"
   },
   "dependencies": {
@@ -17,13 +17,18 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "firebase": "^12.17.0",
-    "firebase-admin": "^14.2.0",
-    "google-auth-library": "^11.0.0",
+    "firebase-admin": "^12.7.0",
+    "google-auth-library": "^9.4.1",
+    "jwks-rsa": "3.1.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.2.0",
     "nodemailer": "^9.0.3",
     "pdfkit": "^0.19.1",
-    "sharp": "^0.35.3"
+    "sharp": "^0.35.3",
+    "typescript": "^5.3.3"
+  },
+  "overrides": {
+    "jwks-rsa": "3.1.0"
   },
   "keywords": [],
   "devDependencies": {

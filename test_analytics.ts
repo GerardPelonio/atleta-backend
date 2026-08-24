@@ -48,9 +48,9 @@ async function runTests() {
   });
 
   if (notifications.length >= 2) {
-    console.log('Fetch notifications test passed.\n');
+    console.log('✅ Fetch notifications test passed.\n');
   } else {
-    console.error('Failed to fetch created notifications.');
+    console.error('❌ Failed to fetch created notifications.');
   }
 
   // 3. Mark Single Notification Read

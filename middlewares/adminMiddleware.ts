@@ -33,10 +33,11 @@ export async function requireSystemAdmin(
       endpoint,
       ip_address: clientIp,
       details: { error: 'No Bearer authorization token provided' },
-    });
+    }).catch(() => {});
     res.status(401).json({ error: 'Access denied. No token provided.' });
     return;
   }
+
 
   const token = authHeader.split(' ')[1];
 
@@ -60,7 +61,7 @@ export async function requireSystemAdmin(
         endpoint,
         ip_address: clientIp,
         details: { error: 'Non-admin role token presented', role: decoded.role },
-      });
+      }).catch(() => {});
       res.status(403).json({ error: 'Access denied. System Admin role required.' });
       return;
     }
@@ -77,7 +78,7 @@ export async function requireSystemAdmin(
           endpoint,
           ip_address: clientIp,
           details: { error: 'Admin profile is deactivated' },
-        });
+        }).catch(() => {});
         res.status(403).json({ error: 'Access denied. Admin profile is deactivated.' });
         return;
       }
@@ -109,7 +110,7 @@ export async function requireSystemAdmin(
           clearance_level: req.adminUser.clearance_level,
           department_code: req.adminUser.department_code,
         },
-      }).catch((err) => console.error('Async audit log error:', err));
+      }).catch(() => {});
     }
 
     next();
@@ -122,8 +123,9 @@ export async function requireSystemAdmin(
       endpoint,
       ip_address: clientIp,
       details: { error: 'Invalid or expired token', message: error?.message },
-    });
+    }).catch(() => {});
     res.status(401).json({ error: 'Invalid or expired token.' });
     return;
   }
+
 }
