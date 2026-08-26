@@ -108,19 +108,36 @@ export async function updateCoachProfile(
   const canonicalCoachId = coachId.startsWith('coach_') ? coachId : `coach_${coachId}`;
   const rawUserId = userId.replace(/^coach_/, '');
 
-  // 1. Patch Users collection if first_name or last_name provided
+  // 1. Patch Users collection with all updated coach fields
+  const userUpdates: Record<string, any> = { updated_at: now };
+  if (payload.first_name) userUpdates.first_name = payload.first_name.trim();
+  if (payload.last_name) userUpdates.last_name = payload.last_name.trim();
   if (payload.first_name || payload.last_name) {
-    const userUpdates: Record<string, any> = { updated_at: now };
-    if (payload.first_name) userUpdates.first_name = payload.first_name.trim();
-    if (payload.last_name) userUpdates.last_name = payload.last_name.trim();
-
-    await db.collection('Users').doc(rawUserId).set(userUpdates, { merge: true });
+    const fn = payload.first_name || '';
+    const ln = payload.last_name || '';
+    userUpdates.full_name = `${fn} ${ln}`.trim();
+  }
+  if (payload.sport_type) userUpdates.sport_type = payload.sport_type.trim();
+  if (payload.years_of_experience !== undefined) userUpdates.years_of_experience = Number(payload.years_of_experience);
+  if (payload.current_institution) userUpdates.current_institution = payload.current_institution.trim();
+  if (payload.quote !== undefined) userUpdates.quote = payload.quote ? payload.quote.trim() : null;
+  if (Array.isArray(payload.professional_documents)) {
+    userUpdates.professional_documents = payload.professional_documents.filter(
+      (d) => typeof d === 'string' && d.trim().length > 0,
+    );
   }
 
-  // 2. Patch existing canonical Coach_Profiles document (doc ID is coach_<uid>)
+  await db.collection('Users').doc(rawUserId).set(userUpdates, { merge: true });
+
+  // 2. Patch canonical Coach_Profiles document (doc ID is coach_<uid>)
   const coachUpdates: Record<string, any> = { updated_at: now };
   if (payload.first_name) coachUpdates.first_name = payload.first_name.trim();
   if (payload.last_name) coachUpdates.last_name = payload.last_name.trim();
+  if (payload.first_name || payload.last_name) {
+    const fn = payload.first_name || '';
+    const ln = payload.last_name || '';
+    coachUpdates.full_name = `${fn} ${ln}`.trim();
+  }
   if (payload.sport_type) coachUpdates.sport_type = payload.sport_type.trim();
   if (payload.years_of_experience !== undefined) coachUpdates.years_of_experience = Number(payload.years_of_experience);
   if (payload.current_institution) coachUpdates.current_institution = payload.current_institution.trim();

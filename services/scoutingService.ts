@@ -552,14 +552,14 @@ export async function getFullScoutingAthleteProfile(athleteId: string): Promise<
     full_name: fullName,
     email: userData.email || profileData.email || '',
     phone_number: userData.phone_number || profileData.phone_number || null,
-    province: profileData.province || userData.province || 'NCR',
-    birthdate: profileData.birthdate || userData.birthdate || '2001-08-14',
-    gender: profileData.gender || userData.gender || 'Male',
-    sport_type: profileData.sport_type || userData.sport_type || 'Basketball',
-    position: profileData.position || 'Unassigned',
+    province: profileData.province || userData.province || '',
+    birthdate: profileData.birthdate || userData.birthdate || '',
+    gender: profileData.gender || userData.gender || '',
+    sport_type: profileData.sport_type || userData.sport_type || '',
+    position: profileData.position || userData.position || 'Unassigned',
     jersey_number: profileData.jersey_number ?? null,
     recruitment_status: profileData.recruitment_status || 'Available',
-    avatar_url: profileData.avatar_url || userData.avatar_url || 'https://images.unsplash.com/photo-1546519638-68e109498ffc?w=400',
+    avatar_url: profileData.avatar_url || userData.avatar_url || '',
 
     physical_attributes: {
       height_cm: heightCm,
@@ -581,14 +581,9 @@ export async function getFullScoutingAthleteProfile(athleteId: string): Promise<
 
     career_per: careerPer,
 
-    recent_matches: profileData.recent_matches || [
-      { id: 'm1', opponent: 'Ateneo Blue Eagles', result: 'Win', score: '88 - 82', date: '2026-07-25' },
-      { id: 'm2', opponent: 'La Salle Green Archers', result: 'Win', score: '94 - 90', date: '2026-07-18' },
-    ],
+    recent_matches: profileData.recent_matches || [],
 
-    achievements: profileData.achievements || [
-      { title: 'Season MVP', year: '2025', content: 'Awarded Most Valuable Player in National Collegiate League.' },
-    ],
+    achievements: profileData.achievements || [],
   };
 
   // Cache response for ultra-fast subsequent retrievals

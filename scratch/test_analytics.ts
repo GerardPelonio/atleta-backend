@@ -1,7 +1,7 @@
-import { generateToken } from './services/userService';
-import { getAthleteHomeSummary } from './services/athleteService';
-import { createNotification, getAthleteNotifications, markNotificationAsRead, markAllNotificationsAsRead } from './services/notificationService';
-import { eventBus, EVENTS } from './utils/eventBus';
+import { generateToken } from '../services/userService';
+import { getAthleteHomeSummary } from '../services/athleteService';
+import { createNotification, getAthleteNotifications, markNotificationAsRead, markAllNotificationsAsRead } from '../services/notificationService';
+import { eventBus, EVENTS } from '../utils/eventBus';
 
 const TEST_ATHLETE_ID = 'athlete-test-uuid-101';
 

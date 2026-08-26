@@ -167,6 +167,10 @@ export async function requestPasswordReset(req: AuthRequest, res: Response): Pro
     const result = await requestPasswordResetService(email, clientFrontendUrl);
     res.status(200).json(result);
   } catch (error: any) {
+    if (error.code === 'SOCIAL_AUTH_ACCOUNT') {
+      res.status(400).json({ error: error.message, code: 'SOCIAL_AUTH_ACCOUNT' });
+      return;
+    }
     if (error.code === 'USER_NOT_FOUND') {
       res.status(404).json({ error: error.message });
       return;
@@ -194,6 +198,10 @@ export async function resetPassword(req: AuthRequest, res: Response): Promise<vo
     const result = await resetPasswordConfirmService(token, new_password, emailHint);
     res.status(200).json(result);
   } catch (error: any) {
+    if (error.code === 'SOCIAL_AUTH_ACCOUNT') {
+      res.status(400).json({ error: error.message, code: 'SOCIAL_AUTH_ACCOUNT' });
+      return;
+    }
     if (error.code === 'INVALID_TOKEN') {
       res.status(400).json({ error: error.message });
       return;
@@ -224,6 +232,10 @@ export async function changePassword(req: AuthRequest, res: Response): Promise<v
       message: 'Password updated successfully.',
     });
   } catch (error: any) {
+    if (error.code === 'SOCIAL_AUTH_ACCOUNT') {
+      res.status(400).json({ error: error.message, code: 'SOCIAL_AUTH_ACCOUNT' });
+      return;
+    }
     console.error('ChangePassword error:', error);
     res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
   }

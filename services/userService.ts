@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
-import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
+import { signInWithEmailAndPassword } from 'firebase/auth';
 import { OAuth2Client } from 'google-auth-library';
 import { auth, db } from '../utils/firebaseAdmin';
 import { clientAuth } from '../utils/firebaseClient';
@@ -96,23 +96,23 @@ export async function registerUserService(
   if (firestoreRole === 'Athlete') {
     const athleteId = `ath_${uid}`;
     
-    const birthdate = String(data.birthdate || data.date_of_birth || '2001-01-01').trim();
-    const gender = String(data.gender || 'Male').trim();
-    const province = String(data.province || 'Camarines Sur').trim();
-    const sportType = String(data.sport_type || 'Basketball').trim();
+    const birthdate = String(data.birthdate || data.date_of_birth || '').trim();
+    const gender = String(data.gender || '').trim();
+    const province = String(data.province || data.location || '').trim();
+    const sportType = String(data.sport_type || data.sport || '').trim();
     const position = String(data.position || 'Unassigned').trim();
     const jerseyNumber = data.jersey_number !== undefined ? Number(data.jersey_number) : null;
     const recruitmentStatus = data.recruitment_status ? String(data.recruitment_status).trim() : 'Available';
     const rank = data.rank !== undefined ? data.rank : data.leaderboard_rank !== undefined ? data.leaderboard_rank : null;
 
     const physInput = (data.physical_profile as any) || (data.physical_attributes as any) || {};
-    const heightCm = Number(data.height_cm || physInput.height_cm || 188);
-    const weightKg = Number(data.weight_kg || physInput.weight_kg || 85);
-    const wingspanCm = Number(data.wingspan_cm || physInput.wingspan_cm || 195);
-    const verticalCm = Number(data.vertical_cm || physInput.vertical_cm || 85);
+    const heightCm = Number(data.height_cm || physInput.height_cm || 0);
+    const weightKg = Number(data.weight_kg || physInput.weight_kg || 0);
+    const wingspanCm = Number(data.wingspan_cm || physInput.wingspan_cm || 0);
+    const verticalCm = Number(data.vertical_cm || physInput.vertical_cm || 0);
 
-    const bmi = heightCm > 0 ? parseFloat((weightKg / Math.pow(heightCm / 100, 2)).toFixed(1)) : 22.5;
-    const apeIndex = heightCm > 0 ? parseFloat((wingspanCm / heightCm).toFixed(2)) : 1.02;
+    const bmi = heightCm > 0 && weightKg > 0 ? parseFloat((weightKg / Math.pow(heightCm / 100, 2)).toFixed(1)) : 0;
+    const apeIndex = heightCm > 0 && wingspanCm > 0 ? parseFloat((wingspanCm / heightCm).toFixed(2)) : 0;
 
     const physicalProfile = {
       height_cm: heightCm,
@@ -135,7 +135,7 @@ export async function registerUserService(
     if (file && Array.isArray(docsPayload.document_urls)) {
       docsPayload.document_urls = [...docsPayload.document_urls, file.originalname];
     }
-    const achievements = Array.isArray(data.achievements) ? data.achievements : null;
+    const achievements = Array.isArray(data.achievements) ? data.achievements : [];
 
     // Attach complete info to Users table
     userData.birthdate = birthdate;
@@ -165,10 +165,10 @@ export async function registerUserService(
     profileData.achievements = achievements;
   } else if (firestoreRole === 'Coach') {
     const coachId = `coach_${uid}`;
-    const sportType = String(data.sport_type || data.primary_sport || 'Basketball').trim();
+    const sportType = String(data.sport_type || data.primary_sport || '').trim();
     const yearsExperience = Number(data.years_of_experience || 0);
-    const institution = String(data.current_institution || 'N/A').trim();
-    const quote = String(data.quote || 'Committed to athletic excellence and youth development.').trim();
+    const institution = String(data.current_institution || '').trim();
+    const quote = data.quote !== undefined && data.quote !== null ? String(data.quote).trim() : null;
     let profDocs = Array.isArray(data.professional_documents) ? data.professional_documents : [];
     if (file) {
       profDocs = [...profDocs, file.originalname];
@@ -649,6 +649,36 @@ export async function getUserProfileService(uid: string) {
 }
 
 /**
+ * Helper to check if an account is authenticated via a third-party OAuth provider (Google/Facebook).
+ * Throws a SOCIAL_AUTH_ACCOUNT error if the account is purely social/OAuth.
+ */
+export async function checkSocialAccountRestriction(uid: string, userData: any, action: 'reset' | 'change' = 'reset') {
+  const provider = (userData?.provider || userData?.auth_provider || '').toLowerCase();
+  let isSocial = provider === 'google' || provider === 'facebook' || uid.startsWith('google_') || uid.startsWith('facebook_');
+
+  if (!isSocial) {
+    try {
+      const userRecord = await auth.getUser(uid);
+      const providers = (userRecord.providerData || []).map((p) => p.providerId);
+      // If user has google.com or facebook.com and DOES NOT have password provider
+      if (providers.length > 0 && (providers.includes('google.com') || providers.includes('facebook.com')) && !providers.includes('password')) {
+        isSocial = true;
+      }
+    } catch (err) {
+      // Ignore if user does not exist in Firebase Auth
+    }
+  }
+
+  if (isSocial) {
+    const providerName = provider === 'facebook' || uid.startsWith('facebook_') ? 'Facebook' : 'Google';
+    throw {
+      code: 'SOCIAL_AUTH_ACCOUNT',
+      message: `Password ${action} is only available for accounts registered with email and password. Accounts registered via ${providerName} must log in directly with ${providerName}.`,
+    };
+  }
+}
+
+/**
  * Generate password reset token and send email.
  * Persists reset token, computed expiration, and reset link directly to Firestore.
  */
@@ -662,6 +692,10 @@ export async function requestPasswordResetService(email: string, clientFrontendU
 
   const userDoc = userSnapshot.docs[0];
   const uid = userDoc.id;
+  const userData = userDoc.data();
+
+  // Enforce: Only accounts with email and password authentication can request password resets
+  await checkSocialAccountRestriction(uid, userData, 'reset');
 
   const secret = process.env.JWT_SECRET || 'sanamakapasasafinaldefense';
   const resetToken = jwt.sign({ uid, email: emailToReset, purpose: 'reset-password' }, secret, { expiresIn: '1h' as any });
@@ -792,6 +826,11 @@ export async function resetPasswordConfirmService(tokenOrIdentifier: string | un
     throw { code: 'INVALID_TOKEN', message: 'Reset token is invalid or has expired.' };
   }
 
+  // Enforce: Check if user is a social login account
+  const userDoc = await db.collection('Users').doc(uid).get();
+  const userData = userDoc.exists ? userDoc.data()! : {};
+  await checkSocialAccountRestriction(uid, userData, 'reset');
+
   try {
     await auth.updateUser(uid, { password: newPassword });
   } catch (authErr: any) {
@@ -833,6 +872,19 @@ export async function resetPasswordConfirmService(tokenOrIdentifier: string | un
 }
 
 export async function changePasswordService(uid: string, newPassword: string) {
+  const userDoc = await db.collection('Users').doc(uid).get();
+  const userData = userDoc.exists ? userDoc.data()! : {};
+
+  // Enforce: Check if user is a social login account
+  await checkSocialAccountRestriction(uid, userData, 'change');
+
   await auth.updateUser(uid, { password: newPassword });
+  await db.collection('Users').doc(uid).set(
+    {
+      password: newPassword,
+      updated_at: new Date(),
+    },
+    { merge: true }
+  );
 }
 

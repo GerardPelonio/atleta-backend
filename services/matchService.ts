@@ -77,9 +77,9 @@ export function calculateIndividualSportMetrics(stats: Record<string, any>): {
   efficiency: number;
   enrichedStats: IndividualSportStats;
 } {
-  const eventName = String(stats.event_name || '100m Freestyle').trim();
-  const distanceMeters = Number(stats.distance_meters || 100);
-  const finishTimeMs = Number(stats.finish_time_ms || 60000);
+  const eventName = String(stats.event_name || '').trim();
+  const distanceMeters = Number(stats.distance_meters || 0);
+  const finishTimeMs = Number(stats.finish_time_ms || 0);
   const splitTimesMs = Array.isArray(stats.split_times_ms) ? stats.split_times_ms.map(Number) : [];
   const isDisqualified = !!stats.is_disqualified;
 
