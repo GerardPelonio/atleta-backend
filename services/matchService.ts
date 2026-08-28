@@ -468,7 +468,7 @@ async function callGeminiWithWaterfall(requestBody: any, geminiKey: string): Pro
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody),
-          signal: AbortSignal.timeout(45000),
+          signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(45000) : undefined,
         }
       );
 
