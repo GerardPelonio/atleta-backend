@@ -536,18 +536,27 @@ Important:
       }
 
       const base64Image = sendBuffer.toString('base64');
-      const promptText = `Look at this basketball scoresheet carefully. It has two teams with player rows containing jersey numbers (#), player names, quarter scores (Q1-Q4), field goals, free throws, and total points (PTS).
+      const promptText = `Look at this scoresheet carefully. It contains match results and player tables for two teams (VISITORS and HOME).
+Identify the HOME team name and AWAY/VISITORS team name, their final scores, and individual player stats.
 
 Extract the data into this exact JSON format:
-{"team_scores":[{"team":"TeamName","score":0}],"player_summary":[{"player_name":"Full Name","jersey_number":0,"points":0,"rebounds":0,"assists":0,"fouls":0}]}
+{
+  "team_scores": [
+    {"team": "CELTICS", "score": 107, "is_home": true},
+    {"team": "HAWKS", "score": 103, "is_home": false}
+  ],
+  "player_summary": [
+    {"player_name": "Full Name", "team_name": "TeamName", "jersey_number": 0, "points": 0, "rebounds": 0, "assists": 0, "fouls": 0}
+  ]
+}
 
 Important:
-- The FINAL SCORE line at the bottom shows each team's total score.
-- Each player row has: jersey # | Name | Position | Q1 | Q2 | Q3 | Q4 | FT | FGM/FGA | FTM/FTA | PTS
-- The PTS column is the LAST number column on each player row.
-- Include ALL players from BOTH teams (VISITORS and HOME).
-- Use 0 for any stat you cannot read clearly.
-- Return ONLY the JSON object, nothing else.`;
+- VISITORS/AWAY team is on the left side of the scoresheet.
+- HOME team is on the right side of the scoresheet.
+- Make sure every player's "team_name" correctly matches their team (e.g. HAWKS for visitor players on left, CELTICS for home players on right).
+- The FINAL SCORE or Running Score at the bottom shows each team's total final score.
+- The PTS column is the points scored by each player.
+- Return ONLY valid JSON, nothing else.`;
 
       requestBody = {
         contents: [
