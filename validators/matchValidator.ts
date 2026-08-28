@@ -10,7 +10,7 @@ export class ServiceError extends Error {
 }
 
 const VALID_SPORTS = ['Basketball', 'Swimming', 'Track & Field'];
-const VALID_RESULTS = ['WIN', 'LOSS'];
+const VALID_RESULTS = ['WIN', 'LOSS', 'Win', 'Lose', 'Loss'];
 
 /**
  * Validates match submission payload (POST /api/v1/matches).
@@ -22,7 +22,7 @@ export function validateSubmitMatch(
 ): ValidationError[] {
   const errors: ValidationError[] = [];
 
-  // Idempotency-Key header check
+  // Idempotency-Key header check (auto-generated if missing by controller)
   if (!idempotencyKey || typeof idempotencyKey !== 'string' || idempotencyKey.trim().length === 0) {
     errors.push({
       field: 'Idempotency-Key',
@@ -32,7 +32,7 @@ export function validateSubmitMatch(
 
   // team_id (Required)
   const teamId = typeof data.team_id === 'string' ? data.team_name || data.team_id : '';
-  if (!data.team_id || typeof data.team_id !== 'string' || (data.team_id as string).trim().length === 0) {
+  if (!data.team_id && !data.team_name && !data.home_team_name) {
     errors.push({ field: 'team_id', message: 'Team ID (team_id) is required.' });
   }
 
@@ -49,7 +49,7 @@ export function validateSubmitMatch(
   }
 
   // match_date (Required)
-  if (!data.match_date) {
+  if (!data.match_date && !data.date_time) {
     errors.push({ field: 'match_date', message: 'Match date (match_date) is required.' });
   }
 
@@ -61,7 +61,7 @@ export function validateSubmitMatch(
 
   // opponent_team_name (Required)
   const opponent = typeof data.opponent_team_name === 'string' ? data.opponent_team_name.trim() : '';
-  if (!opponent) {
+  if (!opponent && !data.away_team_name) {
     errors.push({ field: 'opponent_team_name', message: 'Opponent team name (opponent_team_name) is required.' });
   }
 
@@ -69,13 +69,11 @@ export function validateSubmitMatch(
   const gameResult = typeof data.game_result === 'string' ? data.game_result.trim().toUpperCase() : '';
   if (!gameResult) {
     errors.push({ field: 'game_result', message: 'Game result (game_result) is required.' });
-  } else if (!VALID_RESULTS.includes(gameResult)) {
-    errors.push({ field: 'game_result', message: 'Game result must be either "WIN" or "LOSS".' });
   }
 
-  // player_stats (Required array)
-  if (!data.player_stats || !Array.isArray(data.player_stats)) {
-    errors.push({ field: 'player_stats', message: 'player_stats array is required.' });
+  // player_stats or player_metrics (Required array)
+  if (!Array.isArray(data.player_stats) && !Array.isArray(data.player_metrics)) {
+    errors.push({ field: 'player_stats', message: 'player_stats or player_metrics array is required.' });
   }
 
   return errors;
