@@ -7,6 +7,7 @@ import {
   scanStandaloneScoresheet,
   getBoxscore,
   getMatchDetailsHandler,
+  getAllMatchesHandler,
 } from '../controllers/matchController';
 import {
   submitAuditRequestController,
@@ -30,6 +31,9 @@ router.post('/ocr/scan', authenticate, upload.any(), scanStandaloneScoresheet);
 router.post('/scoresheet', authenticate, upload.any(), scanStandaloneScoresheet);
 
 // Match Endpoints (Named and Root Routes)
+router.get('/', authenticate, getAllMatchesHandler);
+router.get('/all', authenticate, getAllMatchesHandler);
+router.get('/list', authenticate, getAllMatchesHandler);
 router.post('/submit', authenticate, submitMatch);
 router.post('/create', authenticate, submitMatch);
 router.post('/log', authenticate, submitMatch);

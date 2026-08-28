@@ -1,5 +1,6 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middlewares/authMiddleware';
+import { db } from '../utils/firebaseAdmin';
 import {
   submitMatchSession,
   processScoresheetOCR,
@@ -8,6 +9,21 @@ import {
   getMatchResultDetails,
 } from '../services/matchService';
 import { validateSubmitMatch, ServiceError } from '../validators/matchValidator';
+
+export async function getAllMatchesHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const snap = await db.collection('Match_Logs').get();
+    const matches = snap.docs.map((doc) => ({
+      id: doc.id,
+      match_id: doc.id,
+      ...doc.data(),
+    }));
+    res.status(200).json({ matches });
+  } catch (error: any) {
+    console.error('getAllMatchesHandler error:', error);
+    res.status(500).json({ error: error?.message || 'Failed to fetch matches' });
+  }
+}
 
 export async function submitMatch(req: AuthRequest, res: Response): Promise<void> {
   try {
