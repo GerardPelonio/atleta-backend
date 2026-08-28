@@ -34,11 +34,11 @@ router.post('/scoresheet', authenticate, upload.any(), scanStandaloneScoresheet)
 router.get('/', optionalAuth, getAllMatchesHandler);
 router.get('/all', optionalAuth, getAllMatchesHandler);
 router.get('/list', optionalAuth, getAllMatchesHandler);
-router.post('/submit', authenticate, submitMatch);
-router.post('/create', authenticate, submitMatch);
-router.post('/log', authenticate, submitMatch);
-router.post('/log-match', authenticate, submitMatch);
-router.post('/', authenticate, submitMatch);
+router.post('/submit', optionalAuth, submitMatch);
+router.post('/create', optionalAuth, submitMatch);
+router.post('/log', optionalAuth, submitMatch);
+router.post('/log-match', optionalAuth, submitMatch);
+router.post('/', optionalAuth, submitMatch);
 
 // Official Match Endpoints
 router.post('/official', authenticate, createOfficialMatchHandler);
