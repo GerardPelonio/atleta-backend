@@ -431,11 +431,39 @@ export async function updateTeam(
   return await getTeamDetails(teamId);
 }
 
+export function matchesSportCategory(athleteSport?: string, athletePosition?: string, targetSport?: string): boolean {
+  if (!targetSport || targetSport.toUpperCase() === 'ALL') return true;
+  const target = targetSport.toUpperCase().trim();
+  const sport = (athleteSport || '').toUpperCase().trim();
+  const pos = (athletePosition || '').toUpperCase().trim();
+
+  if (target.includes('BASKET')) {
+    if (sport.includes('BASKET')) return true;
+    if (['POINT GUARD', 'SHOOTING GUARD', 'SMALL FORWARD', 'POWER FORWARD', 'CENTER', 'GUARD', 'FORWARD'].some(p => pos.includes(p))) return true;
+    return !sport;
+  }
+
+  if (target.includes('SWIM')) {
+    if (sport.includes('SWIM')) return true;
+    if (['FREESTYLE', 'BUTTERFLY', 'BREASTSTROKE', 'BACKSTROKE', 'MEDLEY', 'SWIMMER', '50M', '100M', '200M'].some(p => pos.includes(p))) return true;
+    return false;
+  }
+
+  if (target.includes('TRACK') || target.includes('FIELD')) {
+    if (sport.includes('TRACK') || sport.includes('FIELD')) return true;
+    if (['SPRINT', 'HURDLES', 'RELAY', 'LONG JUMP', 'HIGH JUMP', 'JAVELIN', 'SHOT PUT', 'DISCUS', 'RUNNER', '100M SPRINT'].some(p => pos.includes(p))) return true;
+    return false;
+  }
+
+  return sport === target;
+}
+
 /**
  * Autocomplete search registered athletes by name, ID, position, or email across Users, Athlete_Profiles, and Teams.roster_list collections.
- * GET /api/v1/athletes/search?query=
+ * Optionally filtered by sportType.
+ * GET /api/v1/athletes/search?query=&sport=
  */
-export async function searchAthletes(queryStr?: string) {
+export async function searchAthletes(queryStr?: string, sportType?: string) {
   const resultsMap = new Map<string, RosterAthlete>();
   const queryLower = (queryStr || '').trim().toLowerCase();
 
@@ -557,7 +585,12 @@ export async function searchAthletes(queryStr?: string) {
     }
   }
 
-  return Array.from(resultsMap.values());
+  const allAthletes = Array.from(resultsMap.values());
+  if (!sportType || sportType.toUpperCase() === 'ALL') {
+    return allAthletes;
+  }
+
+  return allAthletes.filter((a) => matchesSportCategory(a.sport_type, a.position, sportType));
 }
 
 /**
