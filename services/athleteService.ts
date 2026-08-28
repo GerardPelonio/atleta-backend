@@ -55,95 +55,95 @@ export async function getAthleteProfile(athleteId: string): Promise<AthleteFullP
   const bmi = calculateBMI(weightKg, heightCm);
   const apeIndex = calculateApeIndex(wingspanCm, heightCm);
 
-    const rawWorkload = profileData.workload_analytics || profileData.workload;
-    const coachTarget = profileData.workload_target;
-    const mergedWorkload = rawWorkload
-      ? {
-          ...rawWorkload,
-          target_7day_effort_pts: coachTarget?.target_7day_effort_pts || rawWorkload.target_7day_effort_pts || 400,
-          target_intensity: coachTarget?.target_intensity || rawWorkload.target_intensity || 8,
-        }
-      : await getAthleteWorkloadSummary(canonicalAthleteId).catch(() => undefined);
+  const rawWorkload = profileData.workload_analytics || profileData.workload;
+  const coachTarget = profileData.workload_target;
+  const mergedWorkload = rawWorkload
+    ? {
+      ...rawWorkload,
+      target_7day_effort_pts: coachTarget?.target_7day_effort_pts || rawWorkload.target_7day_effort_pts || 400,
+      target_intensity: coachTarget?.target_intensity || rawWorkload.target_intensity || 8,
+    }
+    : await getAthleteWorkloadSummary(canonicalAthleteId).catch(() => undefined);
 
-    return {
-      athlete_id: canonicalAthleteId,
-      user_id: rawUid,
-      first_name: firstName,
-      last_name: lastName,
-      full_name: `${firstName} ${lastName}`,
-      avatar_url: profileData.avatar_url || 'https://images.unsplash.com/photo-1546519638-68e109498ffc?w=400',
-      birthdate: profileData.birthdate || userData.birthdate || '2001-08-14',
-      gender: profileData.gender || userData.gender || 'Male',
-      position: profileData.position || 'Point Guard',
-      location: profileData.province || userData.province || 'Camarines Sur, PH',
-      sport_type: profileData.sport_type || userData.sport_type || 'Basketball',
+  return {
+    athlete_id: canonicalAthleteId,
+    user_id: rawUid,
+    first_name: firstName,
+    last_name: lastName,
+    full_name: `${firstName} ${lastName}`,
+    avatar_url: profileData.avatar_url || 'https://images.unsplash.com/photo-1546519638-68e109498ffc?w=400',
+    birthdate: profileData.birthdate || userData.birthdate || '2001-08-14',
+    gender: profileData.gender || userData.gender || 'Male',
+    position: profileData.position || 'Point Guard',
+    location: profileData.province || userData.province || 'Camarines Sur, PH',
+    sport_type: profileData.sport_type || userData.sport_type || 'Basketball',
 
-      physical_attributes: {
-        height_cm: heightCm,
-        weight_kg: weightKg,
-        wingspan_cm: wingspanCm,
-        vertical_cm: verticalCm,
+    physical_attributes: {
+      height_cm: heightCm,
+      weight_kg: weightKg,
+      wingspan_cm: wingspanCm,
+      vertical_cm: verticalCm,
+    },
+
+    computed_metrics: {
+      bmi,
+      ape_index: apeIndex,
+    },
+
+    stats: profileData.stats || {
+      ppg: 22.4,
+      rpg: 6.8,
+      apg: 8.2,
+      bpg: 1.1,
+      fg_pct: 48.5,
+      three_pct: 38.2,
+      ft_pct: 84.1,
+      efficiency_rating: 24.6,
+      wins: 18,
+      losses: 4,
+    },
+
+    recent_matches: profileData.recent_matches || [
+      { id: 'm1', opponent: 'Ateneo Blue Eagles', result: 'Win', score: '88 - 82', date: '2026-07-25' },
+      { id: 'm2', opponent: 'La Salle Green Archers', result: 'Win', score: '94 - 90', date: '2026-07-18' },
+      { id: 'm3', opponent: 'UP Fighting Maroons', result: 'Lose', score: '79 - 83', date: '2026-07-11' },
+      { id: 'm4', opponent: 'UST Growling Tigers', result: 'Win', score: '102 - 91', date: '2026-07-04' },
+    ],
+
+    analytics: profileData.analytics || {
+      scoring_trend: [18, 24, 21, 28, 19, 31, 22, 26, 17, 24],
+      radar_competencies: {
+        speed: 88,
+        agility: 85,
+        power: 82,
+        iq: 92,
+        tech: 89,
       },
+    },
 
-      computed_metrics: {
-        bmi,
-        ape_index: apeIndex,
+    documents: profileData.documents || {
+      psa_birth_certificate: profileData.psa_birth_certificate || {
+        name: 'PSA_BirthCertificate.pdf',
+        status: 'Verified',
+        uploaded_at: '2026-01-10',
       },
-
-      stats: profileData.stats || {
-        ppg: 22.4,
-        rpg: 6.8,
-        apg: 8.2,
-        bpg: 1.1,
-        fg_pct: 48.5,
-        three_pct: 38.2,
-        ft_pct: 84.1,
-        efficiency_rating: 24.6,
-        wins: 18,
-        losses: 4,
+      proof_of_residency: profileData.proof_of_residency || {
+        name: 'Barangay_Certificate.pdf',
+        status: 'Verified',
+        uploaded_at: '2026-01-12',
       },
+    },
 
-      recent_matches: profileData.recent_matches || [
-        { id: 'm1', opponent: 'Ateneo Blue Eagles', result: 'Win', score: '88 - 82', date: '2026-07-25' },
-        { id: 'm2', opponent: 'La Salle Green Archers', result: 'Win', score: '94 - 90', date: '2026-07-18' },
-        { id: 'm3', opponent: 'UP Fighting Maroons', result: 'Lose', score: '79 - 83', date: '2026-07-11' },
-        { id: 'm4', opponent: 'UST Growling Tigers', result: 'Win', score: '102 - 91', date: '2026-07-04' },
-      ],
-
-      analytics: profileData.analytics || {
-        scoring_trend: [18, 24, 21, 28, 19, 31, 22, 26, 17, 24],
-        radar_competencies: {
-          speed: 88,
-          agility: 85,
-          power: 82,
-          iq: 92,
-          tech: 89,
-        },
-      },
-
-      documents: profileData.documents || {
-        psa_birth_certificate: profileData.psa_birth_certificate || {
-          name: 'PSA_BirthCertificate.pdf',
-          status: 'Verified',
-          uploaded_at: '2026-01-10',
-        },
-        proof_of_residency: profileData.proof_of_residency || {
-          name: 'Barangay_Certificate.pdf',
-          status: 'Verified',
-          uploaded_at: '2026-01-12',
-        },
-      },
-
-      achievements: profileData.achievements || [
-        { id: 'a1', title: 'Season MVP', year: '2025', description: 'Awarded Most Valuable Player in National Collegiate League.' },
-        { id: 'a2', title: 'All-Tournament First Team', year: '2024', description: 'Selected as top point guard in Regional Championship.' },
-        { id: 'a3', title: 'High School Champion', year: '2022', description: 'Led team to undefeated championship run.' },
-      ],
-      workload_analytics: mergedWorkload,
-      workload: mergedWorkload,
-      workload_target: coachTarget || undefined,
-    };
-  }
+    achievements: profileData.achievements || [
+      { id: 'a1', title: 'Season MVP', year: '2025', description: 'Awarded Most Valuable Player in National Collegiate League.' },
+      { id: 'a2', title: 'All-Tournament First Team', year: '2024', description: 'Selected as top point guard in Regional Championship.' },
+      { id: 'a3', title: 'High School Champion', year: '2022', description: 'Led team to undefeated championship run.' },
+    ],
+    workload_analytics: mergedWorkload,
+    workload: mergedWorkload,
+    workload_target: coachTarget || undefined,
+  };
+}
 
 /**
  * Update physical attributes, stats, or profile details for an athlete.

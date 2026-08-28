@@ -458,8 +458,8 @@ export async function searchAthletes(queryStr?: string) {
       const docs = Array.isArray(p.eligibility_documents)
         ? p.eligibility_documents
         : Array.isArray(u.eligibility_documents)
-        ? u.eligibility_documents
-        : [];
+          ? u.eligibility_documents
+          : [];
 
       const athleteObj: RosterAthlete = {
         athlete_id: athleteId,
