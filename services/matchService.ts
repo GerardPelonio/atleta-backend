@@ -172,28 +172,44 @@ export async function submitMatchSession(
   const matchId = `match_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const now = new Date().toISOString();
 
-  const matchLog: MatchLog = {
+  // Resolve Home Team name
+  let homeTeamName = (payload as any).home_team_name || '';
+  if (!homeTeamName && payload.team_id) {
+    const homeTeamDoc = await db.collection('Teams').doc(payload.team_id).get();
+    if (homeTeamDoc.exists) {
+      homeTeamName = homeTeamDoc.data()?.team_name || 'Home Team';
+    }
+  }
+  if (!homeTeamName) homeTeamName = 'Home Team';
+
+  const oppTeamName = (payload.opponent_team_name || 'Opponent Team').trim();
+
+  const matchLog: any = {
     match_id: matchId,
     team_id: payload.team_id,
+    home_team_name: homeTeamName,
     logged_by_coach_id: coachId,
     sport_type: payload.sport_type,
     match_type: payload.match_type.trim(),
     match_date: payload.match_date,
     location: payload.location.trim(),
-    opponent_team_name: payload.opponent_team_name.trim(),
+    opponent_team_name: oppTeamName,
     game_result: payload.game_result,
     roster_athletes: (payload.player_stats || []).map((p) => p.athlete_id),
+    player_stats: payload.player_stats || [],
     notes: payload.notes ? payload.notes.trim() : undefined,
     idempotency_key: key,
     timestamp: now,
   };
 
-  const performanceMetrics: PerformanceMetric[] = [];
+  const performanceMetrics: any[] = [];
 
   for (const item of payload.player_stats || []) {
-    const athleteId = item.athlete_id;
+    const athleteId = item.athlete_id || `ath_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const rawStats = item.stats || {};
     const metricId = `metric_${matchId}_${athleteId}`;
+    const pName = (item as any).player_name || 'Athlete';
+    const pTeam = (item as any).team_name || ((item as any).team || homeTeamName);
 
     let efficiency = 0;
     let enrichedStats: any = rawStats;
@@ -212,9 +228,11 @@ export async function submitMatchSession(
       enrichedStats = computed.enrichedStats;
     }
 
-    const metric: PerformanceMetric = {
+    const metric: any = {
       metric_id: metricId,
       athlete_id: athleteId,
+      player_name: pName,
+      team_name: pTeam,
       match_id: matchId,
       sport_category: payload.sport_type,
       sport_stats: enrichedStats,
@@ -223,6 +241,54 @@ export async function submitMatchSession(
     };
 
     performanceMetrics.push(metric);
+
+    // Ensure Athlete Profile exists in Athlete_Profiles for both Home and Away players
+    const athleteRef = db.collection('Athlete_Profiles').doc(athleteId);
+    const athleteDoc = await athleteRef.get();
+    if (!athleteDoc.exists && pName) {
+      const nameParts = pName.split(/\s+/);
+      await athleteRef.set({
+        athlete_id: athleteId,
+        first_name: nameParts[0] || 'Athlete',
+        last_name: nameParts.slice(1).join(' ') || '',
+        team_name: pTeam,
+        sport_type: payload.sport_type,
+        position: 'Player',
+        created_at: now,
+      });
+    }
+  }
+
+  // Ensure Opponent Team is recorded in Teams collection
+  if (oppTeamName) {
+    const oppTeamQuery = await db.collection('Teams')
+      .where('team_name', '==', oppTeamName)
+      .limit(1)
+      .get();
+
+    if (oppTeamQuery.empty) {
+      const oppTeamId = `team_opp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const oppRoster = (payload.player_stats || [])
+        .filter((p: any) => (p.team_name || '').toUpperCase() === oppTeamName.toUpperCase())
+        .map((p: any, idx: number) => {
+          const nameParts = (p.player_name || '').split(/\s+/);
+          return {
+            athlete_id: p.athlete_id,
+            first_name: nameParts[0] || 'Player',
+            last_name: nameParts.slice(1).join(' ') || '',
+            jersey_number: p.jersey_number || idx + 1,
+            position: 'Player',
+          };
+        });
+
+      await db.collection('Teams').doc(oppTeamId).set({
+        team_id: oppTeamId,
+        team_name: oppTeamName,
+        sport_type: payload.sport_type,
+        roster_list: oppRoster,
+        created_at: now,
+      });
+    }
   }
 
   // Execute atomic batch write: Match Log + Performance Metrics + Idempotency Record
@@ -268,7 +334,7 @@ function extractJsonFromAiText(content: string): any {
   // 1. Direct parse attempt
   try {
     return JSON.parse(clean);
-  } catch (_) {}
+  } catch (_) { }
 
   // 2. Fix trailing commas before } or ]
   clean = clean.replace(/,\s*([\}\]])/g, '$1');
@@ -279,7 +345,7 @@ function extractJsonFromAiText(content: string): any {
 
   try {
     return JSON.parse(clean);
-  } catch (_) {}
+  } catch (_) { }
 
   // 4. Auto-balance unclosed brackets / braces if truncated
   let openBraces = (clean.match(/\{/g) || []).length;
@@ -314,14 +380,14 @@ function extractJsonFromAiText(content: string): any {
     while ((match = playerRegex.exec(content)) !== null) {
       try {
         playerSummary.push(JSON.parse(match[0].replace(/,\s*\}/g, '}')));
-      } catch (_) {}
+      } catch (_) { }
     }
 
     const teamRegex = /\{[^{}]*"team"[^{}]*"score"[^{}]*\}/g;
     while ((match = teamRegex.exec(content)) !== null) {
       try {
         teamScores.push(JSON.parse(match[0].replace(/,\s*\}/g, '}')));
-      } catch (_) {}
+      } catch (_) { }
     }
 
     if (playerSummary.length > 0 || teamScores.length > 0) {
@@ -819,12 +885,14 @@ export async function getMatchBoxscore(matchId: string): Promise<BoxscoreRespons
       }
     }
 
+    const teamName = data.team_name || profileData.team_name || (data.team || '');
     playerMetrics.push({
       metric_id: data.metric_id,
       athlete_id: athleteId,
       user_id: profileData.user_id || athleteId,
-      first_name: firstName || 'Athlete',
+      first_name: firstName || data.player_name || 'Athlete',
       last_name: lastName || '',
+      team_name: teamName,
       position: profileData.position || 'Unassigned',
       jersey_number: profileData.jersey_number ?? null,
       sport_stats: data.sport_stats,
@@ -832,11 +900,31 @@ export async function getMatchBoxscore(matchId: string): Promise<BoxscoreRespons
     });
   }
 
+  // Fallback to matchData.player_stats if Performance_Metrics were not queried or written yet
+  if (playerMetrics.length === 0 && Array.isArray(matchData.player_stats) && matchData.player_stats.length > 0) {
+    for (const item of matchData.player_stats) {
+      const pName = (item as any).player_name || 'Athlete';
+      const nameParts = pName.split(/\s+/);
+      playerMetrics.push({
+        metric_id: `metric_${matchId}_${(item as any).athlete_id || 'player'}`,
+        athlete_id: (item as any).athlete_id || 'athlete_id',
+        user_id: (item as any).athlete_id || 'user_id',
+        first_name: nameParts[0] || 'Athlete',
+        last_name: nameParts.slice(1).join(' ') || '',
+        team_name: (item as any).team_name || (item as any).team || '',
+        position: 'Player',
+        jersey_number: (item as any).jersey_number ?? null,
+        sport_stats: (item as any).stats || (item as any).sport_stats || {},
+        calculated_player_efficiency: 0,
+      });
+    }
+  }
+
   return {
     match: matchData,
     team_summary: {
       team_id: matchData.team_id,
-      team_name: teamName,
+      team_name: (matchData as any).home_team_name || teamName,
       opponent_team_name: matchData.opponent_team_name,
       game_result: matchData.game_result,
       match_date: matchData.match_date,
@@ -862,8 +950,8 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
   const matchData = matchDoc.data() as any;
 
   // Fetch team summary
-  let teamName = 'Home Team';
-  if (matchData.team_id) {
+  let teamName = matchData.home_team_name || 'Home Team';
+  if (matchData.team_id && teamName === 'Home Team') {
     const teamDoc = await db.collection('Teams').doc(matchData.team_id).get();
     if (teamDoc.exists) {
       teamName = teamDoc.data()!.team_name || teamName;
@@ -896,17 +984,39 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
       }
     }
 
+    const pTeam = data.team_name || profileData.team_name || (data.team || '');
     playerMetrics.push({
       metric_id: data.metric_id,
       athlete_id: athleteId,
       user_id: profileData.user_id || athleteId,
-      first_name: firstName || 'Athlete',
+      first_name: firstName || data.player_name || 'Athlete',
       last_name: lastName || '',
+      team_name: pTeam,
       position: profileData.position || 'Unassigned',
       jersey_number: profileData.jersey_number ?? null,
       sport_stats: data.sport_stats || {},
       calculated_player_efficiency: data.calculated_player_efficiency || 0,
     });
+  }
+
+  // Fallback to matchData.player_stats if Performance_Metrics were not queried or written yet
+  if (playerMetrics.length === 0 && Array.isArray(matchData.player_stats) && matchData.player_stats.length > 0) {
+    for (const item of matchData.player_stats) {
+      const pName = (item as any).player_name || 'Athlete';
+      const nameParts = pName.split(/\s+/);
+      playerMetrics.push({
+        metric_id: `metric_${matchId}_${(item as any).athlete_id || 'player'}`,
+        athlete_id: (item as any).athlete_id || 'athlete_id',
+        user_id: (item as any).athlete_id || 'user_id',
+        first_name: nameParts[0] || 'Athlete',
+        last_name: nameParts.slice(1).join(' ') || '',
+        team_name: (item as any).team_name || (item as any).team || '',
+        position: 'Player',
+        jersey_number: (item as any).jersey_number ?? null,
+        sport_stats: (item as any).stats || (item as any).sport_stats || {},
+        calculated_player_efficiency: 0,
+      });
+    }
   }
 
   const sportType = matchData.sport_type || 'Basketball';
