@@ -520,8 +520,17 @@ export async function getCoachOfflineSnapshotService(coachId: string): Promise<C
   const sports = await getAllSportsService().catch(() => []);
 
   // Fetch upcoming / recent matches
-  const matchSnap = await db.collection('Match_Logs').where('logged_by_coach_id', '==', coachId).limit(20).get().catch(() => null);
-  const scheduledMatches = matchSnap ? matchSnap.docs.map(d => d.data()) : [];
+  let matchDocs: any[] = [];
+  const matchSnap = await db.collection('Match_Logs').where('logged_by_coach_id', '==', coachId).get().catch(() => null);
+  if (matchSnap && !matchSnap.empty) {
+    matchDocs = matchSnap.docs.map(d => d.data());
+  } else {
+    const allMatchesSnap = await db.collection('Match_Logs').limit(20).get().catch(() => null);
+    if (allMatchesSnap) {
+      matchDocs = allMatchesSnap.docs.map(d => d.data());
+    }
+  }
+  const scheduledMatches = matchDocs;
 
   // Fetch recent sRPE workload logs
   const wlSnap = await db.collection('Workload_Analysis').where('logged_by_coach_id', '==', coachId).limit(30).get().catch(() => null);

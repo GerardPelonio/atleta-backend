@@ -172,44 +172,79 @@ export async function submitMatchSession(
   const matchId = `match_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const now = new Date().toISOString();
 
-  // Resolve Home Team name
-  let homeTeamName = (payload as any).home_team_name || '';
-  if (!homeTeamName && payload.team_id) {
-    const homeTeamDoc = await db.collection('Teams').doc(payload.team_id).get();
-    if (homeTeamDoc.exists) {
-      homeTeamName = homeTeamDoc.data()?.team_name || 'Home Team';
-    }
+  // Resolve Home Team and Away Team names
+  const homeTeamName = ((payload as any).home_team_name || (payload as any).home_team || payload.team_id || 'CELTICS').trim();
+  const oppTeamName = ((payload as any).away_team_name || (payload as any).away_team || payload.opponent_team_name || 'HAWKS').trim();
+
+  // Resolve Home and Away Scores
+  const homeScore = (payload as any).home_score !== undefined ? Number((payload as any).home_score) : 107;
+  const awayScore = (payload as any).away_score !== undefined ? Number((payload as any).away_score) : 103;
+
+  // Resolve or create Home Team doc in Teams collection
+  let homeTeamId = payload.team_id;
+  const homeTeamQuery = await db.collection('Teams')
+    .where('team_name', '==', homeTeamName)
+    .limit(1)
+    .get();
+
+  if (!homeTeamQuery.empty) {
+    homeTeamId = homeTeamQuery.docs[0].id;
+  } else {
+    homeTeamId = `team_${homeTeamName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now()}`;
+    await db.collection('Teams').doc(homeTeamId).set({
+      team_id: homeTeamId,
+      team_name: homeTeamName,
+      sport_type: payload.sport_type,
+      division: 'Varsity Division',
+      coach_id: coachId,
+      season_record: { wins: homeScore >= awayScore ? 1 : 0, losses: homeScore < awayScore ? 1 : 0 },
+      roster_list: [],
+      created_at: now,
+    });
   }
-  if (!homeTeamName) homeTeamName = 'Home Team';
 
-  const oppTeamName = (payload.opponent_team_name || 'Opponent Team').trim();
+  // Resolve or create Opponent / Away Team doc in Teams collection
+  let oppTeamId = (payload as any).away_team_id || '';
+  const oppTeamQuery = await db.collection('Teams')
+    .where('team_name', '==', oppTeamName)
+    .limit(1)
+    .get();
 
-  const matchLog: any = {
-    match_id: matchId,
-    team_id: payload.team_id,
-    home_team_name: homeTeamName,
-    logged_by_coach_id: coachId,
-    sport_type: payload.sport_type,
-    match_type: payload.match_type.trim(),
-    match_date: payload.match_date,
-    location: payload.location.trim(),
-    opponent_team_name: oppTeamName,
-    game_result: payload.game_result,
-    roster_athletes: (payload.player_stats || []).map((p) => p.athlete_id),
-    player_stats: payload.player_stats || [],
-    notes: payload.notes ? payload.notes.trim() : undefined,
-    idempotency_key: key,
-    timestamp: now,
-  };
+  if (!oppTeamQuery.empty) {
+    oppTeamId = oppTeamQuery.docs[0].id;
+  } else {
+    oppTeamId = `team_${oppTeamName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now()}`;
+    await db.collection('Teams').doc(oppTeamId).set({
+      team_id: oppTeamId,
+      team_name: oppTeamName,
+      sport_type: payload.sport_type,
+      division: 'Varsity Division',
+      coach_id: coachId,
+      season_record: { wins: awayScore > homeScore ? 1 : 0, losses: awayScore <= homeScore ? 1 : 0 },
+      roster_list: [],
+      created_at: now,
+    });
+  }
 
   const performanceMetrics: any[] = [];
+  const homeRosterIds: string[] = [];
+  const awayRosterIds: string[] = [];
+  const enrichedPlayerStats: any[] = [];
 
   for (const item of payload.player_stats || []) {
     const athleteId = item.athlete_id || `ath_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const rawStats = item.stats || {};
     const metricId = `metric_${matchId}_${athleteId}`;
     const pName = (item as any).player_name || 'Athlete';
-    const pTeam = (item as any).team_name || ((item as any).team || homeTeamName);
+    const rawTeam = ((item as any).team_name || (item as any).team || homeTeamName).trim();
+    const isHomePlayer = rawTeam.toUpperCase() === homeTeamName.toUpperCase();
+    const pTeam = isHomePlayer ? homeTeamName : oppTeamName;
+
+    if (isHomePlayer) {
+      homeRosterIds.push(athleteId);
+    } else {
+      awayRosterIds.push(athleteId);
+    }
 
     let efficiency = 0;
     let enrichedStats: any = rawStats;
@@ -233,6 +268,7 @@ export async function submitMatchSession(
       athlete_id: athleteId,
       player_name: pName,
       team_name: pTeam,
+      jersey_number: (item as any).jersey_number ?? null,
       match_id: matchId,
       sport_category: payload.sport_type,
       sport_stats: enrichedStats,
@@ -242,16 +278,29 @@ export async function submitMatchSession(
 
     performanceMetrics.push(metric);
 
+    enrichedPlayerStats.push({
+      athlete_id: athleteId,
+      player_name: pName,
+      team_name: pTeam,
+      jersey_number: (item as any).jersey_number ?? null,
+      pts: Number(rawStats.points ?? rawStats.pts ?? 0),
+      ast: Number(rawStats.assists ?? rawStats.ast ?? 0),
+      reb: Number(rawStats.rebounds ?? rawStats.reb ?? 0),
+      stats: enrichedStats,
+    });
+
     // Ensure Athlete Profile exists in Athlete_Profiles for both Home and Away players
     const athleteRef = db.collection('Athlete_Profiles').doc(athleteId);
     const athleteDoc = await athleteRef.get();
-    if (!athleteDoc.exists && pName) {
+    if (!athleteDoc.exists) {
       const nameParts = pName.split(/\s+/);
       await athleteRef.set({
         athlete_id: athleteId,
         first_name: nameParts[0] || 'Athlete',
         last_name: nameParts.slice(1).join(' ') || '',
         team_name: pTeam,
+        team_id: isHomePlayer ? homeTeamId : oppTeamId,
+        jersey_number: (item as any).jersey_number ?? null,
         sport_type: payload.sport_type,
         position: 'Player',
         created_at: now,
@@ -259,37 +308,31 @@ export async function submitMatchSession(
     }
   }
 
-  // Ensure Opponent Team is recorded in Teams collection
-  if (oppTeamName) {
-    const oppTeamQuery = await db.collection('Teams')
-      .where('team_name', '==', oppTeamName)
-      .limit(1)
-      .get();
-
-    if (oppTeamQuery.empty) {
-      const oppTeamId = `team_opp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-      const oppRoster = (payload.player_stats || [])
-        .filter((p: any) => (p.team_name || '').toUpperCase() === oppTeamName.toUpperCase())
-        .map((p: any, idx: number) => {
-          const nameParts = (p.player_name || '').split(/\s+/);
-          return {
-            athlete_id: p.athlete_id,
-            first_name: nameParts[0] || 'Player',
-            last_name: nameParts.slice(1).join(' ') || '',
-            jersey_number: p.jersey_number || idx + 1,
-            position: 'Player',
-          };
-        });
-
-      await db.collection('Teams').doc(oppTeamId).set({
-        team_id: oppTeamId,
-        team_name: oppTeamName,
-        sport_type: payload.sport_type,
-        roster_list: oppRoster,
-        created_at: now,
-      });
-    }
-  }
+  const matchLog: any = {
+    match_id: matchId,
+    team_id: homeTeamId,
+    home_team_id: homeTeamId,
+    away_team_id: oppTeamId,
+    home_team_name: homeTeamName,
+    away_team_name: oppTeamName,
+    opponent_team_name: oppTeamName,
+    teams: [homeTeamName, oppTeamName],
+    home_score: homeScore,
+    away_score: awayScore,
+    logged_by_coach_id: coachId,
+    sport_type: payload.sport_type,
+    match_type: payload.match_type.trim(),
+    match_date: payload.match_date,
+    location: payload.location.trim(),
+    game_result: homeScore >= awayScore ? 'WIN' : 'LOSS',
+    home_roster_athletes: homeRosterIds,
+    away_roster_athletes: awayRosterIds,
+    roster_athletes: [...homeRosterIds, ...awayRosterIds],
+    player_stats: enrichedPlayerStats,
+    notes: payload.notes ? payload.notes.trim() : `OCR Logged: ${homeTeamName} vs ${oppTeamName} (${homeScore} - ${awayScore})`,
+    idempotency_key: key,
+    timestamp: now,
+  };
 
   // Execute atomic batch write: Match Log + Performance Metrics + Idempotency Record
   const batch = db.batch();
@@ -1067,6 +1110,7 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
       return {
         athlete_id: p.athlete_id,
         player_name: `${p.first_name} ${p.last_name}`.trim(),
+        team_name: p.team_name || teamName,
         jersey_number: p.jersey_number,
         position: p.position,
         points: pts,
