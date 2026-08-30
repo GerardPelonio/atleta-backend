@@ -75,37 +75,59 @@ export function calculateBasketballMetrics(stats: Record<string, any>): {
  */
 export function calculateIndividualSportMetrics(stats: Record<string, any>): {
   efficiency: number;
-  enrichedStats: IndividualSportStats;
+  enrichedStats: IndividualSportStats & Record<string, any>;
 } {
-  const eventName = String(stats.event_name || '').trim();
-  const distanceMeters = Number(stats.distance_meters || 0);
-  const finishTimeMs = Number(stats.finish_time_ms || 0);
-  const splitTimesMs = Array.isArray(stats.split_times_ms) ? stats.split_times_ms.map(Number) : [];
+  const rawDist = stats.distance_meters || stats.distance || 100;
+  const distanceMeters = Number(String(rawDist).replace(/[^\d.]/g, '') || 100);
+  const distance = `${distanceMeters}m`;
+
+  let finishTimeMs = Number(stats.finish_time_ms || 0);
+  if (finishTimeMs === 0 && stats.timer_seconds) {
+    finishTimeMs = Math.round(Number(stats.timer_seconds) * 1000);
+  }
+  if (finishTimeMs === 0 && stats.time) {
+    const parts = String(stats.time).split(':');
+    if (parts.length === 2) {
+      finishTimeMs = (parseFloat(parts[0]) * 60 + parseFloat(parts[1])) * 1000;
+    } else {
+      finishTimeMs = (parseFloat(stats.time) || 0) * 1000;
+    }
+  }
+
+  const mins = Math.floor(finishTimeMs / 60000);
+  const secs = ((finishTimeMs % 60000) / 1000).toFixed(2);
+  const formattedTime = stats.formatted_time || (finishTimeMs > 0 ? `${mins > 0 ? mins + ':' : ''}${Number(secs) < 10 && mins > 0 ? '0' : ''}${secs}s` : '00:00.00');
+
+  const eventName = String(stats.event_name || `${distanceMeters}m Event`).trim();
+  const splitTimesMs = Array.isArray(stats.split_times_ms)
+    ? stats.split_times_ms.map(Number)
+    : Array.isArray(stats.split_times)
+    ? stats.split_times
+    : [];
   const isDisqualified = !!stats.is_disqualified;
 
   let efficiency = 0;
-
   if (!isDisqualified && finishTimeMs > 0) {
-    // Speed in meters per second
     const speedMps = distanceMeters / (finishTimeMs / 1000);
-    // Base efficiency scaled to 100 max
     const baseScore = speedMps * 12.5;
-
-    // Split consistency factor
     let splitFactor = 1.0;
-    if (splitTimesMs.length > 1) {
+    if (Array.isArray(splitTimesMs) && splitTimesMs.length > 1 && typeof splitTimesMs[0] === 'number') {
       const avgSplit = splitTimesMs.reduce((a, b) => a + b, 0) / splitTimesMs.length;
       const variance = splitTimesMs.reduce((sum, val) => sum + Math.abs(val - avgSplit), 0) / splitTimesMs.length;
-      splitFactor = Math.max(0.85, 1 - variance / avgSplit);
+      splitFactor = Math.max(0.85, 1 - variance / (avgSplit || 1));
     }
-
     efficiency = Number((baseScore * splitFactor).toFixed(2));
   }
 
-  const enrichedStats: IndividualSportStats = {
+  const enrichedStats: any = {
     event_name: eventName,
     distance_meters: distanceMeters,
+    distance: distance,
     finish_time_ms: finishTimeMs,
+    time: formattedTime,
+    formatted_time: formattedTime,
+    timer_seconds: finishTimeMs > 0 ? finishTimeMs / 1000 : (stats.timer_seconds || 0),
+    split_times: stats.split_times || [],
     split_times_ms: splitTimesMs,
     is_disqualified: isDisqualified,
   };
@@ -1143,18 +1165,25 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
   } else if (sportType === 'Swimming' || sportType === 'Track & Field') {
     const raceResults = playerMetrics.map((p, idx) => {
       const s = p.sport_stats || {};
-      const timeMs = Number(s.finish_time_ms || 60000);
+      let timeMs = Number(s.finish_time_ms || 0);
+      if (timeMs === 0 && s.timer_seconds) timeMs = Math.round(Number(s.timer_seconds) * 1000);
+      const rawDist = s.distance_meters || s.distance || 100;
+      const distanceMeters = Number(String(rawDist).replace(/[^\d.]/g, '') || 100);
+      const distance = `${distanceMeters}m`;
       const mins = Math.floor(timeMs / 60000);
       const secs = ((timeMs % 60000) / 1000).toFixed(2);
-      const formattedTime = `${mins > 0 ? mins + ':' : ''}${Number(secs) < 10 && mins > 0 ? '0' : ''}${secs}s`;
+      const formattedTime = s.formatted_time || s.time || (timeMs > 0 ? `${mins > 0 ? mins + ':' : ''}${Number(secs) < 10 && mins > 0 ? '0' : ''}${secs}s` : '00:00.00');
 
       return {
         athlete_id: p.athlete_id,
         athlete_name: `${p.first_name} ${p.last_name}`.trim(),
         placement_rank: s.placement_rank || (idx + 1),
-        distance_meters: s.distance_meters || 100,
+        distance_meters: distanceMeters,
+        distance: distance,
         finish_time_ms: timeMs,
         formatted_finish_time: formattedTime,
+        time: formattedTime,
+        split_times: s.split_times || [],
         split_times_ms: s.split_times_ms || [],
         is_disqualified: Boolean(s.is_disqualified),
         calculated_player_efficiency: p.calculated_player_efficiency,
@@ -1163,7 +1192,7 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
 
     sportSpecificDetails = {
       sport_category: sportType,
-      event_name: matchData.event_name || (playerMetrics[0]?.sport_stats?.event_name) || '100m Final',
+      event_name: matchData.event_name || (playerMetrics[0]?.sport_stats?.event_name) || `${playerMetrics[0]?.sport_stats?.distance_meters || 100}m Event`,
       race_results: raceResults,
     };
   } else {

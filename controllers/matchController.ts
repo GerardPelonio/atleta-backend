@@ -9,6 +9,7 @@ import {
   getMatchResultDetails,
 } from '../services/matchService';
 import { validateSubmitMatch, ServiceError } from '../validators/matchValidator';
+import { MatchSubmissionPayload } from '../models/matchModel';
 
 export async function getAllMatchesHandler(req: AuthRequest, res: Response): Promise<void> {
   try {

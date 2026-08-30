@@ -25,7 +25,7 @@ export interface Team {
   team_name: string;              // Required, Max 255
   sport_type: string;             // Required
   division: string;               // Required (e.g. "Division 1", "Varsity")
-  region: string;                 // Required
+  region?: string;                // Optional
   description?: string;           // Optional
   mission_statement?: string;     // Optional
   established_year?: number;      // Optional
@@ -67,11 +67,12 @@ export interface RosterAthlete {
 export interface CreateTeamDto {
   team_name: string;              // Required, Max 255
   sport_type: string;             // Required
-  division: string;               // Required (e.g., "Division 1", "Varsity")
-  region?: string;                // Optional (Default: "NCR")
+  division?: string;              // Optional (Defaults: "Varsity Division")
+  region?: string;                // Optional
   description?: string;           // Optional
   mission_statement?: string;     // Optional
   established_year?: number;      // Optional
+  roster_list?: any[];            // Optional initial squad roster
 }
 
 export interface UpdateRosterItem {
@@ -90,7 +91,7 @@ export interface TeamSummary {
   team_name: string;
   sport_type: string;
   division: string;
-  region: string;
+  region?: string;
   season_record: SeasonRecord;
   athlete_count: number;
   coach_name: string;
@@ -103,7 +104,7 @@ export interface TeamDetailResponse {
   team_name: string;
   sport_type: string;
   division: string;
-  region: string;
+  region?: string;
   season_record: SeasonRecord;
   description: string | null;
   mission_statement: string | null;
@@ -127,7 +128,7 @@ export interface AthleteTeamResponse {
     team_name: string;
     sport_type: string;
     division: string;
-    region: string;
+    region?: string;
     description: string | null;
   };
   coach: {

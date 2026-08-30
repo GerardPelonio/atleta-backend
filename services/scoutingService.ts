@@ -41,6 +41,18 @@ export interface ScoutingProposalResult {
   };
 }
 
+// Fast In-Memory Cache for Regional Athlete Search
+interface CacheEntry<T> {
+  data: T;
+  expiry: number;
+}
+const scoutingSearchCache = new Map<string, CacheEntry<RegionalAthleteSearchResult[]>>();
+const SCOUTING_CACHE_TTL_MS = 60 * 1000; // 1 minute
+
+export function invalidateScoutingCache() {
+  scoutingSearchCache.clear();
+}
+
 /**
  * Search and filter regional athlete directory.
  */
@@ -49,6 +61,12 @@ export async function searchRegionalAthletes(
   minPER?: number,
   search?: string,
 ): Promise<RegionalAthleteSearchResult[]> {
+  const cacheKey = `search_${sport || 'all'}_${minPER || 0}_${search || 'none'}`;
+  const cached = scoutingSearchCache.get(cacheKey);
+  if (cached && cached.expiry > Date.now()) {
+    return cached.data;
+  }
+
   // Fetch Athlete Profiles, Users, and Performance Metrics in parallel to minimize network latency
   const [profilesSnapshot, usersSnapshot, metricsSnapshot] = await Promise.all([
     db.collection('Athlete_Profiles').get(),
@@ -148,7 +166,9 @@ export async function searchRegionalAthletes(
   }
 
   // Sort by name or efficiency (default descending by efficiency)
-  return results.sort((a, b) => b.calculated_player_efficiency - a.calculated_player_efficiency);
+  const sorted = results.sort((a, b) => b.calculated_player_efficiency - a.calculated_player_efficiency);
+  scoutingSearchCache.set(cacheKey, { data: sorted, expiry: Date.now() + SCOUTING_CACHE_TTL_MS });
+  return sorted;
 }
 
 /**
@@ -336,6 +356,8 @@ export async function dispatchRecruitmentProposal(
   };
 }
 
+export const submitRecruitmentProposal = dispatchRecruitmentProposal;
+
 /**
  * Retrieve sent recruitment proposals.
  */
@@ -380,7 +402,6 @@ export async function getRecruitmentProposals(coachId: string): Promise<any[]> {
 
 // In-memory cache for coach scouting profiles (60 seconds TTL)
 const scoutingProfileCache = new Map<string, { data: any; cachedAt: number }>();
-const SCOUTING_CACHE_TTL_MS = 60 * 1000;
 
 /**
  * Retrieve complete athlete profile for coaching evaluation.

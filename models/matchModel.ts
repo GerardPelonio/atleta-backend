@@ -101,14 +101,18 @@ export interface PlayerStatSubmission {
 }
 
 export interface MatchSubmissionPayload {
+  [key: string]: any;
   team_id: string;
   home_team_name?: string;
+  match_name?: string;
   sport_type: SportType;
   match_type: string;
   match_date: string;
   location: string;
   opponent_team_name: string;
   game_result: GameResult;
+  home_score?: number;
+  away_score?: number;
   notes?: string;
   player_stats: PlayerStatSubmission[];
 }

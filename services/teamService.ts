@@ -125,15 +125,15 @@ export async function createTeam(coachId: string, payload: CreateTeamDto): Promi
     team_id: teamId,
     team_name: payload.team_name.trim(),
     sport_type: payload.sport_type.trim(),
-    division: payload.division.trim(),
-    region: payload.region ? payload.region.trim() : 'NCR',
+    division: (payload.division && payload.division.trim().length > 0) ? payload.division.trim() : 'Varsity Division',
     established_year: payload.established_year || new Date().getFullYear(),
     season_record: { wins: 0, losses: 0 },
     coach_id: coachId,
-    roster_list: [],
+    roster_list: Array.isArray(payload.roster_list) ? payload.roster_list : [],
     timestamp: now,
   };
 
+  if (payload.region) newTeam.region = payload.region.trim();
   if (payload.description) newTeam.description = payload.description.trim();
   if (payload.mission_statement) newTeam.mission_statement = payload.mission_statement.trim();
 
@@ -181,8 +181,8 @@ export async function getCoachTeams(coachId: string): Promise<TeamSummary[]> {
       team_id: data.team_id,
       team_name: data.team_name,
       sport_type: data.sport_type,
-      division: data.division || 'Varsity',
-      region: data.region || 'NCR',
+      division: data.division || 'Varsity Division',
+      region: data.region || undefined,
       season_record: data.season_record || { wins: 0, losses: 0 },
       athlete_count: data.roster_list ? data.roster_list.length : 0,
       coach_name: coach.full_name,
@@ -231,8 +231,8 @@ export async function browseTeamDirectory(
       team_id: data.team_id,
       team_name: data.team_name,
       sport_type: data.sport_type,
-      division: data.division || 'Varsity',
-      region: data.region || 'NCR',
+      division: data.division || 'Varsity Division',
+      region: data.region || undefined,
       season_record: data.season_record || { wins: 0, losses: 0 },
       athlete_count: data.roster_list ? data.roster_list.length : 0,
       coach_name: coach.full_name,
@@ -263,8 +263,8 @@ export async function getTeamDetails(teamId: string): Promise<TeamDetailResponse
     team_id: data.team_id,
     team_name: data.team_name,
     sport_type: data.sport_type,
-    division: data.division || 'Varsity',
-    region: data.region || 'NCR',
+    division: data.division || 'Varsity Division',
+    region: data.region || undefined,
     season_record: data.season_record || { wins: 0, losses: 0 },
     description: data.description || null,
     mission_statement: data.mission_statement || null,
