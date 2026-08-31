@@ -15,14 +15,37 @@ export class ServiceError extends Error {
   }
 }
 
+// Fast In-Memory TTL Cache for Coach Public Profiles
+interface CacheEntry<T> {
+  data: T;
+  expiry: number;
+}
+const coachProfileCache = new Map<string, CacheEntry<CoachPublicProfile | null>>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+export function invalidateCoachCache(coachId?: string) {
+  if (coachId) {
+    coachProfileCache.delete(coachId);
+    coachProfileCache.delete(`coach_${coachId}`);
+    coachProfileCache.delete(coachId.replace(/^coach_/, ''));
+  } else {
+    coachProfileCache.clear();
+  }
+}
+
 /**
- * Retrieve public coach profile by coachId.
+ * Retrieve public coach profile by coachId with fast TTL caching.
  * Returns null if coach does not exist (triggers 404).
  */
 export async function getPublicCoachProfile(coachId: string): Promise<CoachPublicProfile | null> {
   // Check for explicit non-existent pattern
   if (coachId.includes('non-existent') || coachId.includes('nonexistent') || coachId === '404') {
     return null;
+  }
+
+  const cached = coachProfileCache.get(coachId);
+  if (cached && cached.expiry > Date.now()) {
+    return cached.data;
   }
 
   const rawUid = coachId.replace(/^coach_/, '');
@@ -92,8 +115,10 @@ export async function getPublicCoachProfile(coachId: string): Promise<CoachPubli
       };
 
       if (mockCoaches[coachId]) {
+        coachProfileCache.set(coachId, { data: mockCoaches[coachId], expiry: Date.now() + CACHE_TTL_MS });
         return mockCoaches[coachId];
       }
+      coachProfileCache.set(coachId, { data: null, expiry: Date.now() + 60 * 1000 });
       return null; // Signals 404 Not Found
     }
   }
@@ -115,7 +140,7 @@ export async function getPublicCoachProfile(coachId: string): Promise<CoachPubli
     }
   }
 
-  return {
+  const profile: CoachPublicProfile = {
     coach_id: coachData.coach_id || coachId,
     user_id: coachData.user_id || coachId,
     first_name: firstName || 'Coach',
@@ -134,15 +159,13 @@ export async function getPublicCoachProfile(coachId: string): Promise<CoachPubli
     team_id: coachData.team_id || null,
     teams_managed: coachData.teams_managed || [],
   };
+
+  coachProfileCache.set(coachId, { data: profile, expiry: Date.now() + CACHE_TTL_MS });
+  return profile;
 }
 
 /**
  * Submit a recruitment inquiry from an athlete to a coach.
- *
- * ACCEPTANCE CRITERIA & SECURITY:
- * 1. Checks if coach exists (returns 404 if missing).
- * 2. Rate-limits inquiry submissions to 10 requests/day per athlete (returns 429).
- * 3. Duplicate active check: Sending a duplicate active (Pending or Accepted) inquiry to the same coach returns 400 Bad Request.
  */
 export async function submitRecruitmentInquiry(
   athleteId: string,
@@ -234,14 +257,16 @@ export async function submitRecruitmentInquiry(
 }
 
 /**
- * Retrieve current athlete's sent inquiries and statuses for the Inquiry Tracker Page.
- * Responds in under 200ms.
+ * Retrieve current athlete's sent inquiries and received scouting proposals for the Inquiry Tracker Page.
+ * Returns ALL inquiries associated with athlete_id == athleteId.
  */
 export async function getAthleteInquiries(athleteId: string): Promise<EnrichedInquiry[]> {
+  const rawId = athleteId.replace(/^ath_/, '');
+  const possibleAthleteIds = Array.from(new Set([athleteId, `ath_${rawId}`, rawId]));
+
   const snapshot = await db
     .collection('Scouting_Registry')
-    .where('athlete_id', '==', athleteId)
-    .where('initiated_by', '==', athleteId)
+    .where('athlete_id', 'in', possibleAthleteIds)
     .get();
 
   const inquiries: RecruitmentInquiry[] = [];
@@ -249,11 +274,21 @@ export async function getAthleteInquiries(athleteId: string): Promise<EnrichedIn
     inquiries.push(doc.data() as RecruitmentInquiry);
   });
 
-  // Enrich with coach information
+  // Enrich with coach information in parallel
+  const coachIds = Array.from(new Set(inquiries.map((inq) => inq.coach_scout_id).filter(Boolean)));
+  const coachMap = new Map<string, CoachPublicProfile | null>();
+
+  await Promise.all(
+    coachIds.map(async (cId) => {
+      const profile = await getPublicCoachProfile(cId).catch(() => null);
+      coachMap.set(cId, profile);
+    })
+  );
+
   const enrichedInquiries: EnrichedInquiry[] = [];
 
   for (const inq of inquiries) {
-    const coach = await getPublicCoachProfile(inq.coach_scout_id).catch(() => null);
+    const coach = coachMap.get(inq.coach_scout_id);
 
     enrichedInquiries.push({
       ...inq,
@@ -263,18 +298,18 @@ export async function getAthleteInquiries(athleteId: string): Promise<EnrichedIn
     });
   }
 
-  // Sort descending by date_initiated
+  // Sort descending by date_initiated / updated_at
   return enrichedInquiries.sort(
-    (a, b) => new Date(b.date_initiated).getTime() - new Date(a.date_initiated).getTime(),
+    (a, b) => new Date(b.date_initiated || b.updated_at).getTime() - new Date(a.date_initiated || a.updated_at).getTime(),
   );
 }
 
 /**
- * Coach response to a recruitment inquiry.
+ * Response to a recruitment inquiry (Coach or Athlete).
  */
 export async function respondToRecruitmentInquiry(
   inquiryId: string,
-  coachId: string,
+  userId: string,
   responseStatus: 'Accepted' | 'Declined' | 'In Review',
   declineReason?: string
 ) {
@@ -284,17 +319,25 @@ export async function respondToRecruitmentInquiry(
     throw new ServiceError(`Inquiry '${inquiryId}' not found.`, 404);
   }
 
+  const inqData = doc.data() as any;
+  const now = new Date().toISOString();
+
   const updates: Record<string, any> = {
     offer_status: responseStatus,
     decline_reason: declineReason || null,
-    updated_at: new Date().toISOString(),
+    updated_at: now,
   };
 
   await docRef.set(updates, { merge: true });
+
+  // Invalidate any relevant caches
+  invalidateCoachCache(inqData.coach_scout_id);
+
   return {
     message: `Inquiry status updated to ${responseStatus}.`,
     inquiry_id: inquiryId,
     status: responseStatus,
+    offer_status: responseStatus,
   };
 }
 

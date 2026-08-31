@@ -43,14 +43,14 @@ export async function getAthleteProfile(athleteId: string): Promise<AthleteFullP
   const userData = userDoc.exists ? userDoc.data()! : {};
   const profileData = profileDoc.exists ? profileDoc.data()! : {};
 
-  const firstName = userData.first_name || profileData.first_name || 'Athlete';
-  const lastName = userData.last_name || profileData.last_name || 'User';
+  const firstName = userData.first_name || profileData.first_name || '';
+  const lastName = userData.last_name || profileData.last_name || '';
 
   const phys = profileData.physical_profile || {};
-  const heightCm = phys.height_cm || profileData.height_cm || profileData.physical_attributes?.height_cm || 188;
-  const weightKg = phys.weight_kg || profileData.weight_kg || profileData.physical_attributes?.weight_kg || 85;
-  const wingspanCm = phys.wingspan_cm || profileData.wingspan_cm || profileData.physical_attributes?.wingspan_cm || 195;
-  const verticalCm = phys.vertical_cm || profileData.vertical_cm || profileData.physical_attributes?.vertical_cm || 88;
+  const heightCm = Number(phys.height_cm || profileData.height_cm || profileData.physical_attributes?.height_cm || 0);
+  const weightKg = Number(phys.weight_kg || profileData.weight_kg || profileData.physical_attributes?.weight_kg || 0);
+  const wingspanCm = Number(phys.wingspan_cm || profileData.wingspan_cm || profileData.physical_attributes?.wingspan_cm || 0);
+  const verticalCm = Number(phys.vertical_cm || profileData.vertical_cm || profileData.physical_attributes?.vertical_cm || 0);
 
   const bmi = calculateBMI(weightKg, heightCm);
   const apeIndex = calculateApeIndex(wingspanCm, heightCm);
@@ -59,10 +59,10 @@ export async function getAthleteProfile(athleteId: string): Promise<AthleteFullP
   const coachTarget = profileData.workload_target;
   const mergedWorkload = rawWorkload
     ? {
-      ...rawWorkload,
-      target_7day_effort_pts: coachTarget?.target_7day_effort_pts || rawWorkload.target_7day_effort_pts || 400,
-      target_intensity: coachTarget?.target_intensity || rawWorkload.target_intensity || 8,
-    }
+        ...rawWorkload,
+        target_7day_effort_pts: Number(coachTarget?.target_7day_effort_pts || rawWorkload.target_7day_effort_pts || 0),
+        target_intensity: Number(coachTarget?.target_intensity || rawWorkload.target_intensity || 0),
+      }
     : await getAthleteWorkloadSummary(canonicalAthleteId).catch(() => undefined);
 
   return {
@@ -70,13 +70,13 @@ export async function getAthleteProfile(athleteId: string): Promise<AthleteFullP
     user_id: rawUid,
     first_name: firstName,
     last_name: lastName,
-    full_name: `${firstName} ${lastName}`,
-    avatar_url: profileData.avatar_url || 'https://images.unsplash.com/photo-1546519638-68e109498ffc?w=400',
-    birthdate: profileData.birthdate || userData.birthdate || '2001-08-14',
-    gender: profileData.gender || userData.gender || 'Male',
-    position: profileData.position || 'Point Guard',
-    location: profileData.province || userData.province || 'Camarines Sur, PH',
-    sport_type: profileData.sport_type || userData.sport_type || 'Basketball',
+    full_name: `${firstName} ${lastName}`.trim(),
+    avatar_url: profileData.avatar_url || userData.avatar_url || '',
+    birthdate: profileData.birthdate || userData.birthdate || '',
+    gender: profileData.gender || userData.gender || '',
+    position: profileData.position || userData.position || 'Unassigned',
+    location: profileData.province || userData.province || '',
+    sport_type: profileData.sport_type || userData.sport_type || '',
 
     physical_attributes: {
       height_cm: heightCm,
@@ -91,54 +91,37 @@ export async function getAthleteProfile(athleteId: string): Promise<AthleteFullP
     },
 
     stats: profileData.stats || {
-      ppg: 22.4,
-      rpg: 6.8,
-      apg: 8.2,
-      bpg: 1.1,
-      fg_pct: 48.5,
-      three_pct: 38.2,
-      ft_pct: 84.1,
-      efficiency_rating: 24.6,
-      wins: 18,
-      losses: 4,
+      ppg: 0,
+      rpg: 0,
+      apg: 0,
+      bpg: 0,
+      fg_pct: 0,
+      three_pct: 0,
+      ft_pct: 0,
+      efficiency_rating: 0,
+      wins: 0,
+      losses: 0,
     },
 
-    recent_matches: profileData.recent_matches || [
-      { id: 'm1', opponent: 'Ateneo Blue Eagles', result: 'Win', score: '88 - 82', date: '2026-07-25' },
-      { id: 'm2', opponent: 'La Salle Green Archers', result: 'Win', score: '94 - 90', date: '2026-07-18' },
-      { id: 'm3', opponent: 'UP Fighting Maroons', result: 'Lose', score: '79 - 83', date: '2026-07-11' },
-      { id: 'm4', opponent: 'UST Growling Tigers', result: 'Win', score: '102 - 91', date: '2026-07-04' },
-    ],
+    recent_matches: profileData.recent_matches || [],
 
     analytics: profileData.analytics || {
-      scoring_trend: [18, 24, 21, 28, 19, 31, 22, 26, 17, 24],
+      scoring_trend: [],
       radar_competencies: {
-        speed: 88,
-        agility: 85,
-        power: 82,
-        iq: 92,
-        tech: 89,
+        speed: 0,
+        agility: 0,
+        power: 0,
+        iq: 0,
+        tech: 0,
       },
     },
 
     documents: profileData.documents || {
-      psa_birth_certificate: profileData.psa_birth_certificate || {
-        name: 'PSA_BirthCertificate.pdf',
-        status: 'Verified',
-        uploaded_at: '2026-01-10',
-      },
-      proof_of_residency: profileData.proof_of_residency || {
-        name: 'Barangay_Certificate.pdf',
-        status: 'Verified',
-        uploaded_at: '2026-01-12',
-      },
+      psa_birth_certificate: profileData.psa_birth_certificate || null,
+      proof_of_residency: profileData.proof_of_residency || null,
     },
 
-    achievements: profileData.achievements || [
-      { id: 'a1', title: 'Season MVP', year: '2025', description: 'Awarded Most Valuable Player in National Collegiate League.' },
-      { id: 'a2', title: 'All-Tournament First Team', year: '2024', description: 'Selected as top point guard in Regional Championship.' },
-      { id: 'a3', title: 'High School Champion', year: '2022', description: 'Led team to undefeated championship run.' },
-    ],
+    achievements: profileData.achievements || [],
     workload_analytics: mergedWorkload,
     workload: mergedWorkload,
     workload_target: coachTarget || undefined,
@@ -326,39 +309,49 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
   const sportCategory = profileData.sport_type || 'Basketball';
 
   const stats = profileData.stats || {
-    ppg: 22.4,
-    rpg: 6.8,
-    apg: 8.2,
-    bpg: 1.1,
-    fg_pct: 48.5,
-    three_pct: 38.2,
-    ft_pct: 84.1,
-    efficiency_rating: 24.6,
+    ppg: 0,
+    rpg: 0,
+    apg: 0,
+    bpg: 0,
+    fg_pct: 0,
+    three_pct: 0,
+    ft_pct: 0,
+    efficiency_rating: 0,
   };
 
-  const fgPct = stats.fg_pct || 48.5;
-  const threePct = stats.three_pct || 38.2;
-  const ftPct = stats.ft_pct || 84.1;
-  const efgPct = Math.round((fgPct + 0.5 * threePct) * 10) / 10;
+  const fgPct = stats.fg_pct || 0;
+  const threePct = stats.three_pct || 0;
+  const ftPct = stats.ft_pct || 0;
+  const efgPct = (fgPct + 0.5 * threePct) > 0 ? Math.round((fgPct + 0.5 * threePct) * 10) / 10 : 0;
 
-  const fiveGameTrend = profileData.five_game_trend || [
-    { id: 'm1', opponent: 'Ateneo Blue Eagles', result: 'Win', score: '88 - 82', date: '2026-07-25', points: 28 },
-    { id: 'm2', opponent: 'La Salle Green Archers', result: 'Win', score: '94 - 90', date: '2026-07-18', points: 31 },
-    { id: 'm3', opponent: 'UP Fighting Maroons', result: 'Lose', score: '79 - 83', date: '2026-07-11', points: 19 },
-    { id: 'm4', opponent: 'UST Growling Tigers', result: 'Win', score: '102 - 91', date: '2026-07-04', points: 24 },
-    { id: 'm5', opponent: 'FEU Tamaraws', result: 'Win', score: '85 - 78', date: '2026-06-27', points: 22 },
-  ];
+  const fiveGameTrend = profileData.five_game_trend || [];
 
-  // Gracefully omit team summary if athlete has no team assignment
-  let currentTeamSummary = null;
-  if (profileData.no_team !== true && profileData.has_no_team !== true && athleteId !== 'no_team_athlete') {
-    currentTeamSummary = profileData.team_summary || {
-      team_id: 't-101',
-      team_name: 'Adamson Falcons',
-      coach_name: 'Coach Nash Racela',
-      record: '18 - 4',
-      jersey_number: 7,
-    };
+  // Fetch actual team summary if athlete is assigned to a team
+  let currentTeamSummary = profileData.team_summary || null;
+  if (!currentTeamSummary && profileData.no_team !== true && profileData.has_no_team !== true) {
+    try {
+      const teamsSnapshot = await db.collection('Teams').get();
+      for (const tDoc of teamsSnapshot.docs) {
+        const tData = tDoc.data();
+        if (Array.isArray(tData.roster_list)) {
+          const isMember = tData.roster_list.some((m: any) =>
+            typeof m === 'string' ? (m === athleteId || m === canonicalAthleteId || m === rawUid) : (m.athlete_id === athleteId || m.athlete_id === canonicalAthleteId || m.athlete_id === rawUid)
+          );
+          if (isMember) {
+            currentTeamSummary = {
+              team_id: tData.team_id || tDoc.id,
+              team_name: tData.team_name || '',
+              coach_name: tData.coach_name || '',
+              record: tData.record || '0 - 0',
+              jersey_number: profileData.jersey_number ?? null,
+            };
+            break;
+          }
+        }
+      }
+    } catch (err) {
+      // Gracefully continue without team summary
+    }
   }
 
   // Fetch recent workload indicators logged by coach/athlete
@@ -371,11 +364,11 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
       const loads = sorted.map(e => Number(e.daily_load || 0));
       const acute = loads.slice(0, 7).reduce((a, b) => a + b, 0) / Math.max(1, loads.slice(0, 7).length);
       const chronic = loads.slice(0, 28).reduce((a, b) => a + b, 0) / Math.max(1, loads.slice(0, 28).length);
-      const acwr = chronic > 0 ? parseFloat((acute / chronic).toFixed(2)) : 1.0;
-      let riskLevel = 'MODERATE';
+      const acwr = chronic > 0 ? parseFloat((acute / chronic).toFixed(2)) : 0;
+      let riskLevel = 'OPTIMAL';
       let riskDesc = 'Optimal training zone. Keep up the balanced workload!';
       if (acwr < 0.8) {
-        riskLevel = 'LOW';
+        riskLevel = 'UNDERLOAD';
         riskDesc = 'Under-training zone.';
       } else if (acwr > 1.5) {
         riskLevel = 'CRITICAL';
@@ -407,13 +400,13 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
       apg: stats.apg,
       bpg: stats.bpg,
       efficiency_rating: stats.efficiency_rating,
-      scoring_trend: profileData.analytics?.scoring_trend || [18, 24, 21, 28, 19, 31, 22, 26, 17, 24],
+      scoring_trend: profileData.analytics?.scoring_trend || [],
       radar_competencies: profileData.analytics?.radar_competencies || {
-        speed: 88,
-        agility: 85,
-        power: 82,
-        iq: 92,
-        tech: 89,
+        speed: 0,
+        agility: 0,
+        power: 0,
+        iq: 0,
+        tech: 0,
       },
     },
     shooting_efficiency: {
@@ -524,48 +517,25 @@ export async function getAthleteExpandedCareerStats(athleteId: string): Promise<
     if (blk > maxBlk) maxBlk = blk;
   }
 
-  // If no metric logs in Firestore, fallback to profile baseline averages
-  if (totalGames === 0) {
-    totalGames = 22;
-    const baseStats = profileData.stats || { ppg: 22.4, rpg: 6.8, apg: 8.2, bpg: 1.1, fg_pct: 48.5, three_pct: 38.2, ft_pct: 84.1, efficiency_rating: 24.6 };
-    totalPts = Math.round((baseStats.ppg || 22.4) * totalGames);
-    totalReb = Math.round((baseStats.rpg || 6.8) * totalGames);
-    totalAst = Math.round((baseStats.apg || 8.2) * totalGames);
-    totalBlk = Math.round((baseStats.bpg || 1.1) * totalGames);
-    totalStl = Math.round(2.1 * totalGames);
-    totalTo = Math.round(2.4 * totalGames);
-    totalFouls = Math.round(1.8 * totalGames);
-    totalFgm = Math.round(totalPts * 0.42);
-    totalFga = Math.round(totalFgm / 0.485);
-    totalFtm = Math.round(totalPts * 0.25);
-    totalFta = Math.round(totalFtm / 0.841);
-    maxPts = 34;
-    maxReb = 12;
-    maxAst = 14;
-    maxStl = 5;
-    maxBlk = 3;
-    maxEff = 38.5;
-    perList.push(24.6, 28.2, 21.0, 31.5, 26.4);
-  }
-
+  // If no metric logs in Firestore, calculate from recorded stats or clean zeros
   const avgPer = perList.length > 0
     ? parseFloat((perList.reduce((a, b) => a + b, 0) / perList.length).toFixed(2))
-    : 24.6;
+    : Number(profileData.stats?.efficiency_rating || 0);
 
-  const fgPct = totalFga > 0 ? parseFloat(((totalFgm / totalFga) * 100).toFixed(2)) : 48.5;
-  const threePct = profileData.stats?.three_pct || 38.2;
-  const ftPct = totalFta > 0 ? parseFloat(((totalFtm / totalFta) * 100).toFixed(2)) : 84.1;
+  const fgPct = totalFga > 0 ? parseFloat(((totalFgm / totalFga) * 100).toFixed(2)) : Number(profileData.stats?.fg_pct || 0);
+  const threePct = Number(profileData.stats?.three_pct || 0);
+  const ftPct = totalFta > 0 ? parseFloat(((totalFtm / totalFta) * 100).toFixed(2)) : Number(profileData.stats?.ft_pct || 0);
   const efgPct = parseFloat(((fgPct + 0.5 * threePct)).toFixed(2));
   const tsDenom = 2 * (totalFga + 0.44 * totalFta);
-  const tsPct = tsDenom > 0 ? parseFloat(((totalPts / tsDenom) * 100).toFixed(2)) : 58.4;
+  const tsPct = tsDenom > 0 ? parseFloat(((totalPts / tsDenom) * 100).toFixed(2)) : 0;
 
-  const ppg = parseFloat((totalPts / totalGames).toFixed(1));
-  const rpg = parseFloat((totalReb / totalGames).toFixed(1));
-  const apg = parseFloat((totalAst / totalGames).toFixed(1));
-  const spg = parseFloat((totalStl / totalGames).toFixed(1));
-  const bpg = parseFloat((totalBlk / totalGames).toFixed(1));
-  const topg = parseFloat((totalTo / totalGames).toFixed(1));
-  const fpg = parseFloat((totalFouls / totalGames).toFixed(1));
+  const ppg = totalGames > 0 ? parseFloat((totalPts / totalGames).toFixed(1)) : Number(profileData.stats?.ppg || 0);
+  const rpg = totalGames > 0 ? parseFloat((totalReb / totalGames).toFixed(1)) : Number(profileData.stats?.rpg || 0);
+  const apg = totalGames > 0 ? parseFloat((totalAst / totalGames).toFixed(1)) : Number(profileData.stats?.apg || 0);
+  const spg = totalGames > 0 ? parseFloat((totalStl / totalGames).toFixed(1)) : 0;
+  const bpg = totalGames > 0 ? parseFloat((totalBlk / totalGames).toFixed(1)) : Number(profileData.stats?.bpg || 0);
+  const topg = totalGames > 0 ? parseFloat((totalTo / totalGames).toFixed(1)) : 0;
+  const fpg = totalGames > 0 ? parseFloat((totalFouls / totalGames).toFixed(1)) : 0;
 
   return {
     athlete_id: athleteId,
@@ -603,12 +573,12 @@ export async function getAthleteExpandedCareerStats(athleteId: string): Promise<
       fpg,
     },
     game_highs: {
-      points: maxPts || 28,
-      rebounds: maxReb || 8,
-      assists: maxAst || 9,
-      steals: maxStl || 3,
-      blocks: maxBlk || 2,
-      efficiency: maxEff || avgPer,
+      points: maxPts,
+      rebounds: maxReb,
+      assists: maxAst,
+      steals: maxStl,
+      blocks: maxBlk,
+      efficiency: maxEff,
     },
     historical_per_trend: perList,
     workload_analytics: profileData.workload_analytics || profileData.workload || (await getAthleteWorkloadSummary(athleteId).catch(() => undefined)),

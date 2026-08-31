@@ -75,37 +75,59 @@ export function calculateBasketballMetrics(stats: Record<string, any>): {
  */
 export function calculateIndividualSportMetrics(stats: Record<string, any>): {
   efficiency: number;
-  enrichedStats: IndividualSportStats;
+  enrichedStats: IndividualSportStats & Record<string, any>;
 } {
-  const eventName = String(stats.event_name || '100m Freestyle').trim();
-  const distanceMeters = Number(stats.distance_meters || 100);
-  const finishTimeMs = Number(stats.finish_time_ms || 60000);
-  const splitTimesMs = Array.isArray(stats.split_times_ms) ? stats.split_times_ms.map(Number) : [];
+  const rawDist = stats.distance_meters || stats.distance || 100;
+  const distanceMeters = Number(String(rawDist).replace(/[^\d.]/g, '') || 100);
+  const distance = `${distanceMeters}m`;
+
+  let finishTimeMs = Number(stats.finish_time_ms || 0);
+  if (finishTimeMs === 0 && stats.timer_seconds) {
+    finishTimeMs = Math.round(Number(stats.timer_seconds) * 1000);
+  }
+  if (finishTimeMs === 0 && stats.time) {
+    const parts = String(stats.time).split(':');
+    if (parts.length === 2) {
+      finishTimeMs = (parseFloat(parts[0]) * 60 + parseFloat(parts[1])) * 1000;
+    } else {
+      finishTimeMs = (parseFloat(stats.time) || 0) * 1000;
+    }
+  }
+
+  const mins = Math.floor(finishTimeMs / 60000);
+  const secs = ((finishTimeMs % 60000) / 1000).toFixed(2);
+  const formattedTime = stats.formatted_time || (finishTimeMs > 0 ? `${mins > 0 ? mins + ':' : ''}${Number(secs) < 10 && mins > 0 ? '0' : ''}${secs}s` : '00:00.00');
+
+  const eventName = String(stats.event_name || `${distanceMeters}m Event`).trim();
+  const splitTimesMs = Array.isArray(stats.split_times_ms)
+    ? stats.split_times_ms.map(Number)
+    : Array.isArray(stats.split_times)
+    ? stats.split_times
+    : [];
   const isDisqualified = !!stats.is_disqualified;
 
   let efficiency = 0;
-
   if (!isDisqualified && finishTimeMs > 0) {
-    // Speed in meters per second
     const speedMps = distanceMeters / (finishTimeMs / 1000);
-    // Base efficiency scaled to 100 max
     const baseScore = speedMps * 12.5;
-
-    // Split consistency factor
     let splitFactor = 1.0;
-    if (splitTimesMs.length > 1) {
+    if (Array.isArray(splitTimesMs) && splitTimesMs.length > 1 && typeof splitTimesMs[0] === 'number') {
       const avgSplit = splitTimesMs.reduce((a, b) => a + b, 0) / splitTimesMs.length;
       const variance = splitTimesMs.reduce((sum, val) => sum + Math.abs(val - avgSplit), 0) / splitTimesMs.length;
-      splitFactor = Math.max(0.85, 1 - variance / avgSplit);
+      splitFactor = Math.max(0.85, 1 - variance / (avgSplit || 1));
     }
-
     efficiency = Number((baseScore * splitFactor).toFixed(2));
   }
 
-  const enrichedStats: IndividualSportStats = {
+  const enrichedStats: any = {
     event_name: eventName,
     distance_meters: distanceMeters,
+    distance: distance,
     finish_time_ms: finishTimeMs,
+    time: formattedTime,
+    formatted_time: formattedTime,
+    timer_seconds: finishTimeMs > 0 ? finishTimeMs / 1000 : (stats.timer_seconds || 0),
+    split_times: stats.split_times || [],
     split_times_ms: splitTimesMs,
     is_disqualified: isDisqualified,
   };
@@ -172,28 +194,79 @@ export async function submitMatchSession(
   const matchId = `match_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const now = new Date().toISOString();
 
-  const matchLog: MatchLog = {
-    match_id: matchId,
-    team_id: payload.team_id,
-    logged_by_coach_id: coachId,
-    sport_type: payload.sport_type,
-    match_type: payload.match_type.trim(),
-    match_date: payload.match_date,
-    location: payload.location.trim(),
-    opponent_team_name: payload.opponent_team_name.trim(),
-    game_result: payload.game_result,
-    roster_athletes: (payload.player_stats || []).map((p) => p.athlete_id),
-    notes: payload.notes ? payload.notes.trim() : undefined,
-    idempotency_key: key,
-    timestamp: now,
-  };
+  // Resolve Home Team and Away Team names
+  const homeTeamName = ((payload as any).home_team_name || (payload as any).home_team || payload.team_id || 'CELTICS').trim();
+  const oppTeamName = ((payload as any).away_team_name || (payload as any).away_team || payload.opponent_team_name || 'HAWKS').trim();
 
-  const performanceMetrics: PerformanceMetric[] = [];
+  // Resolve Home and Away Scores
+  const homeScore = (payload as any).home_score !== undefined ? Number((payload as any).home_score) : 107;
+  const awayScore = (payload as any).away_score !== undefined ? Number((payload as any).away_score) : 103;
+
+  // Resolve or create Home Team doc in Teams collection
+  let homeTeamId = payload.team_id;
+  const homeTeamQuery = await db.collection('Teams')
+    .where('team_name', '==', homeTeamName)
+    .limit(1)
+    .get();
+
+  if (!homeTeamQuery.empty) {
+    homeTeamId = homeTeamQuery.docs[0].id;
+  } else {
+    homeTeamId = `team_${homeTeamName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now()}`;
+    await db.collection('Teams').doc(homeTeamId).set({
+      team_id: homeTeamId,
+      team_name: homeTeamName,
+      sport_type: payload.sport_type,
+      division: 'Varsity Division',
+      coach_id: coachId,
+      season_record: { wins: homeScore >= awayScore ? 1 : 0, losses: homeScore < awayScore ? 1 : 0 },
+      roster_list: [],
+      created_at: now,
+    });
+  }
+
+  // Resolve or create Opponent / Away Team doc in Teams collection
+  let oppTeamId = (payload as any).away_team_id || '';
+  const oppTeamQuery = await db.collection('Teams')
+    .where('team_name', '==', oppTeamName)
+    .limit(1)
+    .get();
+
+  if (!oppTeamQuery.empty) {
+    oppTeamId = oppTeamQuery.docs[0].id;
+  } else {
+    oppTeamId = `team_${oppTeamName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now()}`;
+    await db.collection('Teams').doc(oppTeamId).set({
+      team_id: oppTeamId,
+      team_name: oppTeamName,
+      sport_type: payload.sport_type,
+      division: 'Varsity Division',
+      coach_id: coachId,
+      season_record: { wins: awayScore > homeScore ? 1 : 0, losses: awayScore <= homeScore ? 1 : 0 },
+      roster_list: [],
+      created_at: now,
+    });
+  }
+
+  const performanceMetrics: any[] = [];
+  const homeRosterIds: string[] = [];
+  const awayRosterIds: string[] = [];
+  const enrichedPlayerStats: any[] = [];
 
   for (const item of payload.player_stats || []) {
-    const athleteId = item.athlete_id;
+    const athleteId = item.athlete_id || `ath_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const rawStats = item.stats || {};
     const metricId = `metric_${matchId}_${athleteId}`;
+    const pName = (item as any).player_name || 'Athlete';
+    const rawTeam = ((item as any).team_name || (item as any).team || homeTeamName).trim();
+    const isHomePlayer = rawTeam.toUpperCase() === homeTeamName.toUpperCase();
+    const pTeam = isHomePlayer ? homeTeamName : oppTeamName;
+
+    if (isHomePlayer) {
+      homeRosterIds.push(athleteId);
+    } else {
+      awayRosterIds.push(athleteId);
+    }
 
     let efficiency = 0;
     let enrichedStats: any = rawStats;
@@ -212,9 +285,12 @@ export async function submitMatchSession(
       enrichedStats = computed.enrichedStats;
     }
 
-    const metric: PerformanceMetric = {
+    const metric: any = {
       metric_id: metricId,
       athlete_id: athleteId,
+      player_name: pName,
+      team_name: pTeam,
+      jersey_number: (item as any).jersey_number ?? null,
       match_id: matchId,
       sport_category: payload.sport_type,
       sport_stats: enrichedStats,
@@ -223,7 +299,62 @@ export async function submitMatchSession(
     };
 
     performanceMetrics.push(metric);
+
+    enrichedPlayerStats.push({
+      athlete_id: athleteId,
+      player_name: pName,
+      team_name: pTeam,
+      jersey_number: (item as any).jersey_number ?? null,
+      pts: Number(rawStats.points ?? rawStats.pts ?? 0),
+      ast: Number(rawStats.assists ?? rawStats.ast ?? 0),
+      reb: Number(rawStats.rebounds ?? rawStats.reb ?? 0),
+      stats: enrichedStats,
+    });
+
+    // Ensure Athlete Profile exists in Athlete_Profiles for both Home and Away players
+    const athleteRef = db.collection('Athlete_Profiles').doc(athleteId);
+    const athleteDoc = await athleteRef.get();
+    if (!athleteDoc.exists) {
+      const nameParts = pName.split(/\s+/);
+      await athleteRef.set({
+        athlete_id: athleteId,
+        first_name: nameParts[0] || 'Athlete',
+        last_name: nameParts.slice(1).join(' ') || '',
+        team_name: pTeam,
+        team_id: isHomePlayer ? homeTeamId : oppTeamId,
+        jersey_number: (item as any).jersey_number ?? null,
+        sport_type: payload.sport_type,
+        position: 'Player',
+        created_at: now,
+      });
+    }
   }
+
+  const matchLog: any = {
+    match_id: matchId,
+    team_id: homeTeamId,
+    home_team_id: homeTeamId,
+    away_team_id: oppTeamId,
+    home_team_name: homeTeamName,
+    away_team_name: oppTeamName,
+    opponent_team_name: oppTeamName,
+    teams: [homeTeamName, oppTeamName],
+    home_score: homeScore,
+    away_score: awayScore,
+    logged_by_coach_id: coachId,
+    sport_type: payload.sport_type,
+    match_type: payload.match_type.trim(),
+    match_date: payload.match_date,
+    location: payload.location.trim(),
+    game_result: homeScore >= awayScore ? 'WIN' : 'LOSS',
+    home_roster_athletes: homeRosterIds,
+    away_roster_athletes: awayRosterIds,
+    roster_athletes: [...homeRosterIds, ...awayRosterIds],
+    player_stats: enrichedPlayerStats,
+    notes: payload.notes ? payload.notes.trim() : `OCR Logged: ${homeTeamName} vs ${oppTeamName} (${homeScore} - ${awayScore})`,
+    idempotency_key: key,
+    timestamp: now,
+  };
 
   // Execute atomic batch write: Match Log + Performance Metrics + Idempotency Record
   const batch = db.batch();
@@ -268,7 +399,7 @@ function extractJsonFromAiText(content: string): any {
   // 1. Direct parse attempt
   try {
     return JSON.parse(clean);
-  } catch (_) {}
+  } catch (_) { }
 
   // 2. Fix trailing commas before } or ]
   clean = clean.replace(/,\s*([\}\]])/g, '$1');
@@ -279,7 +410,7 @@ function extractJsonFromAiText(content: string): any {
 
   try {
     return JSON.parse(clean);
-  } catch (_) {}
+  } catch (_) { }
 
   // 4. Auto-balance unclosed brackets / braces if truncated
   let openBraces = (clean.match(/\{/g) || []).length;
@@ -314,14 +445,14 @@ function extractJsonFromAiText(content: string): any {
     while ((match = playerRegex.exec(content)) !== null) {
       try {
         playerSummary.push(JSON.parse(match[0].replace(/,\s*\}/g, '}')));
-      } catch (_) {}
+      } catch (_) { }
     }
 
     const teamRegex = /\{[^{}]*"team"[^{}]*"score"[^{}]*\}/g;
     while ((match = teamRegex.exec(content)) !== null) {
       try {
         teamScores.push(JSON.parse(match[0].replace(/,\s*\}/g, '}')));
-      } catch (_) {}
+      } catch (_) { }
     }
 
     if (playerSummary.length > 0 || teamScores.length > 0) {
@@ -359,7 +490,7 @@ async function callGeminiWithWaterfall(requestBody: any, geminiKey: string): Pro
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody),
-          signal: AbortSignal.timeout(45000),
+          signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(45000) : undefined,
         }
       );
 
@@ -470,18 +601,27 @@ Important:
       }
 
       const base64Image = sendBuffer.toString('base64');
-      const promptText = `Look at this basketball scoresheet carefully. It has two teams with player rows containing jersey numbers (#), player names, quarter scores (Q1-Q4), field goals, free throws, and total points (PTS).
+      const promptText = `Look at this scoresheet carefully. It contains match results and player tables for two teams (VISITORS and HOME).
+Identify the HOME team name and AWAY/VISITORS team name, their final scores, and individual player stats.
 
 Extract the data into this exact JSON format:
-{"team_scores":[{"team":"TeamName","score":0}],"player_summary":[{"player_name":"Full Name","jersey_number":0,"points":0,"rebounds":0,"assists":0,"fouls":0}]}
+{
+  "team_scores": [
+    {"team": "CELTICS", "score": 107, "is_home": true},
+    {"team": "HAWKS", "score": 103, "is_home": false}
+  ],
+  "player_summary": [
+    {"player_name": "Full Name", "team_name": "TeamName", "jersey_number": 0, "points": 0, "rebounds": 0, "assists": 0, "fouls": 0}
+  ]
+}
 
 Important:
-- The FINAL SCORE line at the bottom shows each team's total score.
-- Each player row has: jersey # | Name | Position | Q1 | Q2 | Q3 | Q4 | FT | FGM/FGA | FTM/FTA | PTS
-- The PTS column is the LAST number column on each player row.
-- Include ALL players from BOTH teams (VISITORS and HOME).
-- Use 0 for any stat you cannot read clearly.
-- Return ONLY the JSON object, nothing else.`;
+- VISITORS/AWAY team is on the left side of the scoresheet.
+- HOME team is on the right side of the scoresheet.
+- Make sure every player's "team_name" correctly matches their team (e.g. HAWKS for visitor players on left, CELTICS for home players on right).
+- The FINAL SCORE or Running Score at the bottom shows each team's total final score.
+- The PTS column is the points scored by each player.
+- Return ONLY valid JSON, nothing else.`;
 
       requestBody = {
         contents: [
@@ -819,12 +959,14 @@ export async function getMatchBoxscore(matchId: string): Promise<BoxscoreRespons
       }
     }
 
+    const teamName = data.team_name || profileData.team_name || (data.team || '');
     playerMetrics.push({
       metric_id: data.metric_id,
       athlete_id: athleteId,
       user_id: profileData.user_id || athleteId,
-      first_name: firstName || 'Athlete',
+      first_name: firstName || data.player_name || 'Athlete',
       last_name: lastName || '',
+      team_name: teamName,
       position: profileData.position || 'Unassigned',
       jersey_number: profileData.jersey_number ?? null,
       sport_stats: data.sport_stats,
@@ -832,11 +974,31 @@ export async function getMatchBoxscore(matchId: string): Promise<BoxscoreRespons
     });
   }
 
+  // Fallback to matchData.player_stats if Performance_Metrics were not queried or written yet
+  if (playerMetrics.length === 0 && Array.isArray(matchData.player_stats) && matchData.player_stats.length > 0) {
+    for (const item of matchData.player_stats) {
+      const pName = (item as any).player_name || 'Athlete';
+      const nameParts = pName.split(/\s+/);
+      playerMetrics.push({
+        metric_id: `metric_${matchId}_${(item as any).athlete_id || 'player'}`,
+        athlete_id: (item as any).athlete_id || 'athlete_id',
+        user_id: (item as any).athlete_id || 'user_id',
+        first_name: nameParts[0] || 'Athlete',
+        last_name: nameParts.slice(1).join(' ') || '',
+        team_name: (item as any).team_name || (item as any).team || '',
+        position: 'Player',
+        jersey_number: (item as any).jersey_number ?? null,
+        sport_stats: (item as any).stats || (item as any).sport_stats || {},
+        calculated_player_efficiency: 0,
+      });
+    }
+  }
+
   return {
     match: matchData,
     team_summary: {
       team_id: matchData.team_id,
-      team_name: teamName,
+      team_name: (matchData as any).home_team_name || teamName,
       opponent_team_name: matchData.opponent_team_name,
       game_result: matchData.game_result,
       match_date: matchData.match_date,
@@ -862,8 +1024,8 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
   const matchData = matchDoc.data() as any;
 
   // Fetch team summary
-  let teamName = 'Home Team';
-  if (matchData.team_id) {
+  let teamName = matchData.home_team_name || 'Home Team';
+  if (matchData.team_id && teamName === 'Home Team') {
     const teamDoc = await db.collection('Teams').doc(matchData.team_id).get();
     if (teamDoc.exists) {
       teamName = teamDoc.data()!.team_name || teamName;
@@ -896,17 +1058,39 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
       }
     }
 
+    const pTeam = data.team_name || profileData.team_name || (data.team || '');
     playerMetrics.push({
       metric_id: data.metric_id,
       athlete_id: athleteId,
       user_id: profileData.user_id || athleteId,
-      first_name: firstName || 'Athlete',
+      first_name: firstName || data.player_name || 'Athlete',
       last_name: lastName || '',
+      team_name: pTeam,
       position: profileData.position || 'Unassigned',
       jersey_number: profileData.jersey_number ?? null,
       sport_stats: data.sport_stats || {},
       calculated_player_efficiency: data.calculated_player_efficiency || 0,
     });
+  }
+
+  // Fallback to matchData.player_stats if Performance_Metrics were not queried or written yet
+  if (playerMetrics.length === 0 && Array.isArray(matchData.player_stats) && matchData.player_stats.length > 0) {
+    for (const item of matchData.player_stats) {
+      const pName = (item as any).player_name || 'Athlete';
+      const nameParts = pName.split(/\s+/);
+      playerMetrics.push({
+        metric_id: `metric_${matchId}_${(item as any).athlete_id || 'player'}`,
+        athlete_id: (item as any).athlete_id || 'athlete_id',
+        user_id: (item as any).athlete_id || 'user_id',
+        first_name: nameParts[0] || 'Athlete',
+        last_name: nameParts.slice(1).join(' ') || '',
+        team_name: (item as any).team_name || (item as any).team || '',
+        position: 'Player',
+        jersey_number: (item as any).jersey_number ?? null,
+        sport_stats: (item as any).stats || (item as any).sport_stats || {},
+        calculated_player_efficiency: 0,
+      });
+    }
   }
 
   const sportType = matchData.sport_type || 'Basketball';
@@ -948,6 +1132,7 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
       return {
         athlete_id: p.athlete_id,
         player_name: `${p.first_name} ${p.last_name}`.trim(),
+        team_name: p.team_name || teamName,
         jersey_number: p.jersey_number,
         position: p.position,
         points: pts,
@@ -980,18 +1165,25 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
   } else if (sportType === 'Swimming' || sportType === 'Track & Field') {
     const raceResults = playerMetrics.map((p, idx) => {
       const s = p.sport_stats || {};
-      const timeMs = Number(s.finish_time_ms || 60000);
+      let timeMs = Number(s.finish_time_ms || 0);
+      if (timeMs === 0 && s.timer_seconds) timeMs = Math.round(Number(s.timer_seconds) * 1000);
+      const rawDist = s.distance_meters || s.distance || 100;
+      const distanceMeters = Number(String(rawDist).replace(/[^\d.]/g, '') || 100);
+      const distance = `${distanceMeters}m`;
       const mins = Math.floor(timeMs / 60000);
       const secs = ((timeMs % 60000) / 1000).toFixed(2);
-      const formattedTime = `${mins > 0 ? mins + ':' : ''}${Number(secs) < 10 && mins > 0 ? '0' : ''}${secs}s`;
+      const formattedTime = s.formatted_time || s.time || (timeMs > 0 ? `${mins > 0 ? mins + ':' : ''}${Number(secs) < 10 && mins > 0 ? '0' : ''}${secs}s` : '00:00.00');
 
       return {
         athlete_id: p.athlete_id,
         athlete_name: `${p.first_name} ${p.last_name}`.trim(),
         placement_rank: s.placement_rank || (idx + 1),
-        distance_meters: s.distance_meters || 100,
+        distance_meters: distanceMeters,
+        distance: distance,
         finish_time_ms: timeMs,
         formatted_finish_time: formattedTime,
+        time: formattedTime,
+        split_times: s.split_times || [],
         split_times_ms: s.split_times_ms || [],
         is_disqualified: Boolean(s.is_disqualified),
         calculated_player_efficiency: p.calculated_player_efficiency,
@@ -1000,7 +1192,7 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
 
     sportSpecificDetails = {
       sport_category: sportType,
-      event_name: matchData.event_name || (playerMetrics[0]?.sport_stats?.event_name) || '100m Final',
+      event_name: matchData.event_name || (playerMetrics[0]?.sport_stats?.event_name) || `${playerMetrics[0]?.sport_stats?.distance_meters || 100}m Event`,
       race_results: raceResults,
     };
   } else {

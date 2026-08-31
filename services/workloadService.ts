@@ -99,8 +99,8 @@ export async function logSrpeEntry(params: {
   }
   const profileData = profileDoc.exists ? profileDoc.data()! : {};
   const coachTarget = profileData.workload_target || {};
-  const targetEffort = Number(coachTarget.target_7day_effort_pts || profileData.workload_analytics?.target_7day_effort_pts || 400);
-  const targetIntensity = coachTarget.target_intensity ? Number(coachTarget.target_intensity) : (profileData.workload_analytics?.target_intensity || 8);
+  const targetEffort = Number(coachTarget.target_7day_effort_pts || profileData.workload_analytics?.target_7day_effort_pts || 0);
+  const targetIntensity = coachTarget.target_intensity ? Number(coachTarget.target_intensity) : Number(profileData.workload_analytics?.target_intensity || 0);
 
   // 3. Fetch all entries to compute live aggregate metrics
   const snapshot = await db
@@ -122,12 +122,12 @@ export async function logSrpeEntry(params: {
   const loads28d = loads.slice(0, 28);
 
   const acuteLoadSum = loads7d.reduce((a, b) => a + b, 0);
-  const chronicLoadAvg = loads28d.length > 0 ? round(loads28d.reduce((a, b) => a + b, 0) / loads28d.length) : 380;
-  const acwrRatio = chronicLoadAvg > 0 ? round(acuteLoadSum / chronicLoadAvg) : 1.0;
+  const chronicLoadAvg = loads28d.length > 0 ? round(loads28d.reduce((a, b) => a + b, 0) / loads28d.length) : 0;
+  const acwrRatio = chronicLoadAvg > 0 ? round(acuteLoadSum / chronicLoadAvg) : 0;
 
   const mean7d = loads7d.length > 0 ? mean(loads7d) : dailyLoad;
   const std7d = loads7d.length > 0 ? stddev(loads7d) : 0;
-  const routineScore = std7d > 0 ? round(mean7d / std7d) : 1.25;
+  const routineScore = std7d > 0 ? round(mean7d / std7d) : (loads7d.length > 0 ? 1.0 : 0);
   const bodyStress = Math.round(acuteLoadSum * routineScore);
 
   const weeklyLogs = sortedEntries.slice(0, 7).map((e) => ({
@@ -311,18 +311,18 @@ export async function getAthleteWorkloadSummary(athleteId: string): Promise<any>
   const loads7d = loads.slice(0, 7);
   const loads28d = loads.slice(0, 28);
 
-  const latestDailyLoad = loads[0] || (savedWorkload.workout_score || 0);
+  const latestDailyLoad = loads[0] || Number(savedWorkload.workout_score || 0);
   const acuteLoadSum = loads7d.length > 0
     ? loads7d.reduce((a, b) => a + b, 0)
-    : (savedWorkload.acute_load_7day_avg || 0);
+    : Number(savedWorkload.acute_load_7day_avg || 0);
   const chronicLoadAvg = loads28d.length > 0
     ? round(loads28d.reduce((a, b) => a + b, 0) / loads28d.length)
-    : (savedWorkload.chronic_load_28day_avg || 380);
-  const acwrRatio = chronicLoadAvg > 0 ? round(acuteLoadSum / chronicLoadAvg) : 1.0;
+    : Number(savedWorkload.chronic_load_28day_avg || 0);
+  const acwrRatio = chronicLoadAvg > 0 ? round(acuteLoadSum / chronicLoadAvg) : 0;
 
   const mean7d = loads7d.length > 0 ? mean(loads7d) : 0;
   const std7d = loads7d.length > 0 ? stddev(loads7d) : 0;
-  const routineScore = std7d > 0 ? round(mean7d / std7d) : (savedWorkload.routine_score || 1.25);
+  const routineScore = std7d > 0 ? round(mean7d / std7d) : (loads7d.length > 0 ? 1.0 : Number(savedWorkload.routine_score || 0));
   const bodyStress = Math.round(acuteLoadSum * routineScore);
 
   const weeklyLogs = sortedEntries.length > 0

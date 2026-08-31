@@ -20,11 +20,8 @@ export function validateCreateTeam(data: Record<string, unknown>): ValidationErr
     errors.push({ field: 'sport_type', message: 'Sport category (sport_type) is required.' });
   }
 
-  // division (Required, e.g., "Division 1", "Varsity")
-  const division = typeof data.division === 'string' ? data.division.trim() : '';
-  if (!division) {
-    errors.push({ field: 'division', message: 'Division (e.g. "Division 1", "Varsity") is required.' });
-  }
+  // division (Optional, defaults to "Varsity Division" if omitted)
+  // No error if empty or omitted
 
   return errors;
 }

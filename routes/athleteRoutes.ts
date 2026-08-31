@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { authenticate } from '../middlewares/authMiddleware';
+import { authenticate, optionalAuth } from '../middlewares/authMiddleware';
 import {
   getAthleteHome,
   getAthlete,
@@ -26,9 +26,9 @@ const upload = multer({
 router.post('/register-athlete', upload.single('eligible_documents'), registerAthlete);
 router.post('/register', upload.single('eligible_documents'), registerAthlete);
 router.post('/', upload.single('eligible_documents'), registerAthlete);
-router.get('/search', authenticate, searchAthletesHandler);
-router.get('/list', authenticate, searchAthletesHandler);
-router.get('/', authenticate, searchAthletesHandler);
+router.get('/search', optionalAuth, searchAthletesHandler);
+router.get('/list', optionalAuth, searchAthletesHandler);
+router.get('/', optionalAuth, searchAthletesHandler);
 
 // Clean Token-Based Routes (No Athlete ID required in URL)
 router.get('/home', authenticate, getAthleteHome);

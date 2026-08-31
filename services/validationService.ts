@@ -59,8 +59,8 @@ export async function createOfficialMatchService(
   const validationId = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const teamId = data.team_id || data.home_team_id || 'team_default';
-  const opponentName = data.opponent_team_name || data.away_team_id || 'Away Team';
+  const teamId = data.team_id || data.home_team_id || '';
+  const opponentName = data.opponent_team_name || data.away_team_id || '';
 
   // 3. Construct Match Log
   const matchLog: MatchLog = {

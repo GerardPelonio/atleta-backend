@@ -125,15 +125,15 @@ export async function createTeam(coachId: string, payload: CreateTeamDto): Promi
     team_id: teamId,
     team_name: payload.team_name.trim(),
     sport_type: payload.sport_type.trim(),
-    division: payload.division.trim(),
-    region: payload.region ? payload.region.trim() : 'NCR',
+    division: (payload.division && payload.division.trim().length > 0) ? payload.division.trim() : 'Varsity Division',
     established_year: payload.established_year || new Date().getFullYear(),
     season_record: { wins: 0, losses: 0 },
     coach_id: coachId,
-    roster_list: [],
+    roster_list: Array.isArray(payload.roster_list) ? payload.roster_list : [],
     timestamp: now,
   };
 
+  if (payload.region) newTeam.region = payload.region.trim();
   if (payload.description) newTeam.description = payload.description.trim();
   if (payload.mission_statement) newTeam.mission_statement = payload.mission_statement.trim();
 
@@ -181,8 +181,8 @@ export async function getCoachTeams(coachId: string): Promise<TeamSummary[]> {
       team_id: data.team_id,
       team_name: data.team_name,
       sport_type: data.sport_type,
-      division: data.division || 'Varsity',
-      region: data.region || 'NCR',
+      division: data.division || 'Varsity Division',
+      region: data.region || undefined,
       season_record: data.season_record || { wins: 0, losses: 0 },
       athlete_count: data.roster_list ? data.roster_list.length : 0,
       coach_name: coach.full_name,
@@ -231,8 +231,8 @@ export async function browseTeamDirectory(
       team_id: data.team_id,
       team_name: data.team_name,
       sport_type: data.sport_type,
-      division: data.division || 'Varsity',
-      region: data.region || 'NCR',
+      division: data.division || 'Varsity Division',
+      region: data.region || undefined,
       season_record: data.season_record || { wins: 0, losses: 0 },
       athlete_count: data.roster_list ? data.roster_list.length : 0,
       coach_name: coach.full_name,
@@ -263,8 +263,8 @@ export async function getTeamDetails(teamId: string): Promise<TeamDetailResponse
     team_id: data.team_id,
     team_name: data.team_name,
     sport_type: data.sport_type,
-    division: data.division || 'Varsity',
-    region: data.region || 'NCR',
+    division: data.division || 'Varsity Division',
+    region: data.region || undefined,
     season_record: data.season_record || { wins: 0, losses: 0 },
     description: data.description || null,
     mission_statement: data.mission_statement || null,
@@ -431,16 +431,60 @@ export async function updateTeam(
   return await getTeamDetails(teamId);
 }
 
+export function matchesSportCategory(athleteSport?: string, athletePosition?: string, targetSport?: string): boolean {
+  if (!targetSport || targetSport.toUpperCase() === 'ALL') return true;
+  const target = targetSport.toUpperCase().trim();
+  const sport = (athleteSport || '').toUpperCase().trim();
+  const pos = (athletePosition || '').toUpperCase().trim();
+
+  if (target.includes('BASKET')) {
+    if (sport.includes('BASKET')) return true;
+    if (['POINT GUARD', 'SHOOTING GUARD', 'SMALL FORWARD', 'POWER FORWARD', 'CENTER', 'GUARD', 'FORWARD'].some(p => pos.includes(p))) return true;
+    return !sport;
+  }
+
+  if (target.includes('SWIM')) {
+    if (sport.includes('SWIM')) return true;
+    if (['FREESTYLE', 'BUTTERFLY', 'BREASTSTROKE', 'BACKSTROKE', 'MEDLEY', 'SWIMMER', '50M', '100M', '200M'].some(p => pos.includes(p))) return true;
+    return false;
+  }
+
+  if (target.includes('TRACK') || target.includes('FIELD')) {
+    if (sport.includes('TRACK') || sport.includes('FIELD')) return true;
+    if (['SPRINT', 'HURDLES', 'RELAY', 'LONG JUMP', 'HIGH JUMP', 'JAVELIN', 'SHOT PUT', 'DISCUS', 'RUNNER', '100M SPRINT'].some(p => pos.includes(p))) return true;
+    return false;
+  }
+
+  return sport === target;
+}
+
 /**
  * Autocomplete search registered athletes by name, ID, position, or email across Users, Athlete_Profiles, and Teams.roster_list collections.
- * GET /api/v1/athletes/search?query=
+ * Optionally filtered by sportType.
+ * GET /api/v1/athletes/search?query=&sport=
  */
-export async function searchAthletes(queryStr?: string) {
+export async function searchAthletes(queryStr?: string, sportType?: string) {
   const resultsMap = new Map<string, RosterAthlete>();
   const queryLower = (queryStr || '').trim().toLowerCase();
 
+  // Fetch collections in parallel to eliminate N+1 roundtrips
+  const [usersSnapshot, profilesSnapshot, teamsSnapshot] = await Promise.all([
+    db.collection('Users').get(),
+    db.collection('Athlete_Profiles').get(),
+    db.collection('Teams').get(),
+  ]);
+
+  const profilesMap = new Map<string, any>();
+  profilesSnapshot.docs.forEach((doc) => {
+    profilesMap.set(doc.id, doc.data());
+  });
+
+  const usersMap = new Map<string, any>();
+  usersSnapshot.docs.forEach((doc) => {
+    usersMap.set(doc.id, doc.data());
+  });
+
   // 1. Search Users collection for all registered user accounts with role === 'Athlete' or 'Player'
-  const usersSnapshot = await db.collection('Users').get();
   for (const userDoc of usersSnapshot.docs) {
     const u = userDoc.data();
     const role = (u.role || '').toString().toLowerCase();
@@ -452,14 +496,13 @@ export async function searchAthletes(queryStr?: string) {
       const fullName = `${firstName} ${lastName}`.trim();
       const athleteId = u.athlete_id || uid;
 
-      const profileDoc = await db.collection('Athlete_Profiles').doc(uid).get();
-      const p = profileDoc.exists ? profileDoc.data()! : {};
+      const p = profilesMap.get(uid) || profilesMap.get(athleteId) || {};
 
       const docs = Array.isArray(p.eligibility_documents)
         ? p.eligibility_documents
         : Array.isArray(u.eligibility_documents)
-          ? u.eligibility_documents
-          : [];
+        ? u.eligibility_documents
+        : [];
 
       const athleteObj: RosterAthlete = {
         athlete_id: athleteId,
@@ -482,24 +525,15 @@ export async function searchAthletes(queryStr?: string) {
   }
 
   // 2. Search Athlete_Profiles collection for any profiles
-  const profilesSnapshot = await db.collection('Athlete_Profiles').get();
   for (const profileDoc of profilesSnapshot.docs) {
     const p = profileDoc.data();
     const athleteId = p.athlete_id || profileDoc.id;
 
     if (!resultsMap.has(athleteId)) {
       const uid = p.user_id || profileDoc.id;
-      let firstName = p.first_name || '';
-      let lastName = p.last_name || '';
-
-      if (!firstName || !lastName) {
-        const userDoc = await db.collection('Users').doc(uid).get();
-        if (userDoc.exists) {
-          const u = userDoc.data()!;
-          firstName = firstName || u.first_name || '';
-          lastName = lastName || u.last_name || '';
-        }
-      }
+      const u = usersMap.get(uid) || {};
+      let firstName = p.first_name || u.first_name || '';
+      let lastName = p.last_name || u.last_name || '';
 
       const docs = Array.isArray(p.eligibility_documents) ? p.eligibility_documents : [];
       const athleteObj: RosterAthlete = {
@@ -509,7 +543,7 @@ export async function searchAthletes(queryStr?: string) {
         last_name: lastName || '',
         position: p.position || 'Unassigned',
         jersey_number: p.jersey_number ?? null,
-        sport_type: p.sport_type || '',
+        sport_type: p.sport_type || u.sport_type || '',
         avatar_url: p.avatar_url || undefined,
         eligibility_documents: docs,
         is_eligibility_verified: docs.length > 0,
@@ -523,7 +557,6 @@ export async function searchAthletes(queryStr?: string) {
   }
 
   // 3. Search Teams collection roster_list array for any athletes
-  const teamsSnapshot = await db.collection('Teams').get();
   for (const teamDoc of teamsSnapshot.docs) {
     const teamData = teamDoc.data() as Team;
     if (Array.isArray(teamData.roster_list)) {
@@ -557,7 +590,12 @@ export async function searchAthletes(queryStr?: string) {
     }
   }
 
-  return Array.from(resultsMap.values());
+  const allAthletes = Array.from(resultsMap.values());
+  if (!sportType || sportType.toUpperCase() === 'ALL') {
+    return allAthletes;
+  }
+
+  return allAthletes.filter((a) => matchesSportCategory(a.sport_type, a.position, sportType));
 }
 
 /**

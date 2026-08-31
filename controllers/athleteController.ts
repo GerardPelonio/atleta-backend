@@ -115,12 +115,14 @@ export async function uploadDocument(req: Request, res: Response): Promise<void>
 
 export async function searchAthletesHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const query = req.query.query as string | undefined;
-    const athletes = await searchAthletes(query);
+    const query = (req.query.query || req.query.search || req.query.q) as string | undefined;
+    const sport = (req.query.sport || req.query.sport_type || req.query.category) as string | undefined;
+    const athletes = await searchAthletes(query, sport);
 
     res.status(200).json({
       total: athletes.length,
       query: query || null,
+      sport: sport || null,
       athletes,
     });
   } catch (error: any) {

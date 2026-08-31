@@ -8,6 +8,7 @@ export type ValidationStatus = 'Pending' | 'Approved' | 'Rejected';
 export interface MatchLog {
   match_id: string;               // Primary Key, Required
   team_id: string;                // Foreign Key -> Teams.team_id, Required
+  home_team_name?: string;        // Optional Home Team Name
   logged_by_coach_id?: string;    // Foreign Key -> Coach.coach_id, Required by manuscript
   sport_type: SportType;          // Required ("Basketball" | "Swimming" | "Track & Field")
   match_type: string;             // Required (e.g. "Unofficial", "Official", "Tournament")
@@ -16,6 +17,7 @@ export interface MatchLog {
   opponent_team_name: string;     // Required
   game_result: GameResult;        // Required ("WIN" | "LOSS")
   roster_athletes?: string[];     // Array of athlete IDs who played in the match
+  player_stats?: any[];           // Detailed array of player stats from both teams
   notes?: string;                 // Text, Optional
   scoresheet_url?: string;        // Optional URL of uploaded scoresheet
   idempotency_key?: string;       // Optional idempotency key string
@@ -78,6 +80,9 @@ export type SportStatsPayload = BasketballStats | IndividualSportStats | Record<
 export interface PerformanceMetric {
   metric_id: string;              // Primary Key, Required
   athlete_id: string;             // Foreign Key -> Athlete.athlete_id, Required
+  player_name?: string;           // Optional Player Name
+  team_name?: string;             // Optional Team Name (Home or Opponent)
+  team?: string;                  // Optional Team Name alias
   match_id: string;               // Foreign Key -> Match_Logs.match_id, Required
   sport_category: string;         // Required
   sport_stats: SportStatsPayload; // Map / JSON Object
@@ -89,17 +94,25 @@ export interface PerformanceMetric {
 
 export interface PlayerStatSubmission {
   athlete_id: string;
+  player_name?: string;
+  team_name?: string;
+  jersey_number?: number;
   stats: Record<string, any>;
 }
 
 export interface MatchSubmissionPayload {
+  [key: string]: any;
   team_id: string;
+  home_team_name?: string;
+  match_name?: string;
   sport_type: SportType;
   match_type: string;
   match_date: string;
   location: string;
   opponent_team_name: string;
   game_result: GameResult;
+  home_score?: number;
+  away_score?: number;
   notes?: string;
   player_stats: PlayerStatSubmission[];
 }
@@ -128,6 +141,7 @@ export interface BoxscorePlayerMetric {
   user_id: string;
   first_name: string;
   last_name: string;
+  team_name?: string;
   position: string;
   jersey_number?: number | null;
   sport_stats: SportStatsPayload;
