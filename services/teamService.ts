@@ -21,18 +21,29 @@ export class ServiceError extends Error {
 
 // ─── Helper: Enrich coach from Coach_Profiles + Users ───────────────────────
 
-async function enrichCoach(coachId: string): Promise<{
+async function enrichCoach(coachId?: string): Promise<{
   coach_id: string;
   full_name: string;
   years_of_experience: number;
   current_institution: string;
   quote: string | null;
 }> {
-  let coachDoc = await db.collection('Coach_Profiles').doc(coachId).get();
+  if (!coachId || typeof coachId !== 'string' || !coachId.trim()) {
+    return {
+      coach_id: '',
+      full_name: 'Head Coach',
+      years_of_experience: 0,
+      current_institution: 'Collegiate Athletics',
+      quote: null,
+    };
+  }
+
+  const rawCoachId = coachId.trim();
+  let coachDoc = await db.collection('Coach_Profiles').doc(rawCoachId).get();
 
   // Fallback to stripping 'coach_' prefix if needed
-  if (!coachDoc.exists && coachId.startsWith('coach_')) {
-    const rawUid = coachId.replace('coach_', '');
+  if (!coachDoc.exists && rawCoachId.startsWith('coach_')) {
+    const rawUid = rawCoachId.replace('coach_', '');
     coachDoc = await db.collection('Coach_Profiles').doc(rawUid).get();
   }
 
@@ -52,10 +63,10 @@ async function enrichCoach(coachId: string): Promise<{
   }
 
   return {
-    coach_id: coachId,
+    coach_id: rawCoachId,
     full_name: `${firstName || 'Coach'} ${lastName || ''}`.trim(),
     years_of_experience: coachData.years_of_experience || 0,
-    current_institution: coachData.current_institution || '',
+    current_institution: coachData.current_institution || 'Collegiate Athletics',
     quote: coachData.quote || null,
   };
 }
@@ -68,11 +79,14 @@ async function enrichRoster(rosterList: (string | TeamRosterMember)[]): Promise<
   const roster: RosterAthlete[] = [];
 
   for (const item of rosterList) {
-    const athleteId = typeof item === 'string' ? item : item.athlete_id;
+    if (!item) continue;
+    const athleteId = typeof item === 'string' ? item : (item.athlete_id || (item as any).user_id);
+    if (!athleteId || typeof athleteId !== 'string' || !athleteId.trim()) continue;
+
     const positionOverride = typeof item === 'object' ? item.position : undefined;
     const jerseyOverride = typeof item === 'object' ? item.jersey_number : undefined;
 
-    const profileDoc = await db.collection('Athlete_Profiles').doc(athleteId).get();
+    const profileDoc = await db.collection('Athlete_Profiles').doc(athleteId.trim()).get();
     const profileData = profileDoc.exists ? profileDoc.data()! : {};
 
     let firstName = profileData.first_name || '';
@@ -80,7 +94,7 @@ async function enrichRoster(rosterList: (string | TeamRosterMember)[]): Promise<
 
     // Fallback to Users collection
     if (!firstName || !lastName) {
-      const userDoc = await db.collection('Users').doc(profileData.user_id || athleteId).get();
+      const userDoc = await db.collection('Users').doc(profileData.user_id || athleteId.trim()).get();
       if (userDoc.exists) {
         const userData = userDoc.data()!;
         firstName = firstName || userData.first_name || 'Athlete';
@@ -96,8 +110,8 @@ async function enrichRoster(rosterList: (string | TeamRosterMember)[]): Promise<
         : Array.isArray(eligDocs) && eligDocs.length > 0;
 
     roster.push({
-      athlete_id: athleteId,
-      user_id: profileData.user_id || athleteId,
+      athlete_id: athleteId.trim(),
+      user_id: profileData.user_id || athleteId.trim(),
       first_name: firstName || 'Athlete',
       last_name: lastName || '',
       position: positionOverride || profileData.position || 'Unassigned',
@@ -195,32 +209,56 @@ export async function getCoachTeams(coachId: string): Promise<TeamSummary[]> {
 }
 
 /**
- * Browse team directory with optional sport and search filters.
+ * Browse team directory with optional sport, search, and exclusion filters.
  */
 export async function browseTeamDirectory(
   sport?: string,
   search?: string,
   coachId?: string,
+  excludeAthleteId?: string,
+  excludeTeamId?: string,
 ): Promise<TeamSummary[]> {
   if (coachId) {
     return getCoachTeams(coachId);
   }
 
-  let query: FirebaseFirestore.Query = db.collection('Teams');
-
-  if (sport && sport.trim().length > 0) {
-    query = query.where('sport_type', '==', sport.trim());
-  }
-
-  const snapshot = await query.get();
+  const snapshot = await db.collection('Teams').get();
   const teams: TeamSummary[] = [];
+
+  const normSportQuery = (sport || '').toLowerCase().replace(/&/g, 'and').replace(/\s+/g, '').trim();
 
   for (const doc of snapshot.docs) {
     const data = doc.data() as Team;
 
+    // Filter by excluded team ID
+    if (excludeTeamId && data.team_id === excludeTeamId) {
+      continue;
+    }
+
+    // Filter by excluded athlete membership (if athlete already plays in this team)
+    if (excludeAthleteId && Array.isArray(data.roster_list)) {
+      const cleanExId = excludeAthleteId.replace(/^ath_/, '');
+      const isMember = data.roster_list.some((item) => {
+        const id = (typeof item === 'string' ? item : (item.athlete_id || (item as any).user_id) || '').replace(/^ath_/, '');
+        return id === cleanExId;
+      });
+      if (isMember) {
+        continue;
+      }
+    }
+
+    // Sport filter with normalization (& vs and, case-insensitive)
+    if (normSportQuery && normSportQuery !== 'all') {
+      const teamSport = (data.sport_type || '').toLowerCase().replace(/&/g, 'and').replace(/\s+/g, '').trim();
+      if (teamSport !== normSportQuery && !teamSport.includes(normSportQuery) && !normSportQuery.includes(teamSport)) {
+        continue;
+      }
+    }
+
+    // Search query filter
     if (search && search.trim().length > 0) {
       const searchLower = search.trim().toLowerCase();
-      if (!data.team_name.toLowerCase().includes(searchLower)) {
+      if (!data.team_name.toLowerCase().includes(searchLower) && !(data.sport_type || '').toLowerCase().includes(searchLower)) {
         continue;
       }
     }
@@ -236,12 +274,153 @@ export async function browseTeamDirectory(
       season_record: data.season_record || { wins: 0, losses: 0 },
       athlete_count: data.roster_list ? data.roster_list.length : 0,
       coach_name: coach.full_name,
-      coach_id: data.coach_id,
+      coach_id: data.coach_id || '',
       established_year: data.established_year,
     });
   }
 
   return teams;
+}
+
+/**
+ * Retrieve all athletes managed by a coach (both those assigned to a team and unassigned).
+ */
+export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
+  const cleanId = coachId.replace(/^coach_/, '');
+  const possibleCoachIds = Array.from(new Set([coachId, `coach_${cleanId}`, cleanId]));
+
+  // Fetch coach profile, teams, accepted proposals, and profiles in parallel
+  const [coachProfileDoc, teamsSnapshot, acceptedOffersSnapshot, athleteProfilesSnapshot, usersSnapshot] = await Promise.all([
+    db.collection('Coach_Profiles').doc(possibleCoachIds[1]).get().catch(() => null),
+    db.collection('Teams').where('coach_id', 'in', possibleCoachIds).get().catch(() => null),
+    db.collection('Scouting_Registry').where('coach_scout_id', 'in', possibleCoachIds).where('offer_status', '==', 'Accepted').get().catch(() => null),
+    db.collection('Athlete_Profiles').get().catch(() => null),
+    db.collection('Users').where('role', '==', 'Athlete').get().catch(() => null),
+  ]);
+
+  const athleteIdSet = new Set<string>();
+  const athleteTeamMap = new Map<string, { team_id: string; team_name: string; sport_type: string; jersey_number?: number; position?: string }>();
+
+  // 1. From Coach Profile athlete_managed array
+  if (coachProfileDoc && coachProfileDoc.exists) {
+    const managed = coachProfileDoc.data()?.athlete_managed || coachProfileDoc.data()?.athletes_managed || [];
+    if (Array.isArray(managed)) {
+      managed.forEach((id: string) => athleteIdSet.add(id));
+    }
+  }
+
+  // 2. From Coach Teams roster_list
+  if (teamsSnapshot && !teamsSnapshot.empty) {
+    for (const doc of teamsSnapshot.docs) {
+      const t = doc.data() as Team;
+      if (Array.isArray(t.roster_list)) {
+        for (const item of t.roster_list) {
+          const aId = typeof item === 'string' ? item : (item.athlete_id || (item as any).user_id);
+          if (aId) {
+            athleteIdSet.add(aId);
+            athleteTeamMap.set(aId, {
+              team_id: t.team_id,
+              team_name: t.team_name,
+              sport_type: t.sport_type,
+              jersey_number: typeof item === 'object' ? item.jersey_number : undefined,
+              position: typeof item === 'object' ? item.position : undefined,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // 3. From Accepted Scouting Proposals / Inquiries
+  if (acceptedOffersSnapshot && !acceptedOffersSnapshot.empty) {
+    for (const doc of acceptedOffersSnapshot.docs) {
+      const inq = doc.data();
+      if (inq.athlete_id) {
+        athleteIdSet.add(inq.athlete_id);
+      }
+    }
+  }
+
+  // 4. From Athlete_Profiles where coach_id is assigned
+  const profilesMap = new Map<string, any>();
+  if (athleteProfilesSnapshot) {
+    for (const doc of athleteProfilesSnapshot.docs) {
+      const data = doc.data();
+      profilesMap.set(doc.id, data);
+      if (data.athlete_id) profilesMap.set(data.athlete_id, data);
+      if (data.user_id) profilesMap.set(data.user_id, data);
+
+      if (data.coach_id && possibleCoachIds.includes(data.coach_id)) {
+        athleteIdSet.add(doc.id);
+      }
+    }
+  }
+
+  const usersMap = new Map<string, any>();
+  if (usersSnapshot) {
+    for (const doc of usersSnapshot.docs) {
+      usersMap.set(doc.id, doc.data());
+    }
+  }
+
+  // Fallback: If no athletes explicitly managed yet, fetch athletes with coach sport type or return empty
+  const managedAthletes: any[] = [];
+
+  for (const aId of athleteIdSet) {
+    const rawUid = aId.replace(/^ath_/, '');
+    const canonicalAthleteId = aId.startsWith('ath_') ? aId : `ath_${aId}`;
+
+    const profileData = profilesMap.get(canonicalAthleteId) || profilesMap.get(rawUid) || profilesMap.get(aId) || {};
+    const userData = usersMap.get(rawUid) || usersMap.get(canonicalAthleteId) || {};
+
+    const teamInfo = athleteTeamMap.get(aId) || athleteTeamMap.get(canonicalAthleteId) || athleteTeamMap.get(rawUid);
+
+    const firstName = userData.first_name || profileData.first_name || 'Athlete';
+    const lastName = userData.last_name || profileData.last_name || '';
+    const fullName = `${firstName} ${lastName}`.trim();
+
+    const phys = profileData.physical_profile || profileData.physical_attributes || {};
+    const heightCm = Number(phys.height_cm || profileData.height_cm || 183);
+    const weightKg = Number(phys.weight_kg || profileData.weight_kg || 78);
+    const wingspanCm = Number(phys.wingspan_cm || profileData.wingspan_cm || 188);
+    const verticalCm = Number(phys.vertical_cm || profileData.vertical_cm || 76);
+
+    const docs = Array.isArray(profileData.eligibility_documents)
+      ? profileData.eligibility_documents
+      : profileData.eligibility_documents && typeof profileData.eligibility_documents === 'object'
+      ? Object.values(profileData.eligibility_documents)
+      : [];
+
+    managedAthletes.push({
+      athlete_id: canonicalAthleteId,
+      user_id: rawUid,
+      first_name: firstName,
+      last_name: lastName,
+      full_name: fullName,
+      birthdate: profileData.birthdate || userData.birthdate || '2006-01-01',
+      position: teamInfo?.position || profileData.position || userData.position || 'Player',
+      jersey_number: teamInfo?.jersey_number ?? profileData.jersey_number ?? userData.jersey_number ?? null,
+      sport_type: teamInfo?.sport_type || profileData.sport_type || userData.sport_type || 'Basketball',
+      sport_category: (teamInfo?.sport_type || profileData.sport_type || userData.sport_type || 'Basketball').toUpperCase(),
+      team_id: teamInfo?.team_id || null,
+      team_name: teamInfo?.team_name || 'Unassigned / No Team',
+      has_team: Boolean(teamInfo?.team_id),
+      province: profileData.province || userData.province || 'National Capital Region',
+      location: profileData.province || userData.province || 'National Capital Region',
+      avatar_url: profileData.avatar_url || userData.avatar_url || undefined,
+      recruitment_status: profileData.recruitment_status || 'Active Roster',
+      rating_score: profileData.rating_score || 85,
+      is_eligibility_verified: docs.length > 0 || profileData.eligibility_documents?.psa_verified === true,
+      physical_attributes: {
+        height_cm: heightCm,
+        weight_kg: weightKg,
+        wingspan_cm: wingspanCm,
+        vertical_cm: verticalCm,
+      },
+    });
+  }
+
+  return managedAthletes;
 }
 
 /**

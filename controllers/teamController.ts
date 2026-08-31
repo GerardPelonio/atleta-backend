@@ -16,15 +16,23 @@ export async function browseTeams(req: AuthRequest, res: Response): Promise<void
     const sport = req.query.sport as string | undefined;
     const search = req.query.search as string | undefined;
     const coachId = (req.query.coachId || req.query.coach_id) as string | undefined;
+    const excludeAthleteId = (req.query.excludeAthleteId || req.query.exclude_athlete_id || (req.user?.role === 'Athlete' ? req.user.uid : undefined)) as string | undefined;
+    const excludeTeamId = (req.query.excludeTeamId || req.query.exclude_team_id) as string | undefined;
 
     const startTime = Date.now();
-    const teams = await browseTeamDirectory(sport, search, coachId);
+    const teams = await browseTeamDirectory(sport, search, coachId, excludeAthleteId, excludeTeamId);
     const responseTimeMs = Date.now() - startTime;
 
     res.set('X-Response-Time-Ms', String(responseTimeMs));
     res.status(200).json({
       total: teams.length,
-      filters: { sport: sport || null, search: search || null, coachId: coachId || null },
+      filters: {
+        sport: sport || null,
+        search: search || null,
+        coachId: coachId || null,
+        excludeAthleteId: excludeAthleteId || null,
+        excludeTeamId: excludeTeamId || null,
+      },
       teams,
     });
   } catch (error: any) {

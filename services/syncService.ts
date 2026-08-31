@@ -17,6 +17,7 @@ import {
 } from './athleteService';
 import { getPublicCoachProfile, submitRecruitmentInquiry, respondToRecruitmentInquiry } from './coachInquiryService';
 import { getAllSportsService } from './sportService';
+import { getCoachManagedAthletes } from './teamService';
 import { eventBus, EVENTS } from '../utils/eventBus';
 
 export class ServiceError extends Error {
@@ -535,10 +536,14 @@ export async function getCoachOfflineSnapshotService(coachId: string): Promise<C
   const wlSnap = await db.collection('Workload_Analysis').where('logged_by_coach_id', '==', coachId).limit(30).get().catch(() => null);
   const recentWorkload = wlSnap ? wlSnap.docs.map(d => d.data()) : [];
 
+  // Fetch all handled athletes (both on teams and unassigned)
+  const handledAthletes = await getCoachManagedAthletes(coachId).catch(() => []);
+
   const snapshotData = {
     coach_profile: profile,
     teams,
     rosters,
+    handled_athletes: handledAthletes,
     sports_configurations: sports,
     scheduled_matches: scheduledMatches,
     recent_workload_logs: recentWorkload,

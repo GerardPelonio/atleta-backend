@@ -9,6 +9,7 @@ import {
   updateCoachSettingsHandler,
   updateCoachProfileHandler,
   changeCoachPasswordHandler,
+  getCoachManagedAthletesHandler,
 } from '../controllers/coachInquiryController';
 import { getScoutingAthleteProfileController } from '../controllers/scoutingController';
 import { postSrpeLog, getAthleteWorkloadHandler } from '../controllers/workloadController';
@@ -31,6 +32,10 @@ router.post('/login', authRateLimiter, loginUser);
 // Clean Token-Based Routes (No Coach ID required)
 router.get('/me', authenticate, getCoachProfileHandler);
 router.get('/profile', authenticate, getCoachProfileHandler);
+
+// Coach Handled Athletes (both with team and unassigned)
+router.get('/me/athletes', authenticate, getCoachManagedAthletesHandler);
+router.get('/athletes', authenticate, getCoachManagedAthletesHandler);
 
 // Coach Settings
 router.get('/me/settings', authenticate, getCoachSettingsHandler);
@@ -55,6 +60,7 @@ router.get('/offline-snapshot', authenticate, requireCoach, getCoachOfflineSnaps
 router.get('/scouting/athletes/:athleteId', authenticate, requireCoach, getScoutingAthleteProfileController);
 router.post('/athletes/:athleteId/workload', authenticate, requireCoach, postSrpeLog);
 router.get('/athletes/:athleteId/workload', authenticate, requireCoach, getAthleteWorkloadHandler);
+router.get('/:coachId/athletes', authenticate, getCoachManagedAthletesHandler);
 
 // Public / Parameterized Coach lookup
 router.get('/:coachId', getCoachProfileHandler);

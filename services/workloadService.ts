@@ -175,22 +175,6 @@ export async function logSrpeEntry(params: {
       },
       { merge: true }
     ),
-    db.collection('Users').doc(rawUid).set(
-      {
-        workload_analytics: computedWorkloadAnalytics,
-        workload: computedWorkloadAnalytics,
-        updated_at: new Date(),
-      },
-      { merge: true }
-    ),
-    db.collection('Users').doc(canonicalAthleteId).set(
-      {
-        workload_analytics: computedWorkloadAnalytics,
-        workload: computedWorkloadAnalytics,
-        updated_at: new Date(),
-      },
-      { merge: true }
-    ),
   ]);
 
   // Invalidate in-memory caches
@@ -418,36 +402,6 @@ export async function setAthleteWorkloadTarget(
       { merge: true }
     ),
     db.collection('Athlete_Profiles').doc(rawUid).set(
-      {
-        workload_target: cleanTarget,
-        workload_analytics: {
-          target_7day_effort_pts: cleanTarget.target_7day_effort_pts,
-          target_intensity: cleanTarget.target_intensity || 8,
-        },
-        workload: {
-          target_7day_effort_pts: cleanTarget.target_7day_effort_pts,
-          target_intensity: cleanTarget.target_intensity || 8,
-        },
-        updated_at: new Date(),
-      },
-      { merge: true }
-    ),
-    db.collection('Users').doc(rawUid).set(
-      {
-        workload_target: cleanTarget,
-        workload_analytics: {
-          target_7day_effort_pts: cleanTarget.target_7day_effort_pts,
-          target_intensity: cleanTarget.target_intensity || 8,
-        },
-        workload: {
-          target_7day_effort_pts: cleanTarget.target_7day_effort_pts,
-          target_intensity: cleanTarget.target_intensity || 8,
-        },
-        updated_at: new Date(),
-      },
-      { merge: true }
-    ),
-    db.collection('Users').doc(canonicalAthleteId).set(
       {
         workload_target: cleanTarget,
         workload_analytics: {
