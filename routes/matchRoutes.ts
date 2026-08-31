@@ -49,8 +49,10 @@ router.post('/:matchId/scoresheet', authenticate, upload.any(), uploadScoresheet
 router.get('/:matchId/boxscore', optionalAuth, getBoxscore);
 router.get('/:matchId/details', optionalAuth, getMatchDetailsHandler);
 router.get('/:matchId', optionalAuth, getMatchDetailsHandler);
-router.post('/:matchId/audit-request', authenticate, requireCoach, submitAuditRequestController);
-router.get('/:matchId/pdf', authenticate, requireCoach, exportMatchPdfController);
+router.post('/:matchId/audit-request', optionalAuth, submitAuditRequestController);
+router.post('/:matchId/audit', optionalAuth, submitAuditRequestController);
+router.post('/audit-request', optionalAuth, submitAuditRequestController);
+router.get('/:matchId/pdf', optionalAuth, exportMatchPdfController);
 router.delete('/:matchId', authenticate, deleteMatchHandler);
 
 export default router;
