@@ -13,12 +13,30 @@ import { MatchSubmissionPayload } from '../models/matchModel';
 
 export async function getAllMatchesHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    const coachId = req.user?.uid || (typeof req.query.coach_id === 'string' ? req.query.coach_id : undefined);
+    const showAll = req.query.all === 'true';
+
     const snap = await db.collection('Match_Logs').get();
-    const matches = snap.docs.map((doc) => ({
+    let matches = snap.docs.map((doc) => ({
       id: doc.id,
       match_id: doc.id,
       ...doc.data(),
     }));
+
+    if (coachId && !showAll) {
+      // Find teams managed by this coach
+      const teamsSnap = await db.collection('Teams').where('coach_id', '==', coachId).get();
+      const coachTeamIds = new Set(teamsSnap.docs.map((d) => d.id));
+
+      matches = matches.filter((m: any) => {
+        if (m.coach_id === coachId) return true;
+        if (m.created_by === coachId) return true;
+        if (m.requested_by_coach_id === coachId) return true;
+        if (m.team_id && coachTeamIds.has(m.team_id)) return true;
+        return false;
+      });
+    }
+
     res.status(200).json({ matches });
   } catch (error: any) {
     console.error('getAllMatchesHandler error:', error);
