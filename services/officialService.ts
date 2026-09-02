@@ -22,34 +22,38 @@ export async function registerOfficialService(data: RegisterOfficialDto) {
   const full_legal_name = data.full_legal_name.trim();
   const email = data.email.trim();
   const password = data.password;
-  const orgName = (data.organization_name || 'General Tournament Association').trim();
+  const orgName = (data.organization_name || 'Independent Tournament Body').trim();
 
-  // 1. Verify or auto-register organization in Tournament_Registry
-  const allOrgsSnap = await db.collection('Tournament_Registry').get();
-  const existingOrgDoc = allOrgsSnap.docs.find(doc => {
-    const d = doc.data();
-    return (
-      (d.organization_name && d.organization_name.toLowerCase() === orgName.toLowerCase()) ||
-      (d.name && d.name.toLowerCase() === orgName.toLowerCase()) ||
-      (d.tournament_name && d.tournament_name.toLowerCase() === orgName.toLowerCase()) ||
-      (d.acronym && d.acronym.toLowerCase() === orgName.toLowerCase()) ||
-      (doc.id && doc.id.toLowerCase() === orgName.toLowerCase())
-    );
-  });
+  // 1. Seamlessly record or activate tournament/organization in Tournament_Registry (Non-blocking)
+  try {
+    const allOrgsSnap = await db.collection('Tournament_Registry').get();
+    const existingOrgDoc = allOrgsSnap.docs.find(doc => {
+      const d = doc.data();
+      return (
+        (d.organization_name && d.organization_name.toLowerCase() === orgName.toLowerCase()) ||
+        (d.name && d.name.toLowerCase() === orgName.toLowerCase()) ||
+        (d.tournament_name && d.tournament_name.toLowerCase() === orgName.toLowerCase()) ||
+        (d.acronym && d.acronym.toLowerCase() === orgName.toLowerCase()) ||
+        (doc.id && doc.id.toLowerCase() === orgName.toLowerCase())
+      );
+    });
 
-  const orgDocId = existingOrgDoc ? existingOrgDoc.id : `org_${orgName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+    const orgDocId = existingOrgDoc ? existingOrgDoc.id : `org_${orgName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
 
-  if (!existingOrgDoc) {
-    await db.collection('Tournament_Registry').doc(orgDocId).set({
-      org_id: orgDocId,
-      organization_name: orgName,
-      name: orgName,
-      status: 'Active',
-      created_at: new Date().toISOString(),
-      registered_by: email,
-    }, { merge: true });
-  } else if ((existingOrgDoc.data().status || '').toLowerCase() !== 'active') {
-    await db.collection('Tournament_Registry').doc(orgDocId).update({ status: 'Active' });
+    if (!existingOrgDoc) {
+      await db.collection('Tournament_Registry').doc(orgDocId).set({
+        org_id: orgDocId,
+        organization_name: orgName,
+        name: orgName,
+        status: 'Active',
+        created_at: new Date().toISOString(),
+        registered_by: email,
+      }, { merge: true });
+    } else if ((existingOrgDoc.data().status || '').toLowerCase() !== 'active') {
+      await db.collection('Tournament_Registry').doc(orgDocId).update({ status: 'Active' });
+    }
+  } catch (regError) {
+    console.warn('Tournament_Registry auto-provisioning note (non-blocking):', regError);
   }
 
   // 2. Create Firebase Auth user

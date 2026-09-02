@@ -32,10 +32,10 @@ export function validateRegisterOfficial(data: Record<string, unknown>): Validat
     errors.push({ field: 'password', message: 'Password must be at least 6 characters.' });
   }
 
-  // organization_name (Required)
+  // organization_name (Optional, defaults to Independent Tournament Official)
   const orgName = typeof data.organization_name === 'string' ? data.organization_name.trim() : '';
-  if (!orgName) {
-    errors.push({ field: 'organization_name', message: 'Organization name is required.' });
+  if (orgName && orgName.length > 255) {
+    errors.push({ field: 'organization_name', message: 'Organization name must not exceed 255 characters.' });
   }
 
   return errors;
