@@ -98,7 +98,7 @@ export async function registerOfficialService(data: RegisterOfficialDto) {
 
   // 6. Execute atomic batch write
   const batch = db.batch();
-  
+
   batch.set(db.collection('Users').doc(uid), userData);
 
   batch.set(db.collection('Official_Profiles').doc(officialId), profileData);
@@ -149,10 +149,10 @@ export async function loginOfficialService(email: string, password: string) {
     firebaseIdToken = await userCredential.user.getIdToken();
   } catch (err: any) {
     // If client SDK fails due to API key errors, fall back to stored password comparison for local testing
-    const isApiKeyError = err.code === 'auth/api-key-not-valid.-please-pass-a-valid-api-key.' || 
-                          err.code === 'auth/invalid-api-key' ||
-                          err.message?.includes('api-key-not-valid');
-                          
+    const isApiKeyError = err.code === 'auth/api-key-not-valid.-please-pass-a-valid-api-key.' ||
+      err.code === 'auth/invalid-api-key' ||
+      err.message?.includes('api-key-not-valid');
+
     if (isApiKeyError) {
       if (userData.password && userData.password === password) {
         firebaseIdToken = 'mock_firebase_id_token';
