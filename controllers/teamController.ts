@@ -15,7 +15,8 @@ export async function browseTeams(req: AuthRequest, res: Response): Promise<void
   try {
     const sport = req.query.sport as string | undefined;
     const search = req.query.search as string | undefined;
-    const coachId = (req.query.coachId || req.query.coach_id) as string | undefined;
+    const authenticatedCoachId = (req.user?.role === 'Coach' && req.query.all !== 'true') ? req.user.uid : undefined;
+    const coachId = (req.query.coachId || req.query.coach_id || authenticatedCoachId) as string | undefined;
     const excludeAthleteId = (req.query.excludeAthleteId || req.query.exclude_athlete_id || (req.user?.role === 'Athlete' ? req.user.uid : undefined)) as string | undefined;
     const excludeTeamId = (req.query.excludeTeamId || req.query.exclude_team_id) as string | undefined;
 
