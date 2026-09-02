@@ -25,19 +25,23 @@ export async function getAllMatchesHandler(req: AuthRequest, res: Response): Pro
 
     let matches = allMatches;
     if (coachId && !showAll) {
+      const possibleCoachIds = [coachId, `coach_${coachId}`, coachId.replace('coach_', '')];
       // Find teams managed by this coach
-      const teamsSnap = await db.collection('Teams').where('coach_id', '==', coachId).get();
+      const teamsSnap = await db.collection('Teams').where('coach_id', 'in', possibleCoachIds).get();
       const coachTeamIds = new Set(teamsSnap.docs.map((d) => d.id));
 
       const coachMatches = allMatches.filter((m: any) => {
-        if (m.coach_id === coachId) return true;
-        if (m.created_by === coachId) return true;
-        if (m.requested_by_coach_id === coachId) return true;
+        if (possibleCoachIds.includes(m.logged_by_coach_id)) return true;
+        if (possibleCoachIds.includes(m.coach_id)) return true;
+        if (possibleCoachIds.includes(m.created_by)) return true;
+        if (possibleCoachIds.includes(m.requested_by_coach_id)) return true;
         if (m.team_id && coachTeamIds.has(m.team_id)) return true;
+        if (m.home_team_id && coachTeamIds.has(m.home_team_id)) return true;
+        if (m.away_team_id && coachTeamIds.has(m.away_team_id)) return true;
         return false;
       });
 
-      matches = coachMatches.length > 0 ? coachMatches : allMatches;
+      matches = coachMatches;
     }
 
     res.status(200).json({ matches });
