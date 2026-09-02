@@ -108,12 +108,14 @@ async function enrichRoster(rosterList: (string | TeamRosterMember)[]): Promise<
       eligDocs && typeof eligDocs === 'object' && !Array.isArray(eligDocs)
         ? eligDocs.psa_verified === true
         : Array.isArray(eligDocs) && eligDocs.length > 0;
+    const fullName = profileData.full_name || `${firstName || 'Athlete'} ${lastName || ''}`.trim();
 
     roster.push({
       athlete_id: athleteId.trim(),
       user_id: profileData.user_id || athleteId.trim(),
       first_name: firstName || 'Athlete',
       last_name: lastName || '',
+      full_name: fullName,
       position: positionOverride || profileData.position || 'Unassigned',
       jersey_number: jerseyOverride !== undefined ? jerseyOverride : (profileData.jersey_number ?? null),
       sport_type: profileData.sport_type || '',
