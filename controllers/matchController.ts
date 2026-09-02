@@ -17,24 +17,27 @@ export async function getAllMatchesHandler(req: AuthRequest, res: Response): Pro
     const showAll = req.query.all === 'true';
 
     const snap = await db.collection('Match_Logs').get();
-    let matches = snap.docs.map((doc) => ({
+    const allMatches = snap.docs.map((doc) => ({
       id: doc.id,
       match_id: doc.id,
       ...doc.data(),
     }));
 
+    let matches = allMatches;
     if (coachId && !showAll) {
       // Find teams managed by this coach
       const teamsSnap = await db.collection('Teams').where('coach_id', '==', coachId).get();
       const coachTeamIds = new Set(teamsSnap.docs.map((d) => d.id));
 
-      matches = matches.filter((m: any) => {
+      const coachMatches = allMatches.filter((m: any) => {
         if (m.coach_id === coachId) return true;
         if (m.created_by === coachId) return true;
         if (m.requested_by_coach_id === coachId) return true;
         if (m.team_id && coachTeamIds.has(m.team_id)) return true;
         return false;
       });
+
+      matches = coachMatches.length > 0 ? coachMatches : allMatches;
     }
 
     res.status(200).json({ matches });
