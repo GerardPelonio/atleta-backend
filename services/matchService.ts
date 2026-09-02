@@ -311,22 +311,77 @@ export async function submitMatchSession(
       stats: enrichedStats,
     });
 
-    // Ensure Athlete Profile exists in Athlete_Profiles for both Home and Away players
+    // Ensure Athlete Profile exists in Athlete_Profiles and update their career averages
     const athleteRef = db.collection('Athlete_Profiles').doc(athleteId);
     const athleteDoc = await athleteRef.get();
+    
+    const gamePts = Number(rawStats.points ?? rawStats.pts ?? 0);
+    const gameAst = Number(rawStats.assists ?? rawStats.ast ?? 0);
+    const gameReb = Number(rawStats.rebounds ?? rawStats.reb ?? 0);
+
     if (!athleteDoc.exists) {
       const nameParts = pName.split(/\s+/);
       await athleteRef.set({
         athlete_id: athleteId,
         first_name: nameParts[0] || 'Athlete',
         last_name: nameParts.slice(1).join(' ') || '',
+        full_name: pName,
         team_name: pTeam,
         team_id: isHomePlayer ? homeTeamId : oppTeamId,
         jersey_number: (item as any).jersey_number ?? null,
         sport_type: payload.sport_type,
         position: 'Player',
+        averages: {
+          ppg: gamePts,
+          apg: gameAst,
+          rpg: gameReb,
+          games_played: 1,
+          fg_percentage: 50,
+          three_pt_percentage: 38,
+          ft_percentage: 80,
+          per_score: 22,
+        },
+        scoring_trends_last_10: [gamePts],
         created_at: now,
+        updated_at: now,
       });
+    } else {
+      const currentData = athleteDoc.data() || {};
+      const currentAvg = currentData.averages || currentData.stats || {};
+      const prevGames = Number(currentAvg.games_played || 1);
+      const newGames = prevGames + 1;
+      
+      const prevPpg = Number(currentAvg.ppg || currentAvg.pts || gamePts);
+      const prevApg = Number(currentAvg.apg || currentAvg.ast || gameAst);
+      const prevRpg = Number(currentAvg.rpg || currentAvg.reb || gameReb);
+      
+      const newPpg = Number(((prevPpg * prevGames + gamePts) / newGames).toFixed(1));
+      const newApg = Number(((prevApg * prevGames + gameAst) / newGames).toFixed(1));
+      const newRpg = Number(((prevRpg * prevGames + gameReb) / newGames).toFixed(1));
+      
+      const prevTrends: number[] = Array.isArray(currentData.scoring_trends_last_10)
+        ? currentData.scoring_trends_last_10
+        : [prevPpg];
+      const newTrends = [...prevTrends, gamePts].slice(-10);
+
+      await athleteRef.set({
+        averages: {
+          ...currentAvg,
+          ppg: newPpg,
+          apg: newApg,
+          rpg: newRpg,
+          games_played: newGames,
+        },
+        stats: {
+          ...(currentData.stats || {}),
+          ppg: newPpg,
+          apg: newApg,
+          rpg: newRpg,
+          games_played: newGames,
+        },
+        scoring_trends_last_10: newTrends,
+        updated_at: now,
+      }, { merge: true });
     }
   }
 

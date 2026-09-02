@@ -5,6 +5,7 @@ export interface TeamRosterMember {
   user_id?: string;               // Foreign Key -> Users.user_id
   first_name?: string;            // Athlete First Name
   last_name?: string;             // Athlete Last Name
+  full_name?: string;             // Athlete Full Name
   position?: string;              // Optional
   jersey_number?: number;         // Optional
   added_at: string;               // ISO DateTime, Required
@@ -54,6 +55,7 @@ export interface RosterAthlete {
   user_id: string;
   first_name: string;
   last_name: string;
+  full_name?: string;
   position: string;
   jersey_number?: number | null;
   sport_type: string;
