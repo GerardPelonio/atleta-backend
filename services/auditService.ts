@@ -105,20 +105,20 @@ export async function generateMatchPdfBuffer(
   }
 
   // Authorization check: Verify coach manages the team
-  const teamDoc = await db.collection('Teams').doc(teamId).get();
-  if (!teamDoc.exists) {
-    throw new ServiceError(`Team with ID '${teamId}' not found.`, 404);
-  }
+    const teamDoc = await db.collection('Teams').doc(teamId).get();
+    if (!teamDoc.exists) {
+      throw new ServiceError(`Team with ID '${teamId}' not found.`, 404);
+    }
 
-  const teamData = teamDoc.data()!;
-  const isOwner =
+    const teamData = teamDoc.data()!;
+    const isOwner =
     teamData.coach_id === coachId ||
     teamData.coach_id === `coach_${coachId}` ||
     teamData.coach_id.replace('coach_', '') === coachId;
 
-  if (!isOwner) {
-    throw new ServiceError('Unauthorized. You do not manage the team for this match.', 403);
-  }
+    if (!isOwner) {
+      throw new ServiceError('Unauthorized. You do not manage the team for this match.', 403);
+    }
 
   // Certification check (Acceptance Criteria: Requesting an uncertified PDF returns 404)
   if (!matchData.is_certified) {
