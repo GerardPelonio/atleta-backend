@@ -448,14 +448,14 @@ export async function getFullScoutingAthleteProfile(athleteId: string): Promise<
 
   // Physical profile & computed metrics
   const phys = profileData.physical_profile || {};
-  const heightCm = Number(phys.height_cm || profileData.height_cm || 188);
-  const weightKg = Number(phys.weight_kg || profileData.weight_kg || 85);
-  const wingspanCm = Number(phys.wingspan_cm || profileData.wingspan_cm || 195);
-  const verticalCm = Number(phys.vertical_cm || profileData.vertical_cm || 85);
+  const heightCm = Number(phys.height_cm ?? profileData.height_cm ?? 0);
+  const weightKg = Number(phys.weight_kg ?? profileData.weight_kg ?? 0);
+  const wingspanCm = Number(phys.wingspan_cm ?? profileData.wingspan_cm ?? 0);
+  const verticalCm = Number(phys.vertical_cm ?? profileData.vertical_cm ?? 0);
 
-  const heightM = heightCm > 0 ? heightCm / 100 : 1.88;
-  const bmi = Math.round((weightKg / (heightM * heightM)) * 10) / 10;
-  const apeIndex = heightCm > 0 ? Math.round((wingspanCm / heightCm) * 100) / 100 : 1.04;
+  const heightM = heightCm > 0 ? heightCm / 100 : 0;
+  const bmi = heightM > 0 && weightKg > 0 ? Math.round((weightKg / (heightM * heightM)) * 10) / 10 : 0;
+  const apeIndex = heightCm > 0 && wingspanCm > 0 ? Math.round((wingspanCm / heightCm) * 100) / 100 : 0;
 
   // Efficiency & Performance metrics
   const metricsDocs = metricsSnapshot.docs.map((d) => d.data());

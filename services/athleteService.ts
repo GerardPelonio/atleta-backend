@@ -135,21 +135,51 @@ export async function updateAthleteProfile(
   athleteId: string,
   updateData: Partial<Record<string, unknown>>,
 ) {
-  const profileRef = db.collection('Athlete_Profiles').doc(athleteId);
-  const doc = await profileRef.get();
+  const rawUid = athleteId.replace(/^ath_/, '');
+  const canonicalAthleteId = athleteId.startsWith('ath_') ? athleteId : `ath_${athleteId}`;
+
+  const profileRef = db.collection('Athlete_Profiles').doc(canonicalAthleteId);
+  let profileDoc = await profileRef.get();
+  if (!profileDoc.exists) {
+    const rawDoc = await db.collection('Athlete_Profiles').doc(rawUid).get();
+    if (rawDoc.exists) {
+      profileDoc = rawDoc;
+    }
+  }
 
   const payload: Record<string, any> = {
     ...updateData,
+    athlete_id: canonicalAthleteId,
+    user_id: rawUid,
     updated_at: new Date(),
   };
 
+  // Extract user-level fields for synchronizing to Users collection
+  const userPayload: Record<string, any> = {
+    updated_at: new Date(),
+  };
+
+  if (updateData.first_name) userPayload.first_name = String(updateData.first_name).trim();
+  if (updateData.last_name) userPayload.last_name = String(updateData.last_name).trim();
+  if (updateData.first_name || updateData.last_name) {
+    const fn = String(updateData.first_name || '').trim();
+    const ln = String(updateData.last_name || '').trim();
+    userPayload.full_name = `${fn} ${ln}`.trim();
+  }
+  if (updateData.birthdate) userPayload.birthdate = String(updateData.birthdate).trim();
+  if (updateData.gender) userPayload.gender = String(updateData.gender).trim();
+  if (updateData.province) userPayload.province = String(updateData.province).trim();
+  if (updateData.sport_type) userPayload.sport_type = String(updateData.sport_type).trim();
+  if (updateData.position) userPayload.position = String(updateData.position).trim();
+  if (updateData.avatar_url) userPayload.avatar_url = String(updateData.avatar_url).trim();
+
   // Auto-package physical attributes and recompute sports science metrics (BMI & Ape Index)
   if (payload.height_cm !== undefined || payload.weight_kg !== undefined || payload.wingspan_cm !== undefined || payload.vertical_cm !== undefined) {
-    const existing = doc.exists ? (doc.data()?.physical_profile || {}) : {};
-    const height = payload.height_cm !== undefined ? Number(payload.height_cm) : (existing.height_cm || 188);
-    const weight = payload.weight_kg !== undefined ? Number(payload.weight_kg) : (existing.weight_kg || 85);
-    const wingspan = payload.wingspan_cm !== undefined ? Number(payload.wingspan_cm) : (existing.wingspan_cm || 195);
-    const vertical = payload.vertical_cm !== undefined ? Number(payload.vertical_cm) : (existing.vertical_cm || 85);
+    const existing = profileDoc.exists ? (profileDoc.data()?.physical_profile || {}) : {};
+    const height = payload.height_cm !== undefined ? Number(payload.height_cm) : (existing.height_cm ?? 0);
+    const weight = payload.weight_kg !== undefined ? Number(payload.weight_kg) : (existing.weight_kg ?? 0);
+    const wingspan = payload.wingspan_cm !== undefined ? Number(payload.wingspan_cm) : (existing.wingspan_cm ?? 0);
+    const vertical = payload.vertical_cm !== undefined ? Number(payload.vertical_cm) : (existing.vertical_cm ?? 0);
 
     payload.physical_profile = {
       height_cm: height,
@@ -158,13 +188,16 @@ export async function updateAthleteProfile(
       vertical_cm: vertical,
     };
 
-    const bmi = height > 0 ? parseFloat((weight / Math.pow(height / 100, 2)).toFixed(1)) : 22.5;
-    const apeIndex = height > 0 ? parseFloat((wingspan / height).toFixed(2)) : 1.02;
+    const bmi = calculateBMI(weight, height);
+    const apeIndex = calculateApeIndex(wingspan, height);
 
     payload.computed_metrics = {
       bmi,
       ape_index: apeIndex,
     };
+
+    userPayload.physical_profile = payload.physical_profile;
+    userPayload.computed_metrics = payload.computed_metrics;
 
     delete payload.height_cm;
     delete payload.weight_kg;
@@ -177,13 +210,33 @@ export async function updateAthleteProfile(
   delete payload.last_name;
   delete payload.email;
 
-  if (doc.exists) {
+  if (profileDoc.exists && profileDoc.id === canonicalAthleteId) {
     await profileRef.update(payload);
   } else {
     await profileRef.set(payload, { merge: true });
   }
 
-  return getAthleteProfile(athleteId);
+  // Delete any legacy orphan document under rawUid in Athlete_Profiles
+  if (rawUid !== canonicalAthleteId) {
+    await db.collection('Athlete_Profiles').doc(rawUid).delete().catch(() => null);
+  }
+
+  // Synchronize to canonical Users collection document
+  if (Object.keys(userPayload).length > 1) {
+    const userRef = db.collection('Users').doc(rawUid);
+    const userDoc = await userRef.get();
+    if (userDoc.exists) {
+      await userRef.update(userPayload);
+    } else {
+      await userRef.set(userPayload, { merge: true });
+    }
+  }
+
+  // Invalidate home summary cache
+  invalidateAthleteHomeCache(rawUid);
+  invalidateAthleteHomeCache(canonicalAthleteId);
+
+  return getAthleteProfile(canonicalAthleteId);
 }
 
 /**
@@ -194,6 +247,9 @@ export async function uploadAthleteDocument(
   docType: 'psa_birth_certificate' | 'proof_of_residency',
   file?: Express.Multer.File,
 ) {
+  const rawUid = athleteId.replace(/^ath_/, '');
+  const canonicalAthleteId = athleteId.startsWith('ath_') ? athleteId : `ath_${athleteId}`;
+
   const documentMeta: AthleteDocument = {
     name: file?.originalname || `${docType}.pdf`,
     mimeType: file?.mimetype || 'application/pdf',
@@ -202,10 +258,12 @@ export async function uploadAthleteDocument(
     uploaded_at: new Date().toISOString().split('T')[0],
   };
 
-  const profileRef = db.collection('Athlete_Profiles').doc(athleteId);
+  const profileRef = db.collection('Athlete_Profiles').doc(canonicalAthleteId);
 
   await profileRef.set(
     {
+      athlete_id: canonicalAthleteId,
+      user_id: rawUid,
       documents: {
         [docType]: documentMeta,
       },
@@ -214,7 +272,31 @@ export async function uploadAthleteDocument(
     { merge: true },
   );
 
-  return getAthleteProfile(athleteId);
+  // Delete any legacy orphan document under rawUid in Athlete_Profiles
+  if (rawUid !== canonicalAthleteId) {
+    await db.collection('Athlete_Profiles').doc(rawUid).delete().catch(() => null);
+  }
+
+  // Sync to Users collection
+  const userRef = db.collection('Users').doc(rawUid);
+  const userDoc = await userRef.get();
+  if (userDoc.exists) {
+    const existingElig = userDoc.data()?.eligibility_documents || {};
+    const existingUrls = Array.isArray(existingElig.document_urls) ? existingElig.document_urls : [];
+    if (file && !existingUrls.includes(file.originalname)) {
+      existingUrls.push(file.originalname);
+    }
+    await userRef.update({
+      [`eligibility_documents.${docType}`]: documentMeta,
+      'eligibility_documents.document_urls': existingUrls,
+      updated_at: new Date(),
+    }).catch(() => null);
+  }
+
+  invalidateAthleteHomeCache(rawUid);
+  invalidateAthleteHomeCache(canonicalAthleteId);
+
+  return getAthleteProfile(canonicalAthleteId);
 }
 
 // In-memory cache for athlete home summary (300 seconds TTL)

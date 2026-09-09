@@ -9,12 +9,14 @@ import {
   respondToRecruitmentInquiry,
   ServiceError,
 } from '../services/coachInquiryService';
+import { dispatchRecruitmentProposal } from '../services/scoutingService';
 import {
   getCoachSettings,
   updateCoachSettings,
   updateCoachProfile,
   changeCoachPassword,
 } from '../services/coachSettingsService';
+import { getCoachManagedAthletes } from '../services/teamService';
 
 export async function getCoachProfileHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
@@ -41,7 +43,19 @@ export async function getCoachProfileHandler(req: AuthRequest, res: Response): P
 
 export async function submitInquiryHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const athleteId = req.user!.uid;
+    const senderId = req.user!.uid;
+    const userRole = (req.user as any)?.role;
+
+    if (req.body.athlete_id && (userRole === 'Coach' || !req.body.coach_id)) {
+      const { athlete_id, message, offer_details } = req.body;
+      const proposal = await dispatchRecruitmentProposal(senderId, athlete_id, message || offer_details);
+      res.status(201).json({
+        message: 'Recruitment proposal submitted successfully.',
+        inquiry: proposal,
+        proposal,
+      });
+      return;
+    }
 
     const errors = validateInquirySubmission(req.body);
     if (errors.length > 0) {
@@ -53,7 +67,7 @@ export async function submitInquiryHandler(req: AuthRequest, res: Response): Pro
     }
 
     const { coach_id, message } = req.body;
-    const inquiry = await submitRecruitmentInquiry(athleteId, coach_id, message);
+    const inquiry = await submitRecruitmentInquiry(senderId, coach_id, message);
 
     res.status(201).json({
       message: 'Recruitment inquiry submitted successfully.',
@@ -185,6 +199,32 @@ export async function changeCoachPasswordHandler(req: AuthRequest, res: Response
       return;
     }
     console.error('changeCoachPasswordHandler error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function getCoachManagedAthletesHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const rawCoachParam = req.params.coachId;
+    const coachId = (Array.isArray(rawCoachParam) ? rawCoachParam[0] : rawCoachParam) || req.user?.uid;
+
+    if (!coachId) {
+      res.status(400).json({ error: 'Coach ID is required.' });
+      return;
+    }
+
+    const startTime = Date.now();
+    const athletes = await getCoachManagedAthletes(coachId);
+    const responseTimeMs = Date.now() - startTime;
+
+    res.set('X-Response-Time-Ms', String(responseTimeMs));
+    res.status(200).json({
+      coach_id: coachId,
+      total: athletes.length,
+      athletes,
+    });
+  } catch (error: any) {
+    console.error('getCoachManagedAthletesHandler error:', error);
     res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
   }
 }

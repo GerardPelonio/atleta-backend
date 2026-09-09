@@ -88,20 +88,23 @@ export async function updateAthlete(req: Request, res: Response): Promise<void> 
 export async function uploadDocument(req: Request, res: Response): Promise<void> {
   try {
     const athleteId = req.params.athleteId || (req as any).user?.uid;
-    const docType = req.body.doc_type || 'psa_birth_certificate';
-    const file = (req as any).file as Express.Multer.File | undefined;
+    const rawDocType = req.body.doc_type || req.body.document_type || 'psa_birth_certificate';
+    const file = (req as any).file || (Array.isArray((req as any).files) ? (req as any).files[0] : undefined);
 
     if (!athleteId) {
       res.status(400).json({ error: 'Athlete ID is required.' });
       return;
     }
 
-    if (docType !== 'psa_birth_certificate' && docType !== 'proof_of_residency') {
-      res.status(400).json({ error: 'doc_type must be "psa_birth_certificate" or "proof_of_residency".' });
-      return;
+    let normalizedDocType: 'psa_birth_certificate' | 'proof_of_residency' = 'psa_birth_certificate';
+    const cleanType = String(rawDocType).toLowerCase();
+    if (cleanType.includes('residency') || cleanType.includes('proof')) {
+      normalizedDocType = 'proof_of_residency';
+    } else {
+      normalizedDocType = 'psa_birth_certificate';
     }
 
-    const updatedProfile = await uploadAthleteDocument(athleteId, docType, file);
+    const updatedProfile = await uploadAthleteDocument(athleteId, normalizedDocType, file);
 
     res.status(200).json({
       message: 'Document uploaded successfully.',

@@ -132,8 +132,11 @@ export async function registerUserService(
       proof_of_residency: false,
       document_urls: [],
     };
-    if (file && Array.isArray(docsPayload.document_urls)) {
-      docsPayload.document_urls = [...docsPayload.document_urls, file.originalname];
+    if (file) {
+      const existingUrls = Array.isArray(docsPayload.document_urls) ? docsPayload.document_urls : [];
+      if (!existingUrls.includes(file.originalname)) {
+        docsPayload.document_urls = [...existingUrls, file.originalname];
+      }
     }
     const achievements = Array.isArray(data.achievements) ? data.achievements : [];
 
@@ -169,10 +172,13 @@ export async function registerUserService(
     const yearsExperience = Number(data.years_of_experience || 0);
     const institution = String(data.current_institution || '').trim();
     const quote = data.quote !== undefined && data.quote !== null ? String(data.quote).trim() : null;
-    let profDocs = Array.isArray(data.professional_documents) ? data.professional_documents : [];
-    if (file) {
-      profDocs = [...profDocs, file.originalname];
+    let profDocs: string[] = Array.isArray(data.professional_documents)
+      ? (data.professional_documents as string[]).map((d) => typeof d === 'string' ? d : (d as any)?.name || 'document')
+      : [];
+    if (file && !profDocs.includes(file.originalname)) {
+      profDocs.push(file.originalname);
     }
+    profDocs = Array.from(new Set(profDocs));
     const athletesManaged = Array.isArray(data.athlete_managed) ? data.athlete_managed : [];
 
     // Complete info on Users table
@@ -488,13 +494,39 @@ export async function socialLoginService(
     }
   } else {
     // Facebook or other provider
+    let fbSuccess = false;
     try {
       const decodedToken = await auth.verifyIdToken(idToken);
       uid = decodedToken.uid;
-      email = decodedToken.email!;
+      email = decodedToken.email || '';
       fullName = decodedToken.name || 'Social User';
       avatarUrl = decodedToken.picture || '';
-    } catch (err: any) {
+      fbSuccess = true;
+    } catch (_) {
+      // Not a Firebase ID token
+    }
+
+    if (!fbSuccess) {
+      try {
+        const fbRes = await fetch(
+          `https://graph.facebook.com/me?fields=id,name,first_name,last_name,email,picture.type(large)&access_token=${encodeURIComponent(idToken)}`
+        );
+        if (fbRes.ok) {
+          const fbUser = (await fbRes.json()) as any;
+          if (fbUser && fbUser.id) {
+            uid = `facebook_${fbUser.id}`;
+            email = fbUser.email || `${fbUser.id}@facebook.com`;
+            fullName = fbUser.name || `${fbUser.first_name || 'Facebook'} ${fbUser.last_name || 'User'}`.trim();
+            avatarUrl = fbUser.picture?.data?.url || '';
+            fbSuccess = true;
+          }
+        }
+      } catch (_) {
+        // Facebook Graph API lookup failed
+      }
+    }
+
+    if (!fbSuccess) {
       throw { code: 'INVALID_TOKEN', message: `Invalid or expired ${provider} authentication token.` };
     }
   }

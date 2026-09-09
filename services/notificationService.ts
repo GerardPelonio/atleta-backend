@@ -56,9 +56,14 @@ export async function createNotification(params: {
  * Fetch all notifications for a specific recipient user (athlete).
  */
 export async function getAthleteNotifications(recipientUserId: string): Promise<Notification[]> {
+  const rawUid = recipientUserId.replace(/^ath_/, '').replace(/^coach_/, '');
+  const possibleRecipientIds = Array.from(
+    new Set([recipientUserId, rawUid, `ath_${rawUid}`, `coach_${rawUid}`]),
+  );
+
   const snapshot = await db
     .collection('Notifications')
-    .where('recipient_id', '==', recipientUserId)
+    .where('recipient_id', 'in', possibleRecipientIds)
     .get();
 
   if (snapshot.empty) {
@@ -83,7 +88,9 @@ export async function markNotificationAsRead(notificationId: string, recipientUs
 
   if (doc.exists) {
     const data = doc.data() as Notification;
-    if (data.recipient_id === recipientUserId) {
+    const rawUid = recipientUserId.replace(/^ath_/, '').replace(/^coach_/, '');
+    const possibleRecipientIds = [recipientUserId, rawUid, `ath_${rawUid}`, `coach_${rawUid}`];
+    if (possibleRecipientIds.includes(data.recipient_id)) {
       await notifRef.update({ is_read: true });
       return true;
     }
@@ -95,9 +102,14 @@ export async function markNotificationAsRead(notificationId: string, recipientUs
  * Mark all notifications as read for a specific recipient user (athlete).
  */
 export async function markAllNotificationsAsRead(recipientUserId: string): Promise<number> {
+  const rawUid = recipientUserId.replace(/^ath_/, '').replace(/^coach_/, '');
+  const possibleRecipientIds = Array.from(
+    new Set([recipientUserId, rawUid, `ath_${rawUid}`, `coach_${rawUid}`]),
+  );
+
   const snapshot = await db
     .collection('Notifications')
-    .where('recipient_id', '==', recipientUserId)
+    .where('recipient_id', 'in', possibleRecipientIds)
     .where('is_read', '==', false)
     .get();
 
