@@ -290,9 +290,30 @@ export async function dispatchRecruitmentProposal(
   athleteId: string,
   offerDetails?: string,
 ): Promise<any> {
-  // 1. Verify athlete exists
-  const athleteDoc = await db.collection('Athlete_Profiles').doc(athleteId).get();
-  if (!athleteDoc.exists) {
+  // 1. Verify athlete exists across possible key variants
+  const rawAthleteUid = athleteId.replace(/^ath_/, '');
+  const canonicalAthleteId = athleteId.startsWith('ath_') ? athleteId : `ath_${athleteId}`;
+  const possibleAthleteIds = Array.from(new Set([athleteId, rawAthleteUid, canonicalAthleteId].filter(Boolean)));
+
+  let athleteDoc: any = null;
+  for (const id of possibleAthleteIds) {
+    const doc = await db.collection('Athlete_Profiles').doc(id).get();
+    if (doc.exists) {
+      athleteDoc = doc;
+      break;
+    }
+  }
+
+  let userDoc: any = null;
+  for (const id of possibleAthleteIds) {
+    const doc = await db.collection('Users').doc(id).get();
+    if (doc.exists) {
+      userDoc = doc;
+      break;
+    }
+  }
+
+  if (!athleteDoc && !userDoc) {
     throw new ServiceError(`Athlete with ID '${athleteId}' was not found.`, 404);
   }
 
@@ -300,7 +321,7 @@ export async function dispatchRecruitmentProposal(
   const activeProposalsSnapshot = await db
     .collection('Scouting_Registry')
     .where('coach_scout_id', '==', coachId)
-    .where('athlete_id', '==', athleteId)
+    .where('athlete_id', 'in', possibleAthleteIds)
     .where('initiated_by', '==', coachId)
     .where('offer_status', '==', 'Sent')
     .get();
@@ -326,19 +347,14 @@ export async function dispatchRecruitmentProposal(
 
   await db.collection('Scouting_Registry').doc(scoutId).set(proposalData);
 
-  // Get athlete user details for response enrichment
-  let userDoc = await db.collection('Users').doc(athleteId).get();
-  if (!userDoc.exists) {
-    const strippedId = athleteId.replace(/^ath_/, '');
-    userDoc = await db.collection('Users').doc(strippedId).get();
-  }
-  const userData = userDoc.exists ? userDoc.data() : {};
-  const athleteProfileData = athleteDoc.data() || {};
+  const userData = userDoc?.exists ? userDoc.data() : {};
+  const athleteProfileData = athleteDoc?.exists ? athleteDoc.data() : {};
 
   // Notify the athlete directly — write to Firestore immediately
-  const athleteUserId = athleteId.replace(/^ath_/, '');
+  const athleteUserId = rawAthleteUid || athleteId;
   await createNotification({
     recipient_id: athleteUserId,
+    sender_id: coachId,
     type: 'RECRUITMENT_INQUIRY',
     title: 'New Recruitment Offer Received',
     message: `A coach has sent you a formal recruitment proposal. Check your inquiry tracker for details.`,

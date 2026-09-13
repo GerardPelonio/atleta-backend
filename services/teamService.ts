@@ -45,48 +45,69 @@ async function enrichCoach(coachId?: string): Promise<{
   if (!coachId || typeof coachId !== 'string' || !coachId.trim()) {
     return {
       coach_id: '',
-      full_name: 'Head Coach',
+      full_name: 'No Coach Assigned',
       years_of_experience: 0,
-      current_institution: 'Collegiate Athletics',
+      current_institution: 'Athletic Program',
       quote: null,
     };
   }
 
   const rawCoachId = coachId.trim();
+  const rawUid = rawCoachId.replace(/^coach_/, '');
+  const canonicalCoachId = rawCoachId.startsWith('coach_') ? rawCoachId : `coach_${rawCoachId}`;
+
   const cached = coachSummaryCache.get(rawCoachId);
   if (cached && Date.now() - cached.cachedAt < TEAM_CACHE_TTL_MS * 5) {
     return cached.data;
   }
 
-  let coachDoc = await db.collection('Coach_Profiles').doc(rawCoachId).get();
-
-  // Fallback to stripping 'coach_' prefix if needed
-  if (!coachDoc.exists && rawCoachId.startsWith('coach_')) {
-    const rawUid = rawCoachId.replace('coach_', '');
+  let coachDoc = await db.collection('Coach_Profiles').doc(canonicalCoachId).get();
+  if (!coachDoc.exists) {
     coachDoc = await db.collection('Coach_Profiles').doc(rawUid).get();
+  }
+  if (!coachDoc.exists) {
+    coachDoc = await db.collection('Coach_Profiles').doc(rawCoachId).get();
   }
 
   const coachData = coachDoc.exists ? coachDoc.data()! : {};
 
   let firstName = coachData.first_name || '';
   let lastName = coachData.last_name || '';
+  let fullName = coachData.full_name || '';
+  let institution = coachData.current_institution || coachData.institution || '';
+  let quote = coachData.quote || null;
+  let experience = Number(coachData.years_of_experience || coachData.years_experience || 0);
 
-  // If names not on coach profile, fetch from Users collection via user_id
-  if ((!firstName || !lastName) && coachData.user_id) {
-    const userDoc = await db.collection('Users').doc(coachData.user_id).get();
+  // Look up Users collection across all possible ID variants
+  const lookupIds = [coachData.user_id, rawUid, canonicalCoachId, rawCoachId].filter(Boolean) as string[];
+  for (const uid of lookupIds) {
+    if (fullName && institution && experience) break;
+    const userDoc = await db.collection('Users').doc(uid).get();
     if (userDoc.exists) {
       const userData = userDoc.data()!;
       firstName = firstName || userData.first_name || '';
       lastName = lastName || userData.last_name || '';
+      fullName = fullName || userData.full_name || '';
+      institution = institution || userData.current_institution || userData.institution || '';
+      quote = quote || userData.quote || null;
+      experience = experience || Number(userData.years_of_experience || userData.years_experience || 0);
+    }
+  }
+
+  if (!fullName) {
+    if (firstName || lastName) {
+      fullName = `${firstName} ${lastName}`.trim();
+    } else {
+      fullName = 'No Coach Assigned';
     }
   }
 
   const result = {
     coach_id: rawCoachId,
-    full_name: `${firstName || 'Coach'} ${lastName || ''}`.trim(),
-    years_of_experience: coachData.years_of_experience || 0,
-    current_institution: coachData.current_institution || 'Collegiate Athletics',
-    quote: coachData.quote || null,
+    full_name: fullName,
+    years_of_experience: experience,
+    current_institution: institution || 'Athletic Program',
+    quote: quote,
   };
 
   coachSummaryCache.set(rawCoachId, { data: result, cachedAt: Date.now() });

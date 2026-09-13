@@ -76,82 +76,64 @@ export async function getPublicCoachProfile(coachId: string): Promise<CoachPubli
         ...userDoc.data(),
       };
     } else {
-      // Known fallback mock coach profiles for demo
-      const mockCoaches: Record<string, CoachPublicProfile> = {
-        'coach-001': {
-          coach_id: 'coach-001',
-          user_id: 'user-coach-001',
-          first_name: 'Nash',
-          last_name: 'Racela',
-          full_name: 'Coach Nash Racela',
-          email: 'nash.racela@adamson.edu.ph',
-          contact_number: '09171112233',
-          years_of_experience: 15,
-          current_institution: 'Adamson University',
-          quote: 'Hard work beats talent when talent doesn\'t work hard.',
-          specialties: ['Offensive Systems', 'Player Development', 'Tactical Pressing'],
-          success_rate: 78.5,
-          professional_documents: ['FIBA_Level2_License.pdf', 'UAAP_Coach_Certification.pdf'],
-          sport_type: 'Basketball',
-          avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400',
-        },
-        'coach-002': {
-          coach_id: 'coach-002',
-          user_id: 'user-coach-002',
-          first_name: 'Tab',
-          last_name: 'Baldwin',
-          full_name: 'Coach Tab Baldwin',
-          email: 'tab.baldwin@ateneo.edu.ph',
-          contact_number: '09172223344',
-          years_of_experience: 25,
-          current_institution: 'Ateneo de Manila University',
-          quote: 'Details make champions.',
-          specialties: ['Defensive Systems', 'International Scouting'],
-          success_rate: 85.0,
-          professional_documents: ['FIBA_Master_Coach.pdf'],
-          sport_type: 'Basketball',
-          avatar_url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400',
-        },
-      };
-
-      if (mockCoaches[coachId]) {
-        coachProfileCache.set(coachId, { data: mockCoaches[coachId], expiry: Date.now() + CACHE_TTL_MS });
-        return mockCoaches[coachId];
-      }
       coachProfileCache.set(coachId, { data: null, expiry: Date.now() + 60 * 1000 });
       return null; // Signals 404 Not Found
     }
   }
 
-  // Enrich names from Users collection if needed
+  // Enrich names and attributes from Users collection
   let firstName = coachData.first_name || '';
   let lastName = coachData.last_name || '';
+  let fullName = coachData.full_name || '';
   let email = coachData.email || '';
   let contactNumber = coachData.contact_number || null;
+  let institution = coachData.current_institution || coachData.institution || '';
+  let regionalAffiliation = coachData.regional_affiliation || null;
+  let nationalLeague = coachData.national_sports_league || null;
+  let quote = coachData.quote || null;
+  let experience = Number(coachData.years_of_experience || coachData.years_experience || 0);
 
-  if ((!firstName || !lastName || !email) && coachData.user_id) {
-    const userDoc = await db.collection('Users').doc(coachData.user_id).get();
+  const lookupIds = [coachData.user_id, rawUid, canonicalCoachId, coachId].filter(Boolean) as string[];
+  for (const uid of lookupIds) {
+    if (fullName && firstName && email && institution && regionalAffiliation && nationalLeague) break;
+    const userDoc = await db.collection('Users').doc(uid).get();
     if (userDoc.exists) {
       const u = userDoc.data()!;
-      firstName = firstName || u.first_name || 'Coach';
+      firstName = firstName || u.first_name || '';
       lastName = lastName || u.last_name || '';
+      fullName = fullName || u.full_name || '';
       email = email || u.email || '';
       contactNumber = contactNumber || u.contact_number || null;
+      institution = institution || u.current_institution || u.institution || '';
+      regionalAffiliation = regionalAffiliation || u.regional_affiliation || null;
+      nationalLeague = nationalLeague || u.national_sports_league || null;
+      quote = quote || u.quote || null;
+      experience = experience || Number(u.years_of_experience || u.years_experience || 0);
+    }
+  }
+
+  if (!fullName) {
+    if (firstName || lastName) {
+      fullName = `${firstName} ${lastName}`.trim();
+    } else {
+      fullName = 'Coach';
     }
   }
 
   const profile: CoachPublicProfile = {
     coach_id: coachData.coach_id || coachId,
-    user_id: coachData.user_id || coachId,
-    first_name: firstName || 'Coach',
-    last_name: lastName || '',
-    full_name: `${firstName || 'Coach'} ${lastName || ''}`.trim(),
-    email: email || 'coach@atleta.com',
+    user_id: coachData.user_id || rawUid,
+    first_name: firstName,
+    last_name: lastName,
+    full_name: fullName,
+    email: email || '',
     contact_number: contactNumber,
-    years_of_experience: coachData.years_of_experience || 5,
-    current_institution: coachData.current_institution || 'Collegiate Athletics',
-    quote: coachData.quote || null,
-    specialties: coachData.specialties || ['Player Development'],
+    years_of_experience: experience,
+    current_institution: institution || '',
+    regional_affiliation: regionalAffiliation,
+    national_sports_league: nationalLeague,
+    quote: quote,
+    specialties: coachData.specialties || coachData.core_specialties || [],
     success_rate: coachData.success_rate || null,
     professional_documents: coachData.professional_documents || [],
     sport_type: coachData.sport_type || 'Basketball',
@@ -178,17 +160,21 @@ export async function submitRecruitmentInquiry(
     throw new ServiceError(`Coach with ID '${coachId}' was not found.`, 404);
   }
 
+  const rawAthleteUid = athleteId.replace(/^ath_/, '');
+  const canonicalAthleteId = athleteId.startsWith('ath_') ? athleteId : `ath_${athleteId}`;
+  const athleteIds = Array.from(new Set([athleteId, rawAthleteUid, canonicalAthleteId].filter(Boolean)));
+  const coachIds = Array.from(new Set([coachId, coachProfile.coach_id, coachProfile.user_id].filter(Boolean)));
+
   // 2. Rate Limit Check: Max 10 requests/day per athlete
   const oneDayAgoMs = Date.now() - 24 * 60 * 60 * 1000;
   const athleteInquiriesSnapshot = await db
     .collection('Scouting_Registry')
-    .where('athlete_id', '==', athleteId)
-    .where('initiated_by', '==', athleteId)
+    .where('athlete_id', 'in', athleteIds)
     .get();
 
   const recentCount = athleteInquiriesSnapshot.docs.filter((doc) => {
     const data = doc.data() as RecruitmentInquiry;
-    return new Date(data.date_initiated).getTime() >= oneDayAgoMs;
+    return athleteIds.includes(data.initiated_by) && new Date(data.date_initiated).getTime() >= oneDayAgoMs;
   }).length;
 
   if (recentCount >= 10) {
@@ -199,16 +185,12 @@ export async function submitRecruitmentInquiry(
   }
 
   // 3. Duplicate Active Inquiry Check (Sent or Accepted for same athlete + coach)
-  const activeSnapshot = await db
-    .collection('Scouting_Registry')
-    .where('athlete_id', '==', athleteId)
-    .where('coach_scout_id', '==', coachId)
-    .where('initiated_by', '==', athleteId)
-    .get();
-
-  const hasActiveInquiry = activeSnapshot.docs.some((doc) => {
+  const hasActiveInquiry = athleteInquiriesSnapshot.docs.some((doc) => {
     const data = doc.data() as RecruitmentInquiry;
-    return data.offer_status === 'Sent' || data.offer_status === 'Accepted';
+    const isTargetCoach = coachIds.includes(data.coach_scout_id);
+    const isSentByAthlete = athleteIds.includes(data.initiated_by);
+    const isActiveStatus = data.offer_status === 'Sent' || data.offer_status === 'Accepted';
+    return isTargetCoach && isSentByAthlete && isActiveStatus;
   });
 
   if (hasActiveInquiry) {

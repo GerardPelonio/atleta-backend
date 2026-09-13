@@ -96,12 +96,18 @@ export async function uploadDocument(req: Request, res: Response): Promise<void>
       return;
     }
 
-    let normalizedDocType: 'psa_birth_certificate' | 'proof_of_residency' = 'psa_birth_certificate';
     const cleanType = String(rawDocType).toLowerCase();
+    let normalizedDocType: string = 'psa_birth_certificate';
     if (cleanType.includes('residency') || cleanType.includes('proof')) {
       normalizedDocType = 'proof_of_residency';
-    } else {
+    } else if (cleanType.includes('med')) {
+      normalizedDocType = 'medical_clearance';
+    } else if (cleanType.includes('school') || cleanType.includes('student') || cleanType.includes('id')) {
+      normalizedDocType = 'school_id';
+    } else if (cleanType.includes('birth') || cleanType.includes('psa')) {
       normalizedDocType = 'psa_birth_certificate';
+    } else {
+      normalizedDocType = cleanType.replace(/\s+/g, '_') || 'other_document';
     }
 
     const updatedProfile = await uploadAthleteDocument(athleteId, normalizedDocType, file);

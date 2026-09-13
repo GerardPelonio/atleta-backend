@@ -166,12 +166,20 @@ export async function updateAthleteProfile(
     const ln = String(updateData.last_name || '').trim();
     userPayload.full_name = `${fn} ${ln}`.trim();
   }
-  if (updateData.birthdate) userPayload.birthdate = String(updateData.birthdate).trim();
+  if (updateData.birthdate && String(updateData.birthdate).trim().length > 0) {
+    payload.birthdate = String(updateData.birthdate).trim();
+    userPayload.birthdate = payload.birthdate;
+  } else {
+    delete payload.birthdate;
+  }
   if (updateData.gender) userPayload.gender = String(updateData.gender).trim();
   if (updateData.province) userPayload.province = String(updateData.province).trim();
   if (updateData.sport_type) userPayload.sport_type = String(updateData.sport_type).trim();
   if (updateData.position) userPayload.position = String(updateData.position).trim();
-  if (updateData.avatar_url) userPayload.avatar_url = String(updateData.avatar_url).trim();
+  if (updateData.avatar_url && String(updateData.avatar_url).trim().length > 0) {
+    payload.avatar_url = String(updateData.avatar_url).trim();
+    userPayload.avatar_url = payload.avatar_url;
+  }
 
   // Auto-package physical attributes and recompute sports science metrics (BMI & Ape Index)
   if (payload.height_cm !== undefined || payload.weight_kg !== undefined || payload.wingspan_cm !== undefined || payload.vertical_cm !== undefined) {
@@ -244,7 +252,7 @@ export async function updateAthleteProfile(
  */
 export async function uploadAthleteDocument(
   athleteId: string,
-  docType: 'psa_birth_certificate' | 'proof_of_residency',
+  docType: string,
   file?: Express.Multer.File,
 ) {
   const rawUid = athleteId.replace(/^ath_/, '');

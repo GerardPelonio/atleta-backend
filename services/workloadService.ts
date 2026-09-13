@@ -158,24 +158,23 @@ export async function logSrpeEntry(params: {
     updated_at: now,
   };
 
-  await Promise.all([
-    db.collection('Athlete_Profiles').doc(canonicalAthleteId).set(
-      {
-        workload_analytics: computedWorkloadAnalytics,
-        workload: computedWorkloadAnalytics,
-        updated_at: new Date(),
-      },
-      { merge: true }
-    ),
-    db.collection('Athlete_Profiles').doc(rawUid).set(
-      {
-        workload_analytics: computedWorkloadAnalytics,
-        workload: computedWorkloadAnalytics,
-        updated_at: new Date(),
-      },
-      { merge: true }
-    ),
-  ]);
+  const targetRef = (profileDoc.exists && profileDoc.id === canonicalAthleteId)
+    ? profileDoc.ref
+    : db.collection('Athlete_Profiles').doc(canonicalAthleteId);
+
+  await targetRef.set(
+    {
+      workload_analytics: computedWorkloadAnalytics,
+      workload: computedWorkloadAnalytics,
+      updated_at: new Date(),
+    },
+    { merge: true }
+  );
+
+  // Clean up legacy rawUid orphan doc in Athlete_Profiles if different from canonical
+  if (profileDoc.exists && profileDoc.id === rawUid && rawUid !== canonicalAthleteId) {
+    await db.collection('Athlete_Profiles').doc(rawUid).delete().catch(() => null);
+  }
 
   // Invalidate in-memory caches
   workloadCache.delete(canonicalAthleteId);

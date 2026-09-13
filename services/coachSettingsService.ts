@@ -96,6 +96,9 @@ export async function updateCoachProfile(
     sport_type?: string;
     years_of_experience?: number;
     current_institution?: string;
+    regional_affiliation?: string | null;
+    national_sports_league?: string | null;
+    avatar_url?: string | null;
     quote?: string | null;
     specialties?: string[];
     certification_license_num?: string | null;
@@ -120,6 +123,9 @@ export async function updateCoachProfile(
   if (payload.sport_type) userUpdates.sport_type = payload.sport_type.trim();
   if (payload.years_of_experience !== undefined) userUpdates.years_of_experience = Number(payload.years_of_experience);
   if (payload.current_institution) userUpdates.current_institution = payload.current_institution.trim();
+  if (payload.regional_affiliation !== undefined) userUpdates.regional_affiliation = payload.regional_affiliation ? payload.regional_affiliation.trim() : null;
+  if (payload.national_sports_league !== undefined) userUpdates.national_sports_league = payload.national_sports_league ? payload.national_sports_league.trim() : null;
+  if (payload.avatar_url !== undefined) userUpdates.avatar_url = payload.avatar_url;
   if (payload.quote !== undefined) userUpdates.quote = payload.quote ? payload.quote.trim() : null;
   if (Array.isArray(payload.professional_documents)) {
     userUpdates.professional_documents = payload.professional_documents.filter(
@@ -141,6 +147,9 @@ export async function updateCoachProfile(
   if (payload.sport_type) coachUpdates.sport_type = payload.sport_type.trim();
   if (payload.years_of_experience !== undefined) coachUpdates.years_of_experience = Number(payload.years_of_experience);
   if (payload.current_institution) coachUpdates.current_institution = payload.current_institution.trim();
+  if (payload.regional_affiliation !== undefined) coachUpdates.regional_affiliation = payload.regional_affiliation ? payload.regional_affiliation.trim() : null;
+  if (payload.national_sports_league !== undefined) coachUpdates.national_sports_league = payload.national_sports_league ? payload.national_sports_league.trim() : null;
+  if (payload.avatar_url !== undefined) coachUpdates.avatar_url = payload.avatar_url;
   if (payload.quote !== undefined) coachUpdates.quote = payload.quote ? payload.quote.trim() : null;
   if (payload.certification_license_num !== undefined) coachUpdates.certification_license_num = payload.certification_license_num ? payload.certification_license_num.trim() : null;
   if (Array.isArray(payload.specialties)) coachUpdates.specialties = payload.specialties;

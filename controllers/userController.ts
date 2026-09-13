@@ -111,17 +111,17 @@ export async function loginUser(req: AuthRequest, res: Response): Promise<void> 
 export async function socialLogin(req: Request, res: Response): Promise<void> {
   try {
     const body = (req.body || {}) as Record<string, any>;
-    const idToken = body.id_token || body.token;
+    const idToken = body.id_token || body.token || body.idToken || body.access_token || body.accessToken || body.credential;
     const provider = body.provider;
     const role = body.role;
 
     if (!idToken) {
-      res.status(400).json({ error: 'id_token (Firebase ID token from Google/Facebook) is required.' });
+      res.status(400).json({ error: 'id_token (Firebase ID token or Access Token from Google/Facebook) is required.' });
       return;
     }
 
     const providerType = provider === 'facebook' ? 'facebook' : 'google';
-    const result = await socialLoginService(idToken, providerType, role || 'Athlete');
+    const result = await socialLoginService(idToken, providerType, role || 'Athlete', body);
 
     res.status(200).json({
       message: `${providerType.toUpperCase()} login successful.`,
