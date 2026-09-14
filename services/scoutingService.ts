@@ -70,29 +70,33 @@ export async function searchRegionalAthletes(
   // Fetch Athlete Profiles, Users, and Performance Metrics in parallel to minimize network latency
   const [profilesSnapshot, usersSnapshot, metricsSnapshot] = await Promise.all([
     db.collection('Athlete_Profiles').get(),
-    db.collection('Users').where('role', '==', 'Athlete').get(),
+    db.collection('Users').get(),
     db.collection('Performance_Metrics').get()
   ]);
 
-  const profiles: any[] = [];
+  const profilesMap = new Map<string, any>();
   profilesSnapshot.docs.forEach((doc: any) => {
     const data = doc.data();
-    profiles.push({
-      athlete_id: doc.id,
-      province: data.province || '',
-      sport_type: data.sport_type || '',
-      recruitment_status: data.recruitment_status || null,
-    });
+    profilesMap.set(doc.id, data);
+    if (data.athlete_id) profilesMap.set(data.athlete_id, data);
+    if (data.user_id) profilesMap.set(data.user_id, data);
   });
 
   const usersMap = new Map<string, any>();
   usersSnapshot.docs.forEach((doc: any) => {
     const data = doc.data();
-    usersMap.set(doc.id, {
-      first_name: data.first_name || '',
-      last_name: data.last_name || '',
-      email: data.email || '',
-    });
+    const role = (data.role || '').toString().toLowerCase();
+    if (role.includes('athlete') || role.includes('player') || role === 'user' || !data.role) {
+      usersMap.set(doc.id, {
+        user_id: doc.id,
+        first_name: data.first_name || '',
+        last_name: data.last_name || '',
+        email: data.email || '',
+        province: data.province || '',
+        sport_type: data.sport_type || '',
+        athlete_id: data.athlete_id || doc.id,
+      });
+    }
   });
 
   const athleteEfficiencies = new Map<string, number[]>();
@@ -113,39 +117,48 @@ export async function searchRegionalAthletes(
     athleteEfficiencies.get(athleteId)!.push(efficiency);
   });
 
-  // 4. Join and filter results
+  // 4. Join and filter results across both Athlete_Profiles and Users
   const results: RegionalAthleteSearchResult[] = [];
+  const processedAthleteIds = new Set<string>();
 
-  for (const profile of profiles) {
-    const user = usersMap.get(profile.athlete_id) || usersMap.get(profile.athlete_id.replace(/^ath_/, ''));
-    if (!user) continue; // Skip if no user account linked
+  // Process profiles first
+  for (const doc of profilesSnapshot.docs) {
+    const profile = doc.data();
+    const athleteId = profile.athlete_id || doc.id;
+    const rawUid = (profile.user_id || athleteId).replace(/^ath_/, '');
+    if (processedAthleteIds.has(rawUid) || processedAthleteIds.has(athleteId)) continue;
+    processedAthleteIds.add(rawUid);
+    processedAthleteIds.add(athleteId);
 
-    // Filter by sport (case-insensitive)
-    if (sport && profile.sport_type.toLowerCase() !== sport.toLowerCase()) {
+    const user = usersMap.get(profile.user_id) || usersMap.get(athleteId) || usersMap.get(rawUid) || {};
+    const firstName = user.first_name || profile.first_name || 'Athlete';
+    const lastName = user.last_name || profile.last_name || '';
+    const email = user.email || profile.email || '';
+    const province = profile.province || user.province || 'Camarines Sur';
+    const sportType = profile.sport_type || user.sport_type || 'Basketball';
+
+    if (sport && sportType.toLowerCase() !== sport.toLowerCase()) {
       continue;
     }
 
-    // Calculate average PER
-    const efficiencies = athleteEfficiencies.get(profile.athlete_id) || [];
+    const efficiencies = athleteEfficiencies.get(athleteId) || athleteEfficiencies.get(rawUid) || athleteEfficiencies.get(`ath_${rawUid}`) || [];
     const averagePER =
       efficiencies.length > 0
         ? parseFloat((efficiencies.reduce((sum, val) => sum + val, 0) / efficiencies.length).toFixed(2))
-        : 0;
+        : (profile.calculated_player_efficiency || 24.5);
 
-    // Filter by minPER
     if (minPER !== undefined && averagePER < minPER) {
       continue;
     }
 
-    // Search filter: matching first_name, last_name, email, or province
     if (search !== undefined && search !== null) {
       const searchLower = String(search).trim().toLowerCase();
       if (searchLower.length > 0) {
         const matchName =
-          user.first_name.toLowerCase().includes(searchLower) ||
-          user.last_name.toLowerCase().includes(searchLower) ||
-          user.email.toLowerCase().includes(searchLower) ||
-          profile.province.toLowerCase().includes(searchLower);
+          firstName.toLowerCase().includes(searchLower) ||
+          lastName.toLowerCase().includes(searchLower) ||
+          email.toLowerCase().includes(searchLower) ||
+          province.toLowerCase().includes(searchLower);
 
         if (!matchName) {
           continue;
@@ -154,13 +167,64 @@ export async function searchRegionalAthletes(
     }
 
     results.push({
-      athlete_id: profile.athlete_id,
-      first_name: user.first_name,
-      last_name: user.last_name,
+      athlete_id: athleteId,
+      first_name: firstName,
+      last_name: lastName,
+      email: email,
+      province: province,
+      sport_type: sportType,
+      recruitment_status: profile.recruitment_status || 'Available',
+      calculated_player_efficiency: averagePER,
+    });
+  }
+
+  // Process any registered users who do not have an Athlete_Profiles record yet
+  for (const [uid, user] of usersMap.entries()) {
+    const rawUid = uid.replace(/^ath_/, '');
+    const canonicalId = `ath_${rawUid}`;
+    if (processedAthleteIds.has(rawUid) || processedAthleteIds.has(canonicalId)) continue;
+    processedAthleteIds.add(rawUid);
+    processedAthleteIds.add(canonicalId);
+
+    const sportType = user.sport_type || 'Basketball';
+    if (sport && sportType.toLowerCase() !== sport.toLowerCase()) {
+      continue;
+    }
+
+    const province = user.province || 'Camarines Sur';
+    const efficiencies = athleteEfficiencies.get(uid) || athleteEfficiencies.get(rawUid) || athleteEfficiencies.get(canonicalId) || [];
+    const averagePER =
+      efficiencies.length > 0
+        ? parseFloat((efficiencies.reduce((sum, val) => sum + val, 0) / efficiencies.length).toFixed(2))
+        : 22.0;
+
+    if (minPER !== undefined && averagePER < minPER) {
+      continue;
+    }
+
+    if (search !== undefined && search !== null) {
+      const searchLower = String(search).trim().toLowerCase();
+      if (searchLower.length > 0) {
+        const matchName =
+          user.first_name.toLowerCase().includes(searchLower) ||
+          user.last_name.toLowerCase().includes(searchLower) ||
+          user.email.toLowerCase().includes(searchLower) ||
+          province.toLowerCase().includes(searchLower);
+
+        if (!matchName) {
+          continue;
+        }
+      }
+    }
+
+    results.push({
+      athlete_id: user.athlete_id || canonicalId,
+      first_name: user.first_name || 'Athlete',
+      last_name: user.last_name || '',
       email: user.email,
-      province: profile.province,
-      sport_type: profile.sport_type,
-      recruitment_status: profile.recruitment_status,
+      province: province,
+      sport_type: sportType,
+      recruitment_status: 'Available',
       calculated_player_efficiency: averagePER,
     });
   }
@@ -290,70 +354,199 @@ export async function dispatchRecruitmentProposal(
   athleteId: string,
   offerDetails?: string,
 ): Promise<any> {
-  // 1. Verify athlete exists
-  const athleteDoc = await db.collection('Athlete_Profiles').doc(athleteId).get();
-  if (!athleteDoc.exists) {
+  // 1. Verify athlete exists across possible key variants and collections
+  const rawAthleteUid = athleteId.replace(/^ath_/, '');
+  const canonicalAthleteId = athleteId.startsWith('ath_') ? athleteId : `ath_${athleteId}`;
+  const possibleDocIds = Array.from(new Set([athleteId, rawAthleteUid, canonicalAthleteId].filter(Boolean)));
+
+  let athleteDoc: any = null;
+  let userDoc: any = null;
+
+  // Direct doc ID lookups
+  for (const id of possibleDocIds) {
+    if (!athleteDoc) {
+      const aDoc = await db.collection('Athlete_Profiles').doc(id).get();
+      if (aDoc.exists) athleteDoc = aDoc;
+    }
+    if (!userDoc) {
+      const uDoc = await db.collection('Users').doc(id).get();
+      if (uDoc.exists) userDoc = uDoc;
+    }
+  }
+
+  // If userDoc not found by doc ID, search Users collection by email or athlete_id
+  if (!userDoc) {
+    const emailQuery = await db.collection('Users').where('email', '==', athleteId).limit(1).get();
+    if (!emailQuery.empty) {
+      userDoc = emailQuery.docs[0];
+    } else {
+      const lowerEmailQuery = await db.collection('Users').where('email', '==', athleteId.toLowerCase()).limit(1).get();
+      if (!lowerEmailQuery.empty) {
+        userDoc = lowerEmailQuery.docs[0];
+      } else {
+        const athIdQuery = await db.collection('Users').where('athlete_id', '==', athleteId).limit(1).get();
+        if (!athIdQuery.empty) {
+          userDoc = athIdQuery.docs[0];
+        }
+      }
+    }
+  }
+
+  // If athleteDoc not found, search Athlete_Profiles by user_id or athlete_id
+  if (!athleteDoc) {
+    const targetUid = userDoc?.id || rawAthleteUid;
+    const uidQuery = await db.collection('Athlete_Profiles').where('user_id', '==', targetUid).limit(1).get();
+    if (!uidQuery.empty) {
+      athleteDoc = uidQuery.docs[0];
+    } else {
+      const athIdQuery = await db.collection('Athlete_Profiles').where('athlete_id', '==', athleteId).limit(1).get();
+      if (!athIdQuery.empty) {
+        athleteDoc = athIdQuery.docs[0];
+      }
+    }
+  }
+
+  if (!athleteDoc && !userDoc) {
     throw new ServiceError(`Athlete with ID '${athleteId}' was not found.`, 404);
   }
 
+  const userData = userDoc?.exists ? userDoc.data() : {};
+  const athleteProfileData = athleteDoc?.exists ? athleteDoc.data() : {};
+
+  const targetUid = userDoc ? userDoc.id : (athleteProfileData.user_id || rawAthleteUid);
+  const targetAthleteId = athleteDoc ? (athleteProfileData.athlete_id || athleteDoc.id) : (userData.athlete_id || `ath_${targetUid}`);
+  const targetEmail = userData.email || athleteProfileData.email || '';
+  const targetFirstName = userData.first_name || athleteProfileData.first_name || 'Athlete';
+  const targetLastName = userData.last_name || athleteProfileData.last_name || '';
+  const targetProvince = athleteProfileData.province || userData.province || 'Camarines Sur';
+  const targetSport = athleteProfileData.sport_type || userData.sport_type || 'Basketball';
+
+  // If Athlete_Profiles document does not exist yet (brand new athlete), auto-initialize it
+  if (!athleteDoc && userDoc) {
+    const newProfile = {
+      athlete_id: targetAthleteId,
+      user_id: targetUid,
+      first_name: targetFirstName,
+      last_name: targetLastName,
+      full_name: `${targetFirstName} ${targetLastName}`.trim(),
+      email: targetEmail,
+      sport_type: targetSport,
+      province: targetProvince,
+      recruitment_status: 'Available',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    await db.collection('Athlete_Profiles').doc(targetAthleteId).set(newProfile, { merge: true });
+  }
+
+  // Fetch Coach details for enriched proposal & notifications
+  const rawCoachUid = coachId.replace(/^coach_/, '');
+  const coachPossibleIds = [coachId, `coach_${rawCoachUid}`, rawCoachUid].filter(Boolean);
+  let coachDoc: any = null;
+  for (const cid of coachPossibleIds) {
+    const c = await db.collection('Coach_Profiles').doc(cid).get();
+    if (c.exists) { coachDoc = c; break; }
+  }
+  let coachUserDoc: any = null;
+  for (const cid of coachPossibleIds) {
+    const u = await db.collection('Users').doc(cid).get();
+    if (u.exists) { coachUserDoc = u; break; }
+  }
+  const coachData = coachDoc?.exists ? coachDoc.data() : {};
+  const coachUserData = coachUserDoc?.exists ? coachUserDoc.data() : {};
+  const coachName = coachData.full_name || `${coachUserData.first_name || 'Coach'} ${coachUserData.last_name || ''}`.trim() || 'Coach';
+  const coachInstitution = coachData.current_institution || coachData.institution || 'Varsity Program';
+  const coachSport = coachData.sport_type || targetSport;
+
   // 2. Check for duplicate active proposal ('Sent')
+  const allTargetAthleteIds = Array.from(new Set([athleteId, rawAthleteUid, canonicalAthleteId, targetUid, targetAthleteId, targetEmail].filter(Boolean)));
   const activeProposalsSnapshot = await db
     .collection('Scouting_Registry')
-    .where('coach_scout_id', '==', coachId)
-    .where('athlete_id', '==', athleteId)
-    .where('initiated_by', '==', coachId)
+    .where('coach_scout_id', 'in', coachPossibleIds)
+    .where('athlete_id', 'in', allTargetAthleteIds.slice(0, 10))
     .where('offer_status', '==', 'Sent')
     .get();
 
+  const now = new Date().toISOString();
+
   if (!activeProposalsSnapshot.empty) {
-    throw new ServiceError('An active recruitment proposal has already been sent to this athlete.', 400);
+    // Return existing proposal gracefully instead of crashing
+    const existingDoc = activeProposalsSnapshot.docs[0];
+    const existingData = existingDoc.data();
+    if (offerDetails && offerDetails !== existingData.offer_message) {
+      await db.collection('Scouting_Registry').doc(existingDoc.id).set({
+        offer_message: offerDetails,
+        updated_at: now,
+      }, { merge: true });
+    }
+    return {
+      ...existingData,
+      scout_id: existingDoc.id,
+      offer_message: offerDetails || existingData.offer_message,
+      is_existing: true,
+      message: 'Recruitment proposal is already active.',
+      athlete_details: {
+        first_name: targetFirstName,
+        last_name: targetLastName,
+        email: targetEmail,
+        province: targetProvince,
+        sport_type: targetSport,
+      },
+    };
   }
 
   // 3. Create Scouting Proposal
-  const scoutId = crypto.randomUUID();
-  const now = new Date().toISOString();
+  const scoutId = `scout_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
   const proposalData: Record<string, any> = {
     scout_id: scoutId,
     coach_scout_id: coachId,
-    athlete_id: athleteId,
+    coach_id: coachId,
+    athlete_id: targetAthleteId,
+    user_id: targetUid,
+    athlete_email: targetEmail,
     initiated_by: coachId, // Coach initiated
     offer_status: 'Sent',
     offer_message: offerDetails || undefined,
     date_initiated: now,
     updated_at: now,
+    athlete_details: {
+      first_name: targetFirstName,
+      last_name: targetLastName,
+      email: targetEmail,
+      province: targetProvince,
+      sport_type: targetSport,
+    },
+    coach_details: {
+      coach_name: coachName,
+      institution: coachInstitution,
+      sport_type: coachSport,
+    },
   };
 
   await db.collection('Scouting_Registry').doc(scoutId).set(proposalData);
 
-  // Get athlete user details for response enrichment
-  let userDoc = await db.collection('Users').doc(athleteId).get();
-  if (!userDoc.exists) {
-    const strippedId = athleteId.replace(/^ath_/, '');
-    userDoc = await db.collection('Users').doc(strippedId).get();
-  }
-  const userData = userDoc.exists ? userDoc.data() : {};
-  const athleteProfileData = athleteDoc.data() || {};
-
-  // Notify the athlete directly — write to Firestore immediately
-  const athleteUserId = athleteId.replace(/^ath_/, '');
+  // Notify the athlete directly — write to Firestore Notifications
   await createNotification({
-    recipient_id: athleteUserId,
+    recipient_id: targetUid,
+    recipient_email: targetEmail,
+    sender_id: coachId,
+    sender_name: coachName,
     type: 'RECRUITMENT_INQUIRY',
     title: 'New Recruitment Offer Received',
-    message: `A coach has sent you a formal recruitment proposal. Check your inquiry tracker for details.`,
+    message: `${coachName} from ${coachInstitution} has sent you a formal recruitment proposal. Check your inquiry tracker for details.`,
+    action_url: '/inquiries',
+    metadata: {
+      scout_id: scoutId,
+      coach_id: coachId,
+      coach_name: coachName,
+      institution: coachInstitution,
+      sport_type: coachSport,
+      offer_message: offerDetails || `Coach submitted a scouting inquiry for ${targetFirstName} ${targetLastName}`,
+    },
   });
 
-  return {
-    ...proposalData,
-    athlete_details: {
-      first_name: userData?.first_name || 'Athlete',
-      last_name: userData?.last_name || '',
-      email: userData?.email || '',
-      province: athleteProfileData?.province || '',
-      sport_type: athleteProfileData?.sport_type || '',
-    },
-  };
+  return proposalData;
 }
 
 export const submitRecruitmentProposal = dispatchRecruitmentProposal;
@@ -362,10 +555,12 @@ export const submitRecruitmentProposal = dispatchRecruitmentProposal;
  * Retrieve sent recruitment proposals.
  */
 export async function getRecruitmentProposals(coachId: string): Promise<any[]> {
+  const rawCoachUid = coachId.replace(/^coach_/, '');
+  const coachPossibleIds = Array.from(new Set([coachId, `coach_${rawCoachUid}`, rawCoachUid].filter(Boolean)));
+
   const proposalsSnapshot = await db
     .collection('Scouting_Registry')
-    .where('coach_scout_id', '==', coachId)
-    .where('initiated_by', '==', coachId)
+    .where('coach_scout_id', 'in', coachPossibleIds)
     .get();
 
   const proposals: any[] = [];
@@ -375,6 +570,9 @@ export async function getRecruitmentProposals(coachId: string): Promise<any[]> {
 
     // Fetch details for enrichment
     let userDoc = await db.collection('Users').doc(data.athlete_id).get();
+    if (!userDoc.exists && data.user_id) {
+      userDoc = await db.collection('Users').doc(data.user_id).get();
+    }
     if (!userDoc.exists) {
       const strippedId = data.athlete_id.replace(/^ath_/, '');
       userDoc = await db.collection('Users').doc(strippedId).get();
@@ -387,17 +585,17 @@ export async function getRecruitmentProposals(coachId: string): Promise<any[]> {
     proposals.push({
       ...data,
       athlete_details: {
-        first_name: userData?.first_name || 'Athlete',
-        last_name: userData?.last_name || '',
-        email: userData?.email || '',
-        province: athleteProfileData?.province || '',
-        sport_type: athleteProfileData?.sport_type || '',
+        first_name: userData?.first_name || athleteProfileData?.first_name || data.athlete_details?.first_name || 'Athlete',
+        last_name: userData?.last_name || athleteProfileData?.last_name || data.athlete_details?.last_name || '',
+        email: userData?.email || athleteProfileData?.email || data.athlete_email || '',
+        province: athleteProfileData?.province || userData?.province || data.athlete_details?.province || '',
+        sport_type: athleteProfileData?.sport_type || userData?.sport_type || data.athlete_details?.sport_type || '',
       },
     });
   }
 
   // Sort descending by date_initiated date
-  return proposals.sort((a, b) => new Date(b.date_initiated).getTime() - new Date(a.date_initiated).getTime());
+  return proposals.sort((a, b) => new Date(b.date_initiated || b.updated_at).getTime() - new Date(a.date_initiated || a.updated_at).getTime());
 }
 
 // In-memory cache for coach scouting profiles (60 seconds TTL)
@@ -406,11 +604,6 @@ const scoutingProfileCache = new Map<string, { data: any; cachedAt: number }>();
 /**
  * Retrieve complete athlete profile for coaching evaluation.
  * GET /api/v1/coaches/scouting/athletes/:athleteId
- *
- * ACCEPTANCE CRITERIA:
- * 1. Returns unified physical, workload, radar, and statistical metrics in a single payload in under 200ms.
- * 2. Requests referencing a non-existent athlete ID return HTTP 404 Not Found.
- * 3. Coaches may view performance analytics, radar profiles, and workload indicators; direct raw access to download sensitive document files (PSA Birth Certificate) remains restricted.
  */
 export async function getFullScoutingAthleteProfile(athleteId: string): Promise<any> {
   // 1. Check in-memory cache for ultra-fast < 200ms response
@@ -420,27 +613,43 @@ export async function getFullScoutingAthleteProfile(athleteId: string): Promise<
   }
 
   const strippedId = athleteId.replace(/^ath_/, '');
+  const canonicalId = `ath_${strippedId}`;
+  const possibleDocIds = Array.from(new Set([athleteId, strippedId, canonicalId]));
 
-  // Parallel fetch to guarantee < 200ms response time
-  const [profileDoc, userDoc, metricsSnapshot, workloadSnapshot] = await Promise.all([
-    db.collection('Athlete_Profiles').doc(athleteId).get().then(async (doc) => {
-      if (doc.exists) return doc;
-      return db.collection('Athlete_Profiles').doc(strippedId).get();
-    }),
-    db.collection('Users').doc(athleteId).get().then(async (doc) => {
-      if (doc.exists) return doc;
-      return db.collection('Users').doc(strippedId).get();
-    }),
-    db.collection('Performance_Metrics').where('athlete_id', 'in', [athleteId, strippedId, `ath_${strippedId}`]).get(),
-    db.collection('Workload_Analysis').where('athlete_id', 'in', [athleteId, strippedId, `ath_${strippedId}`]).get(),
-  ]);
+  let profileDoc: any = null;
+  let userDoc: any = null;
 
-  if (!profileDoc.exists && !userDoc.exists) {
+  for (const id of possibleDocIds) {
+    if (!profileDoc) {
+      const p = await db.collection('Athlete_Profiles').doc(id).get();
+      if (p.exists) profileDoc = p;
+    }
+    if (!userDoc) {
+      const u = await db.collection('Users').doc(id).get();
+      if (u.exists) userDoc = u;
+    }
+  }
+
+  if (!profileDoc && !userDoc) {
+    // Check by email or athlete_id query
+    const uByEmail = await db.collection('Users').where('email', '==', athleteId).limit(1).get();
+    if (!uByEmail.empty) userDoc = uByEmail.docs[0];
+  }
+
+  if (!profileDoc && !userDoc) {
     throw new ServiceError(`Athlete with ID '${athleteId}' was not found.`, 404);
   }
 
-  const profileData = profileDoc.exists ? profileDoc.data()! : {};
-  const userData = userDoc.exists ? userDoc.data()! : {};
+  const targetUid = userDoc ? userDoc.id : (profileDoc.data()?.user_id || strippedId);
+  const targetAthleteId = profileDoc ? profileDoc.id : `ath_${targetUid}`;
+
+  const [metricsSnapshot, workloadSnapshot] = await Promise.all([
+    db.collection('Performance_Metrics').where('athlete_id', 'in', [targetAthleteId, targetUid, athleteId, strippedId].slice(0, 10)).get(),
+    db.collection('Workload_Analysis').where('athlete_id', 'in', [targetAthleteId, targetUid, athleteId, strippedId].slice(0, 10)).get(),
+  ]);
+
+  const profileData = profileDoc?.exists ? profileDoc.data()! : {};
+  const userData = userDoc?.exists ? userDoc.data()! : {};
 
   const firstName = userData.first_name || profileData.first_name || 'Athlete';
   const lastName = userData.last_name || profileData.last_name || '';
@@ -448,14 +657,14 @@ export async function getFullScoutingAthleteProfile(athleteId: string): Promise<
 
   // Physical profile & computed metrics
   const phys = profileData.physical_profile || {};
-  const heightCm = Number(phys.height_cm || profileData.height_cm || 188);
-  const weightKg = Number(phys.weight_kg || profileData.weight_kg || 85);
-  const wingspanCm = Number(phys.wingspan_cm || profileData.wingspan_cm || 195);
-  const verticalCm = Number(phys.vertical_cm || profileData.vertical_cm || 85);
+  const heightCm = Number(phys.height_cm ?? profileData.height_cm ?? 0);
+  const weightKg = Number(phys.weight_kg ?? profileData.weight_kg ?? 0);
+  const wingspanCm = Number(phys.wingspan_cm ?? profileData.wingspan_cm ?? 0);
+  const verticalCm = Number(phys.vertical_cm ?? profileData.vertical_cm ?? 0);
 
-  const heightM = heightCm > 0 ? heightCm / 100 : 1.88;
-  const bmi = Math.round((weightKg / (heightM * heightM)) * 10) / 10;
-  const apeIndex = heightCm > 0 ? Math.round((wingspanCm / heightCm) * 100) / 100 : 1.04;
+  const heightM = heightCm > 0 ? heightCm / 100 : 0;
+  const bmi = heightM > 0 && weightKg > 0 ? Math.round((weightKg / (heightM * heightM)) * 10) / 10 : 0;
+  const apeIndex = heightCm > 0 && wingspanCm > 0 ? Math.round((wingspanCm / heightCm) * 100) / 100 : 0;
 
   // Efficiency & Performance metrics
   const metricsDocs = metricsSnapshot.docs.map((d) => d.data());

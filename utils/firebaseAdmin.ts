@@ -56,9 +56,16 @@ function getFirebaseCredential() {
   }
 
   // 4. Check for local serviceAccountKey.json file (Local development)
-  const serviceAccountPath = path.resolve(__dirname, '..', 'serviceAccountKey.json');
-  if (fs.existsSync(serviceAccountPath)) {
-    return cert(serviceAccountPath);
+  const possiblePaths = [
+    path.resolve(__dirname, '..', 'serviceAccountKey.json'),
+    path.resolve(__dirname, '..', '..', 'serviceAccountKey.json'),
+    path.resolve(process.cwd(), 'Backend', 'serviceAccountKey.json'),
+    path.resolve(process.cwd(), 'serviceAccountKey.json'),
+  ];
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      return cert(p);
+    }
   }
 
   console.warn('⚠️ No Firebase Admin credentials found! Please configure FIREBASE_SERVICE_ACCOUNT in Vercel.');

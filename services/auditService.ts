@@ -22,35 +22,50 @@ export interface OfficialAudit {
 export async function submitAuditRequest(
   coachId: string,
   matchId: string,
+  fallbackMatchData?: any
 ): Promise<OfficialAudit> {
   const matchRef = db.collection('Match_Logs').doc(matchId);
   const matchDoc = await matchRef.get();
 
-  if (!matchDoc.exists) {
-    throw new ServiceError(`Match with ID '${matchId}' not found.`, 404);
+  let matchData = matchDoc.exists ? matchDoc.data()! : null;
+
+  if (matchData && matchData.team_id && matchData.team_id !== 'team_default') {
+    const teamDoc = await db.collection('Teams').doc(matchData.team_id).get();
+    if (teamDoc.exists) {
+      const teamData = teamDoc.data()!;
+      const isOwner =
+        teamData.coach_id === coachId ||
+        teamData.coach_id === `coach_${coachId}` ||
+        teamData.coach_id?.replace('coach_', '') === coachId ||
+        matchData.logged_by_coach_id === coachId ||
+        matchData.coach_id === coachId;
+      if (!isOwner && teamData.coach_id && teamData.coach_id !== coachId) {
+        throw new ServiceError('Unauthorized. You do not manage the team for this match.', 403);
+      }
+    }
   }
 
-  const matchData = matchDoc.data()!;
-  const teamId = matchData.team_id;
-
-  if (!teamId) {
-    throw new ServiceError('Team ID is missing from the match record.', 400);
-  }
-
-  const teamDoc = await db.collection('Teams').doc(teamId).get();
-  if (!teamDoc.exists) {
-    throw new ServiceError(`Team with ID '${teamId}' not found.`, 404);
-  }
-
-  const teamData = teamDoc.data()!;
-  // Verify that the coach manages this team
-  const isOwner =
-    teamData.coach_id === coachId ||
-    teamData.coach_id === `coach_${coachId}` ||
-    teamData.coach_id.replace('coach_', '') === coachId;
-
-  if (!isOwner) {
-    throw new ServiceError('Unauthorized. You do not manage the team for this match.', 403);
+  if (!matchData) {
+    // If the match does not exist in Firestore yet, automatically seed it into Match_Logs
+    matchData = {
+      match_id: matchId,
+      team_id: fallbackMatchData?.team_id || 'team_default',
+      home_team_name: fallbackMatchData?.home_team_name || fallbackMatchData?.home_team || 'Home Team',
+      away_team_name: fallbackMatchData?.away_team_name || fallbackMatchData?.away_team || 'Away Team',
+      league_name: fallbackMatchData?.league_name || 'BATANG PINOY',
+      sport_type: fallbackMatchData?.sport_type || 'BASKETBALL',
+      match_date: fallbackMatchData?.match_date || new Date().toISOString(),
+      location: fallbackMatchData?.location || 'Metro Sports Arena',
+      notes: Array.isArray(fallbackMatchData?.coach_notes)
+        ? fallbackMatchData.coach_notes.join(' ')
+        : fallbackMatchData?.notes || '',
+      audit_status: 'Pending',
+      verification_status: 'Pending',
+      is_certified: false,
+      logged_by_coach_id: coachId,
+      created_at: new Date().toISOString(),
+    };
+    await matchRef.set(matchData);
   }
 
   const auditId = crypto.randomUUID();
@@ -105,20 +120,20 @@ export async function generateMatchPdfBuffer(
   }
 
   // Authorization check: Verify coach manages the team
-    const teamDoc = await db.collection('Teams').doc(teamId).get();
-    if (!teamDoc.exists) {
-      throw new ServiceError(`Team with ID '${teamId}' not found.`, 404);
-    }
+  const teamDoc = await db.collection('Teams').doc(teamId).get();
+  if (!teamDoc.exists) {
+    throw new ServiceError(`Team with ID '${teamId}' not found.`, 404);
+  }
 
-    const teamData = teamDoc.data()!;
-    const isOwner =
+  const teamData = teamDoc.data()!;
+  const isOwner =
     teamData.coach_id === coachId ||
     teamData.coach_id === `coach_${coachId}` ||
     teamData.coach_id.replace('coach_', '') === coachId;
 
-    if (!isOwner) {
-      throw new ServiceError('Unauthorized. You do not manage the team for this match.', 403);
-    }
+  if (!isOwner) {
+    throw new ServiceError('Unauthorized. You do not manage the team for this match.', 403);
+  }
 
   // Certification check (Acceptance Criteria: Requesting an uncertified PDF returns 404)
   if (!matchData.is_certified) {

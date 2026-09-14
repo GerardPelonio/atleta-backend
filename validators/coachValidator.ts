@@ -47,6 +47,18 @@ export function validateRegisterCoach(data: Record<string, unknown>, hasFile: bo
     errors.push({ field: 'contact_number', message: 'Contact number must be exactly 11 characters.' });
   }
 
+  // current_institution (Required for Coach)
+  const currentInstitution = typeof data.current_institution === 'string' ? data.current_institution.trim() : '';
+  if (!currentInstitution) {
+    errors.push({ field: 'current_institution', message: 'Current institution is required.' });
+  }
+
+  // regional_affiliation (Optional / string max 255)
+  const regionalAffiliation = typeof data.regional_affiliation === 'string' ? data.regional_affiliation.trim() : '';
+  if (regionalAffiliation.length > 255) {
+    errors.push({ field: 'regional_affiliation', message: 'Regional affiliation must not exceed 255 characters.' });
+  }
+
   // professional_documents (ACCEPTANCE CRITERIA: Minimum 1 document link upon registration)
   const docs = data.professional_documents;
   const hasDocLinks = Array.isArray(docs) && docs.filter((d) => typeof d === 'string' && d.trim().length > 0).length > 0;

@@ -32,14 +32,8 @@ export async function logAdminAudit(entry: Omit<AdminAuditLog, 'log_id' | 'times
   };
 
   try {
-    const hasCredentials = !!(
-      process.env.FIREBASE_SERVICE_ACCOUNT ||
-      process.env.FIREBASE_SERVICE_ACCOUNT_KEY ||
-      process.env.FIREBASE_PRIVATE_KEY ||
-      process.env.GOOGLE_APPLICATION_CREDENTIALS
-    );
-    if (hasCredentials && db && typeof db.collection === 'function') {
-      await db.collection('Admin_Audit_Logs').doc(logId).set(fullLog).catch(() => {});
+    if (db && typeof db.collection === 'function') {
+      await db.collection('Admin_Audit_Logs').doc(logId).set(fullLog);
     }
   } catch (err) {
     // Audit logging is non-blocking and shouldn't crash unauthenticated requests

@@ -10,6 +10,8 @@ export interface CoachPublicProfile {
   contact_number?: string | null;
   years_of_experience: number;    // Required
   current_institution: string;    // Required
+  regional_affiliation?: string | null;
+  national_sports_league?: string | null;
   quote?: string | null;          // Optional
   specialties?: string[];         // Optional
   success_rate?: number | null;   // Optional

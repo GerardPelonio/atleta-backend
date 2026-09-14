@@ -4,7 +4,9 @@ import {
   getNotifications,
   markAsRead,
   markAllAsRead,
+  createNotificationHandler,
 } from '../controllers/notificationController';
+
 import {
   getOfficialNotificationsHandler,
   markAllOfficialNotificationsAsReadHandler,
@@ -22,11 +24,17 @@ const handleReadAll = (req: any, res: any) => {
 // Official Notifications
 router.get('/official', authenticate, getOfficialNotificationsHandler);
 
+// Create / Dispatch Notifications
+router.post('/create', authenticate, createNotificationHandler);
+router.post('/send', authenticate, createNotificationHandler);
+router.post('/', authenticate, createNotificationHandler);
+
 // Notification Inbox (Named and Root Routes)
 router.get('/me', authenticate, getNotifications);
 router.get('/list', authenticate, getNotifications);
 router.get('/all', authenticate, getNotifications);
 router.get('/', authenticate, getNotifications);
+
 
 // Mark All As Read
 router.patch('/read-all', authenticate, handleReadAll);

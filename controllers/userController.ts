@@ -36,7 +36,12 @@ export async function registerUser(req: AuthRequest, res: Response): Promise<voi
       ...result,
     });
   } catch (error: any) {
-    if (error.code === 'auth/email-already-exists') {
+    if (
+      error.code === 'auth/email-already-exists' ||
+      error.code === 'auth/email-already-in-use' ||
+      error.message?.includes('already in use') ||
+      error.message?.includes('already exists')
+    ) {
       res.status(409).json({ error: 'A user with this email already exists.' });
       return;
     }
@@ -62,7 +67,12 @@ export async function registerCoach(req: AuthRequest, res: Response): Promise<vo
       ...result,
     });
   } catch (error: any) {
-    if (error.code === 'auth/email-already-exists') {
+    if (
+      error.code === 'auth/email-already-exists' ||
+      error.code === 'auth/email-already-in-use' ||
+      error.message?.includes('already in use') ||
+      error.message?.includes('already exists')
+    ) {
       res.status(409).json({ error: 'A coach with this email already exists.' });
       return;
     }
@@ -111,17 +121,17 @@ export async function loginUser(req: AuthRequest, res: Response): Promise<void> 
 export async function socialLogin(req: Request, res: Response): Promise<void> {
   try {
     const body = (req.body || {}) as Record<string, any>;
-    const idToken = body.id_token || body.token;
+    const idToken = body.id_token || body.token || body.idToken || body.access_token || body.accessToken || body.credential;
     const provider = body.provider;
     const role = body.role;
 
     if (!idToken) {
-      res.status(400).json({ error: 'id_token (Firebase ID token from Google/Facebook) is required.' });
+      res.status(400).json({ error: 'id_token (Firebase ID token or Access Token from Google/Facebook) is required.' });
       return;
     }
 
     const providerType = provider === 'facebook' ? 'facebook' : 'google';
-    const result = await socialLoginService(idToken, providerType, role || 'Athlete');
+    const result = await socialLoginService(idToken, providerType, role || 'Athlete', body);
 
     res.status(200).json({
       message: `${providerType.toUpperCase()} login successful.`,

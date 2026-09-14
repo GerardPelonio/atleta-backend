@@ -60,6 +60,8 @@ export interface CoachProfile {
   certification_license_num?: string | null;
   years_of_experience: number;
   current_institution: string;
+  regional_affiliation?: string | null;
+  national_sports_league?: string | null;
   quote?: string | null;
   specialties?: string[];
   sport_type?: string;
