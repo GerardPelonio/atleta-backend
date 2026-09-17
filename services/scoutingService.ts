@@ -57,14 +57,64 @@ export function invalidateScoutingCache() {
  * Search and filter regional athlete directory.
  */
 export async function searchRegionalAthletes(
-  sport?: string,
+  sport?: string | any,
   minPER?: number,
   search?: string,
+  coachId?: string,
 ): Promise<RegionalAthleteSearchResult[]> {
-  const cacheKey = `search_${sport || 'all'}_${minPER || 0}_${search || 'none'}`;
+  if (typeof sport === 'object' && sport !== null) {
+    const opts = sport;
+    sport = opts.sport || opts.sport_type;
+    minPER = opts.minPER || opts.min_per;
+    search = opts.search;
+    coachId = opts.coachId || opts.coach_id;
+  }
+
+  const safeSport = typeof sport === 'string' ? sport.trim() : '';
+  const cacheKey = `search_${safeSport || 'all'}_${minPER || 0}_${search || 'none'}_${coachId || 'public'}`;
   const cached = scoutingSearchCache.get(cacheKey);
   if (cached && cached.expiry > Date.now()) {
     return cached.data;
+  }
+
+  // Build exclusion list of athletes already recruited by this coach
+  const excludedAthleteIds = new Set<string>();
+  if (coachId) {
+    const canonicalCoachId = coachId.startsWith('coach_') ? coachId : `coach_${coachId}`;
+    const rawCoachId = coachId.replace(/^coach_/, '');
+    const possibleCoachIds = [canonicalCoachId, rawCoachId];
+
+    const [coachDoc1, coachDoc2, acceptedInqSnap] = await Promise.all([
+      db.collection('Coach_Profiles').doc(canonicalCoachId).get().catch(() => null),
+      db.collection('Coach_Profiles').doc(rawCoachId).get().catch(() => null),
+      db.collection('Scouting_Registry').where('offer_status', '==', 'Accepted').get().catch(() => null),
+    ]);
+
+    const coachData = (coachDoc1 && coachDoc1.exists ? coachDoc1.data() : null) || (coachDoc2 && coachDoc2.exists ? coachDoc2.data() : null);
+    if (coachData && Array.isArray(coachData.athletes_managed)) {
+      coachData.athletes_managed.forEach((item: any) => {
+        const id = typeof item === 'string' ? item : item.athlete_id || item.user_id;
+        if (id) {
+          const clean = String(id).trim();
+          excludedAthleteIds.add(clean);
+          excludedAthleteIds.add(clean.replace(/^ath_/, ''));
+          excludedAthleteIds.add(`ath_${clean.replace(/^ath_/, '')}`);
+        }
+      });
+    }
+
+    if (acceptedInqSnap && !acceptedInqSnap.empty) {
+      acceptedInqSnap.docs.forEach((doc: any) => {
+        const inq = doc.data();
+        const inqCoachId = inq.coach_id || inq.coach_scout_id;
+        if (possibleCoachIds.includes(inqCoachId) && inq.athlete_id) {
+          const clean = String(inq.athlete_id).trim();
+          excludedAthleteIds.add(clean);
+          excludedAthleteIds.add(clean.replace(/^ath_/, ''));
+          excludedAthleteIds.add(`ath_${clean.replace(/^ath_/, '')}`);
+        }
+      });
+    }
   }
 
   // Fetch Athlete Profiles, Users, and Performance Metrics in parallel to minimize network latency
@@ -103,7 +153,7 @@ export async function searchRegionalAthletes(
     const metricSport = data.sport_category || '';
 
     // If sport is requested, filter metrics by sport category
-    if (sport && metricSport.toLowerCase() !== sport.toLowerCase()) {
+    if (safeSport && metricSport.toLowerCase() !== safeSport.toLowerCase()) {
       return;
     }
 
@@ -117,11 +167,18 @@ export async function searchRegionalAthletes(
   const results: RegionalAthleteSearchResult[] = [];
 
   for (const profile of profiles) {
-    const user = usersMap.get(profile.athlete_id) || usersMap.get(profile.athlete_id.replace(/^ath_/, ''));
-    if (!user) continue; // Skip if no user account linked
+    // Exclude athletes already recruited or managed by the requesting coach
+    if (coachId && (excludedAthleteIds.has(profile.athlete_id) || excludedAthleteIds.has(profile.athlete_id.replace(/^ath_/, '')))) {
+      continue;
+    }
+    const user = usersMap.get(profile.athlete_id) || usersMap.get(profile.athlete_id.replace(/^ath_/, '')) || {
+      first_name: profile.first_name || 'Athlete',
+      last_name: profile.last_name || '',
+      email: profile.email || '',
+    };
 
     // Filter by sport (case-insensitive)
-    if (sport && profile.sport_type.toLowerCase() !== sport.toLowerCase()) {
+    if (safeSport && profile.sport_type && profile.sport_type.toLowerCase() !== safeSport.toLowerCase()) {
       continue;
     }
 

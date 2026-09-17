@@ -16,11 +16,13 @@ export async function searchAthletesController(req: AuthRequest, res: Response):
 
     validateScoutingParams(req.query as Record<string, unknown>);
 
+    const coachId = req.user?.uid;
     const parsedMinPER = minPER ? parseFloat(minPER as string) : undefined;
     const athletes = await searchRegionalAthletes(
       sport as string | undefined,
       parsedMinPER,
       search as string | undefined,
+      coachId,
     );
 
     res.status(200).json(athletes);

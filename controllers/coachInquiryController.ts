@@ -203,6 +203,17 @@ export async function changeCoachPasswordHandler(req: AuthRequest, res: Response
   }
 }
 
+export async function getCoachAthletesHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const coachId = req.user!.uid;
+    const athletes = await getCoachManagedAthletes(coachId);
+    res.status(200).json({ athletes });
+  } catch (error: any) {
+    console.error('getCoachAthletesHandler error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
 export async function getCoachManagedAthletesHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const rawCoachParam = req.params.coachId;

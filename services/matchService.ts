@@ -1,4 +1,5 @@
 import { db } from '../utils/firebaseAdmin';
+import { FieldValue } from 'firebase-admin/firestore';
 import {
   MatchLog,
   PerformanceMetric,
@@ -191,7 +192,22 @@ export async function submitMatchSession(
     return idempotencyDoc.data()!.response;
   }
 
-  const matchId = `match_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  // Check if match_id was explicitly supplied and already exists in Match_Logs
+  const explicitMatchId = (payload as any).match_id;
+  if (explicitMatchId) {
+    const existingMatch = await db.collection('Match_Logs').doc(explicitMatchId).get();
+    if (existingMatch.exists) {
+      console.log(`ℹ️ [DEDUPLICATION] Match '${explicitMatchId}' already exists. Returning existing record.`);
+      return {
+        message: 'Match log already recorded (duplicate eliminated).',
+        match: existingMatch.data(),
+        total_players_logged: 0,
+        performance_metrics: [],
+      };
+    }
+  }
+
+  const matchId = explicitMatchId || `match_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const now = new Date().toISOString();
 
   // Resolve Home Team and Away Team names
@@ -435,6 +451,19 @@ export async function submitMatchSession(
     response: responsePayload,
     created_at: now,
   });
+
+  // Increment coach's matches_logged and total_matches_logged
+  if (coachId && coachId !== 'coach_default') {
+    const rawCoachId = coachId.replace(/^coach_/, '');
+    const canonicalCoachId = `coach_${rawCoachId}`;
+    const incData = {
+      matches_logged: FieldValue.increment(1),
+      total_matches_logged: FieldValue.increment(1),
+      updated_at: now,
+    };
+    batch.set(db.collection('Coach_Profiles').doc(canonicalCoachId), incData, { merge: true });
+    batch.set(db.collection('Coach_Profiles').doc(rawCoachId), incData, { merge: true });
+  }
 
   await batch.commit();
 

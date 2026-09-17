@@ -9,6 +9,7 @@ import {
   updateCoachSettingsHandler,
   updateCoachProfileHandler,
   changeCoachPasswordHandler,
+  getCoachAthletesHandler,
 } from '../controllers/coachInquiryController';
 import { getScoutingAthleteProfileController } from '../controllers/scoutingController';
 import { postSrpeLog, getAthleteWorkloadHandler } from '../controllers/workloadController';
@@ -52,6 +53,8 @@ router.post('/sync-offline', authenticate, requireCoach, syncCoachOfflineBatchHa
 router.get('/offline-snapshot', authenticate, requireCoach, getCoachOfflineSnapshotHandler);
 
 // Coach Actions on Athletes & Teams
+router.get('/athletes', authenticate, requireCoach, getCoachAthletesHandler);
+router.get('/me/athletes', authenticate, requireCoach, getCoachAthletesHandler);
 router.get('/scouting/athletes/:athleteId', authenticate, requireCoach, getScoutingAthleteProfileController);
 router.post('/athletes/:athleteId/workload', authenticate, requireCoach, postSrpeLog);
 router.get('/athletes/:athleteId/workload', authenticate, requireCoach, getAthleteWorkloadHandler);

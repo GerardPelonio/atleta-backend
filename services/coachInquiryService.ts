@@ -286,6 +286,8 @@ export async function getAthleteInquiries(athleteId: string): Promise<EnrichedIn
   );
 }
 
+import { createNotification } from './notificationService';
+
 /**
  * Response to a recruitment inquiry (Coach or Athlete).
  */
@@ -295,10 +297,17 @@ export async function respondToRecruitmentInquiry(
   responseStatus: 'Accepted' | 'Declined' | 'In Review',
   declineReason?: string
 ) {
-  const docRef = db.collection('Scouting_Registry').doc(inquiryId);
-  const doc = await docRef.get();
+  let docRef = db.collection('Scouting_Registry').doc(inquiryId);
+  let doc = await docRef.get();
   if (!doc.exists) {
-    throw new ServiceError(`Inquiry '${inquiryId}' not found.`, 404);
+    const fallbackRef = db.collection('Recruitment_Inquiries').doc(inquiryId);
+    const fallbackDoc = await fallbackRef.get();
+    if (fallbackDoc.exists) {
+      docRef = fallbackRef;
+      doc = fallbackDoc;
+    } else {
+      throw new ServiceError(`Inquiry '${inquiryId}' not found.`, 404);
+    }
   }
 
   const inqData = doc.data() as any;
@@ -311,6 +320,83 @@ export async function respondToRecruitmentInquiry(
   };
 
   await docRef.set(updates, { merge: true });
+
+  // If accepted, update Coach's athletes_managed array and trigger real-time notification
+  if (responseStatus === 'Accepted') {
+    const coachId = inqData.coach_scout_id || inqData.coach_id;
+    const athleteId = inqData.athlete_id;
+
+    // Fetch athlete profile & user details
+    const rawAthUid = String(athleteId).replace(/^ath_/, '');
+    const [athUserDoc, athProfileDoc] = await Promise.all([
+      db.collection('Users').doc(rawAthUid).get().catch(() => null),
+      db.collection('Athlete_Profiles').doc(athleteId).get().catch(() => null),
+    ]);
+
+    const uData: Record<string, any> = (athUserDoc && athUserDoc.exists ? athUserDoc.data() : null) || {};
+    const pData: Record<string, any> = (athProfileDoc && athProfileDoc.exists ? athProfileDoc.data() : null) || {};
+    const athleteName = uData.full_name || `${uData.first_name || ''} ${uData.last_name || ''}`.trim() || pData.full_name || 'Recruited Athlete';
+    const sportType = pData.sport_type || uData.sport_type || inqData.sport_type || 'Basketball';
+
+    const athleteEntry = {
+      athlete_id: athleteId,
+      user_id: rawAthUid,
+      full_name: athleteName,
+      first_name: uData.first_name || '',
+      last_name: uData.last_name || '',
+      email: uData.email || '',
+      sport_type: sportType,
+      position: pData.position || uData.position || 'Player',
+      jersey_number: pData.jersey_number || uData.jersey_number || '00',
+      recruitment_status: 'Recruited',
+      recruited_at: now,
+      inquiry_id: inquiryId,
+    };
+
+    if (coachId) {
+      const canonicalCoachId = String(coachId).startsWith('coach_') ? coachId : `coach_${coachId}`;
+      const rawCoachId = String(coachId).replace(/^coach_/, '');
+
+      const updateCoachDoc = async (ref: FirebaseFirestore.DocumentReference) => {
+        const snap = await ref.get().catch(() => null);
+        if (snap && snap.exists) {
+          const currentManaged: any[] = Array.isArray(snap.data()?.athletes_managed) ? snap.data()!.athletes_managed : [];
+          const exists = currentManaged.some((m: any) => (m.athlete_id && m.athlete_id === athleteId) || m === athleteId || (m.user_id && m.user_id === rawAthUid));
+          if (!exists) {
+            await ref.set({
+              athletes_managed: [...currentManaged, athleteEntry],
+              updated_at: now,
+            }, { merge: true }).catch(() => null);
+          }
+        }
+      };
+
+      await Promise.all([
+        updateCoachDoc(db.collection('Coach_Profiles').doc(canonicalCoachId)),
+        updateCoachDoc(db.collection('Coach_Profiles').doc(rawCoachId)),
+        updateCoachDoc(db.collection('Users').doc(rawCoachId)),
+      ]);
+
+      // Fire notification to coach portal
+      await createNotification({
+        recipient_id: rawCoachId,
+        sender_id: rawAthUid,
+        type: 'RECRUITMENT_INQUIRY',
+        title: 'Recruitment Accepted! 🎉',
+        message: `${athleteName} has accepted your recruitment inquiry for ${sportType}.`,
+      }).catch((err) => console.warn('Notification error on inquiry accept:', err));
+
+      if (canonicalCoachId !== rawCoachId) {
+        await createNotification({
+          recipient_id: canonicalCoachId,
+          sender_id: rawAthUid,
+          type: 'RECRUITMENT_INQUIRY',
+          title: 'Recruitment Accepted! 🎉',
+          message: `${athleteName} has accepted your recruitment inquiry for ${sportType}.`,
+        }).catch(() => null);
+      }
+    }
+  }
 
   // Invalidate any relevant caches
   invalidateCoachCache(inqData.coach_scout_id);

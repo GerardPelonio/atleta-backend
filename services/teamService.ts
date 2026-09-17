@@ -368,7 +368,10 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
   if (coachData) {
     const managed = coachData.athlete_managed || coachData.athletes_managed || [];
     if (Array.isArray(managed)) {
-      managed.forEach((id: string) => athleteIdSet.add(id));
+      managed.forEach((item: any) => {
+        const id = typeof item === 'string' ? item : (item.athlete_id || item.user_id || item.id);
+        if (id) athleteIdSet.add(String(id).trim());
+      });
     }
   }
 
