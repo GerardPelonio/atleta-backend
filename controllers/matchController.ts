@@ -31,10 +31,17 @@ export async function getAllMatchesHandler(req: AuthRequest, res: Response): Pro
       const coachTeamIds = new Set(teamsSnap.docs.map((d) => d.id));
 
       const coachMatches = allMatches.filter((m: any) => {
+        // Official matches (created by Tournament Officials) are always visible to all coaches
+        // so they can request scoresheets for any official game
+        if (m.is_official === true || m.match_type === 'Official Match') return true;
+        // Coach's own manually-logged or OCR-logged matches
         if (possibleCoachIds.includes(m.logged_by_coach_id)) return true;
         if (possibleCoachIds.includes(m.coach_id)) return true;
         if (possibleCoachIds.includes(m.created_by)) return true;
         if (possibleCoachIds.includes(m.requested_by_coach_id)) return true;
+        // Assigned coaches array (OCR submissions often populate this)
+        if (Array.isArray(m.assigned_coaches) && m.assigned_coaches.some((c: string) => possibleCoachIds.includes(c))) return true;
+        // Team-based association
         if (m.team_id && coachTeamIds.has(m.team_id)) return true;
         if (m.home_team_id && coachTeamIds.has(m.home_team_id)) return true;
         if (m.away_team_id && coachTeamIds.has(m.away_team_id)) return true;
