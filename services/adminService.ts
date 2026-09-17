@@ -172,6 +172,7 @@ export async function registerAdminService(
 
   batch.set(db.collection('Users').doc(uid), userData);
   batch.set(db.collection('Admin_Profiles').doc(adminId), adminProfileData);
+  batch.set(db.collection('Admin_Profiles').doc(uid), adminProfileData);
 
   await batch.commit();
 
