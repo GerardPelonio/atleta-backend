@@ -284,15 +284,19 @@ export async function registerUserService(
   if (firestoreRole === 'Athlete') {
     const athleteId = `ath_${uid}`;
     batch.set(db.collection('Athlete_Profiles').doc(athleteId), profileData);
+    batch.set(db.collection('Athlete_Profiles').doc(uid), profileData);
   } else if (firestoreRole === 'Coach') {
     const coachId = `coach_${uid}`;
     batch.set(db.collection('Coach_Profiles').doc(coachId), profileData);
+    batch.set(db.collection('Coach_Profiles').doc(uid), profileData);
   } else if (firestoreRole === 'Official') {
     const officialId = `off_${uid}`;
     batch.set(db.collection('Official_Profiles').doc(officialId), profileData);
+    batch.set(db.collection('Official_Profiles').doc(uid), profileData);
   } else if (firestoreRole === 'System Admin') {
     const adminId = `admin_${uid}`;
     batch.set(db.collection('Admin_Profiles').doc(adminId), profileData);
+    batch.set(db.collection('Admin_Profiles').doc(uid), profileData);
   }
 
   // If role is Coach, also initialize Coach_Settings document atomically
@@ -310,6 +314,7 @@ export async function registerUserService(
       updated_at: now,
     };
     batch.set(settingsRef, settingsData);
+    batch.set(db.collection('Coach_Settings').doc(uid), settingsData);
   }
 
   await batch.commit();
@@ -696,6 +701,27 @@ export async function socialLoginService(
     const batch = db.batch();
     batch.set(userRef, userData);
     batch.set(profileRef, profileData);
+
+    if (userRole === 'Athlete') {
+      const athleteId = `ath_${uid}`;
+      batch.set(db.collection('Athlete_Profiles').doc(athleteId), profileData);
+    } else if (userRole === 'Coach') {
+      const coachId = `coach_${uid}`;
+      batch.set(db.collection('Coach_Profiles').doc(coachId), profileData);
+      const settingsData = {
+        setting_id: `setting_${coachId}`,
+        coach_id: coachId,
+        data_sync_preference: 'Manual',
+        notification_preferences: {
+          game_log_updates: true,
+          recruitment_inquiries: true,
+        },
+        updated_at: now,
+      };
+      batch.set(db.collection('Coach_Settings').doc(coachId), settingsData);
+      batch.set(db.collection('Coach_Settings').doc(uid), settingsData);
+    }
+
     await batch.commit();
   }
 
@@ -751,7 +777,13 @@ export async function getUserProfileService(uid: string) {
   const role = userData.role as UserRole;
 
   const profileCollection = ROLE_COLLECTION_MAP[role] || 'Athlete_Profiles';
-  const profileDoc = await db.collection(profileCollection).doc(uid).get();
+  let profileDoc = await db.collection(profileCollection).doc(uid).get();
+  if (!profileDoc.exists) {
+    const prefix = role === 'Athlete' ? 'ath_' : role === 'Coach' ? 'coach_' : role === 'Official' ? 'off_' : role === 'System Admin' ? 'admin_' : '';
+    if (prefix) {
+      profileDoc = await db.collection(profileCollection).doc(`${prefix}${uid}`).get();
+    }
+  }
   const profileData = profileDoc.exists ? profileDoc.data() : null;
   const permissions = ROLE_PERMISSIONS_MAP[role] || [];
 

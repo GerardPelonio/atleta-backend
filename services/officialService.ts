@@ -124,6 +124,7 @@ export async function registerOfficialService(data: RegisterOfficialDto) {
   batch.set(db.collection('Users').doc(uid), userData);
 
   batch.set(db.collection('Official_Profiles').doc(officialId), profileData);
+  batch.set(db.collection('Official_Profiles').doc(uid), profileData);
 
   batch.set(db.collection('Official_Settings').doc(officialId), settingsData);
   batch.set(db.collection('Official_Settings').doc(uid), settingsData);
