@@ -8,7 +8,10 @@ export interface CreateOfficialMatchDto {
   team_id?: string;
   home_team_id?: string;
   away_team_id?: string;
+  home_team_name?: string;
+  away_team_name?: string;
   opponent_team_name?: string;
+  game_name?: string;
   sport_type: SportType;
   match_type?: string;
   match_date: string;
@@ -59,26 +62,32 @@ export async function createOfficialMatchService(
   const validationId = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const teamId = data.team_id || data.home_team_id || '';
-  const opponentName = data.opponent_team_name || data.away_team_id || '';
+  const teamId = data.team_id || data.home_team_id || data.home_team_name || '';
+  const homeName = data.home_team_name || data.home_team_id || data.team_id || '';
+  const awayName = data.away_team_name || data.opponent_team_name || data.away_team_id || '';
 
-  // 3. Construct Match Log
+  // 3. Construct Match Log — include display-friendly team names so coaches can see the match
   const matchLog: MatchLog = {
     match_id: matchId,
     team_id: teamId,
+    home_team_name: homeName,
+    away_team_name: awayName,
     sport_type: data.sport_type,
     match_type: data.match_type || 'Official Match',
     match_date: data.match_date,
     location: data.location,
-    opponent_team_name: opponentName,
-    game_result: 'WIN', // Default placeholder
+    opponent_team_name: awayName,
+    game_name: data.game_name || `${homeName} vs ${awayName}`,
+    game_result: 'TBD',
     notes: data.notes || '',
     scoresheet_url: data.scoresheet_url || '',
     idempotency_key: idempotencyKey,
     reference_id: data.reference_id || crypto.randomUUID(),
     home_team_id: data.home_team_id || teamId,
-    away_team_id: data.away_team_id || opponentName,
+    away_team_id: data.away_team_id || awayName,
     assigned_coaches: data.assigned_coaches || [],
+    is_official: true,
+    official_id: officialId || uid,
     is_certified: false,
     is_locked: false,
     timestamp: now,

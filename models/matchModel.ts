@@ -2,7 +2,7 @@
 // Stored in Firestore "Match_Logs" collection.
 
 export type SportType = 'Basketball' | 'Swimming' | 'Track & Field';
-export type GameResult = 'WIN' | 'LOSS';
+export type GameResult = 'WIN' | 'LOSS' | 'TBD';
 export type ValidationStatus = 'Pending' | 'Approved' | 'Rejected';
 
 export interface MatchLog {
@@ -28,6 +28,10 @@ export interface MatchLog {
   is_certified?: boolean;         // Default: false, locked when true
   is_locked?: boolean;            // Default: false, locked when true
   is_invalidated?: boolean;       // Optional flag for disputed match records
+  away_team_name?: string;        // Display name for away team
+  game_name?: string;             // Human-readable game name (e.g. "CSPC vs CBSUA")
+  is_official?: boolean;          // True when created by a Tournament Official
+  official_id?: string;           // ID of the official who created the match
   timestamp: string;              // DateTime ISO string, Required
 }
 
