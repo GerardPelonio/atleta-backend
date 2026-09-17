@@ -97,6 +97,7 @@ export interface TeamSummary {
   coach_name: string;
   coach_id: string;
   established_year?: number;
+  roster_list?: any[];
 }
 
 export interface TeamDetailResponse {

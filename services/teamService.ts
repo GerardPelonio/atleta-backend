@@ -254,6 +254,7 @@ export async function getCoachTeams(coachId: string): Promise<TeamSummary[]> {
       coach_name: coach.full_name,
       coach_id: data.coach_id,
       established_year: data.established_year,
+      roster_list: data.roster_list || [],
     });
   }
 
@@ -334,6 +335,7 @@ export async function browseTeamDirectory(
       coach_name: coach.full_name,
       coach_id: data.coach_id || '',
       established_year: data.established_year,
+      roster_list: data.roster_list || [],
     });
   }
 
@@ -433,8 +435,12 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
       db.collection('Users').doc(canonicalAthleteId).get().catch(() => null),
     ]);
 
-    const profileData: Record<string, any> = (profDoc1 && profDoc1.exists) ? (profDoc1.data() || {}) : (profDoc2 && profDoc2.exists) ? (profDoc2.data() || {}) : {};
-    const userData: Record<string, any> = (userDoc1 && userDoc1.exists) ? (userDoc1.data() || {}) : (userDoc2 && userDoc2.exists) ? (userDoc2.data() || {}) : {};
+    const p1 = (profDoc1 && profDoc1.exists) ? (profDoc1.data() || {}) : {};
+    const p2 = (profDoc2 && profDoc2.exists) ? (profDoc2.data() || {}) : {};
+    const profileData: Record<string, any> = { ...p2, ...p1 };
+    const u1 = (userDoc1 && userDoc1.exists) ? (userDoc1.data() || {}) : {};
+    const u2 = (userDoc2 && userDoc2.exists) ? (userDoc2.data() || {}) : {};
+    const userData: Record<string, any> = { ...u2, ...u1 };
 
     const teamInfo = athleteTeamMap.get(aId) || athleteTeamMap.get(canonicalAthleteId) || athleteTeamMap.get(rawUid);
 
@@ -454,8 +460,8 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
       ? Object.values(profileData.eligibility_documents)
       : [];
 
-    const stats = profileData.stats || {};
-    const per = Number(stats.efficiency_rating ?? stats.per ?? stats.calculated_per ?? 0);
+    const stats = profileData.stats || profileData.averages || {};
+    const per = Number(stats.efficiency_rating ?? stats.per ?? stats.calculated_per ?? stats.per_score ?? 0);
     const ppg = Number(stats.ppg ?? stats.points_per_game ?? 0);
     const dynamicRating = per > 0 ? Math.min(99, Math.max(65, Math.round(per * 2.8))) : (ppg > 0 ? Math.min(99, Math.max(65, Math.round(ppg * 3.5))) : (profileData.rating_score || 0));
 
@@ -465,7 +471,7 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
       first_name: firstName,
       last_name: lastName,
       full_name: fullName,
-      birthdate: profileData.birthdate || userData.birthdate || '2006-01-01',
+      birthdate: profileData.birthdate || userData.birthdate || undefined,
       position: teamInfo?.position || profileData.position || userData.position || 'Player',
       jersey_number: teamInfo?.jersey_number ?? profileData.jersey_number ?? userData.jersey_number ?? null,
       sport_type: teamInfo?.sport_type || profileData.sport_type || userData.sport_type || 'Basketball',
@@ -473,8 +479,8 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
       team_id: teamInfo?.team_id || null,
       team_name: teamInfo?.team_name || 'Unassigned / No Team',
       has_team: Boolean(teamInfo?.team_id),
-      province: profileData.province || userData.province || 'National Capital Region',
-      location: profileData.province || userData.province || 'National Capital Region',
+      province: profileData.province || userData.province || undefined,
+      location: profileData.province || userData.province || undefined,
       avatar_url: profileData.avatar_url || userData.avatar_url || undefined,
       recruitment_status: profileData.recruitment_status || 'Active Roster',
       rating_score: dynamicRating,
