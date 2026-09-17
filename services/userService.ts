@@ -229,9 +229,9 @@ export async function registerUserService(
     profileData.account_status = 'Pending';
   } else if (firestoreRole === 'Official') {
     const officialId = `off_${uid}`;
-    const orgName = String(data.organization_name || data.organization || 'Collegiate Athletic League').trim();
-    const licenseNumber = String(data.official_license_number || 'SBP-LIC-2026-DEFAULT').trim();
-    const assignedTournaments = Array.isArray(data.assigned_tournaments) ? data.assigned_tournaments : ['Regional Championships 2026'];
+    const orgName = String(data.organization_name || data.organization || '').trim();
+    const licenseNumber = String(data.official_license_number || '').trim();
+    const assignedTournaments = Array.isArray(data.assigned_tournaments) ? data.assigned_tournaments : [];
 
     // Complete info on Users table
     userData.organization_name = orgName;
@@ -252,9 +252,9 @@ export async function registerUserService(
     profileData.is_active = true;
   } else if (firestoreRole === 'System Admin') {
     const adminId = `admin_${uid}`;
-    const institution = String(data.institution || 'Ateneo de Naga University').trim();
-    const deptCode = String(data.department_code || 'ATHLETICS_DEPT').trim();
-    const clearanceLevel = Number(data.clearance_level || 4);
+    const institution = String(data.institution || '').trim();
+    const deptCode = String(data.department_code || '').trim();
+    const clearanceLevel = Number(data.clearance_level || 1);
 
     // Complete info on Users table
     userData.institution = institution;
@@ -271,7 +271,7 @@ export async function registerUserService(
     profileData.clearance_level = clearanceLevel;
     profileData.is_active = true;
     profileData.is_elevated = true;
-    const rawKey = String(data.admin_security_key || 'default_admin_sec_key');
+    const rawKey = String(data.admin_security_key || '');
     profileData.admin_security_key = hashAdminSecurityKey(rawKey);
   }
 
@@ -380,7 +380,7 @@ export async function loginUserService(email: string, password: string) {
       const userData = userDoc.data();
       if (userData.password && userData.password === password) {
         uid = userDoc.id;
-        firebaseIdToken = await auth.createCustomToken(uid).catch(() => 'mock_firebase_id_token');
+        firebaseIdToken = await auth.createCustomToken(uid).catch(() => '');
       } else {
         throw { code: 'auth/wrong-password', message: 'Invalid email or password.' };
       }
