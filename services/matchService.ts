@@ -556,13 +556,10 @@ function extractJsonFromAiText(content: string): any {
 }
 
 const OCR_MODEL_WATERFALL = [
-  'gemini-1.5-flash-8b',
-  'gemini-1.5-flash',
-  'gemini-2.0-flash-lite',
-  'gemini-2.5-flash-lite',
-  'gemini-2.5-flash',
   'gemini-2.0-flash',
-  'gemini-flash-latest',
+  'gemini-1.5-flash',
+  'gemini-1.5-flash-latest',
+  'gemini-2.0-flash-lite',
   'gemini-1.5-pro',
   'gemini-pro-latest',
 ];
@@ -700,13 +697,13 @@ Important:
       let sendBuffer = file.buffer;
       let sendMime = mimeType;
 
-      // Optimize and compress large camera photos before sending to AI (1200px max for instant transfer)
+      // Optimize and compress large camera photos before sending to AI (1600px for crisp handwriting legibility)
       if (mimeType.startsWith('image/')) {
         try {
           const sharp = require('sharp');
           sendBuffer = await sharp(file.buffer)
-            .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true })
-            .jpeg({ quality: 80 })
+            .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
+            .jpeg({ quality: 85 })
             .toBuffer();
           sendMime = 'image/jpeg';
         } catch (sharpErr) {
@@ -715,26 +712,44 @@ Important:
       }
 
       const base64Image = sendBuffer.toString('base64');
-      const promptText = `Look at this scoresheet carefully. It contains match results and player tables for two teams (VISITORS and HOME).
-Identify the HOME team name and AWAY/VISITORS team name, their final scores, and individual player stats.
-
-Extract the data into this exact JSON format:
+      const promptText = `Analyze this basketball scoresheet carefully (image or PDF).
+Extract the match overview, final team scores, and individual player statistics into this exact JSON format:
 {
+  "match_info": {
+    "sport_type": "Basketball",
+    "event_name": "Tournament / League Name",
+    "opponent_team_name": "Opponent Team Name",
+    "home_team_name": "Home Team Name",
+    "game_result": "WIN",
+    "final_score": "0 - 0"
+  },
   "team_scores": [
-    {"team": "CELTICS", "score": 107, "is_home": true},
-    {"team": "HAWKS", "score": 103, "is_home": false}
+    {"team": "TeamName", "score": 0}
   ],
   "player_summary": [
-    {"player_name": "Full Name", "team_name": "TeamName", "jersey_number": 0, "points": 0, "rebounds": 0, "assists": 0, "fouls": 0}
+    {
+      "player_name": "Full Name",
+      "team_name": "TeamName",
+      "jersey_number": 0,
+      "points": 0,
+      "rebounds": 0,
+      "assists": 0,
+      "fouls": 0,
+      "steals": 0,
+      "blocks": 0,
+      "turnovers": 0,
+      "fg_made": 0,
+      "fg_attempted": 0,
+      "ft_made": 0,
+      "ft_attempted": 0
+    }
   ]
 }
 
 Important:
-- VISITORS/AWAY team is on the left side of the scoresheet.
-- HOME team is on the right side of the scoresheet.
-- Make sure every player's "team_name" correctly matches their team (e.g. HAWKS for visitor players on left, CELTICS for home players on right).
-- The FINAL SCORE or Running Score at the bottom shows each team's total final score.
-- The PTS column is the points scored by each player.
+- Read all handwritten and printed player names and jersey numbers carefully.
+- Extract all players from both teams.
+- Compute player points, rebounds, assists, fouls, etc. accurately.
 - Return ONLY valid JSON, nothing else.`;
 
       requestBody = {
@@ -849,6 +864,8 @@ Important:
         timestamp: now,
         team_name: resolvedTeam,
         player_name: pName,
+        jersey_number: jerseyNum,
+        position: item.position || 'G',
       };
       batch.set(db.collection('Performance_Metrics').doc(metricId), metric, { merge: true });
 
@@ -887,6 +904,8 @@ Important:
     return {
       match_id: matchId,
       scoresheet_url: scoresheetUrl,
+      player_summary: playerSummary,
+      team_scores: teamScores,
       parsed_tables: {
         team_scores: teamScores,
         player_summary: playerSummary,
@@ -1264,15 +1283,20 @@ export async function getMatchBoxscore(matchId: string): Promise<BoxscoreRespons
     }
 
     const teamName = data.team_name || profileData.team_name || (data.team || '');
+    const pFullName = data.player_name || profileData.full_name || `${firstName} ${lastName}`.trim() || 'Athlete';
+    const pJersey = profileData.jersey_number ?? data.jersey_number ?? null;
+    const pPosition = profileData.position || data.position || 'Unassigned';
+
     playerMetrics.push({
       metric_id: data.metric_id,
       athlete_id: athleteId,
       user_id: profileData.user_id || athleteId,
+      player_name: pFullName,
       first_name: firstName || data.player_name || 'Athlete',
       last_name: lastName || '',
       team_name: teamName,
-      position: profileData.position || 'Unassigned',
-      jersey_number: profileData.jersey_number ?? null,
+      position: pPosition,
+      jersey_number: pJersey,
       sport_stats: data.sport_stats,
       calculated_player_efficiency: data.calculated_player_efficiency,
     });
@@ -1390,15 +1414,20 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
     }
 
     const pTeam = data.team_name || profileData.team_name || (data.team || '');
+    const pFullName = data.player_name || profileData.full_name || `${firstName} ${lastName}`.trim() || 'Athlete';
+    const pJersey = profileData.jersey_number ?? data.jersey_number ?? null;
+    const pPosition = profileData.position || data.position || 'Unassigned';
+
     playerMetrics.push({
       metric_id: data.metric_id,
       athlete_id: athleteId,
       user_id: profileData.user_id || athleteId,
+      player_name: pFullName,
       first_name: firstName || data.player_name || 'Athlete',
       last_name: lastName || '',
       team_name: pTeam,
-      position: profileData.position || 'Unassigned',
-      jersey_number: profileData.jersey_number ?? null,
+      position: pPosition,
+      jersey_number: pJersey,
       sport_stats: data.sport_stats || {},
       calculated_player_efficiency: data.calculated_player_efficiency || 0,
     });

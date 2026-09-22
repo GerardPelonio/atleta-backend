@@ -87,6 +87,8 @@ export interface PerformanceMetric {
   player_name?: string;           // Optional Player Name
   team_name?: string;             // Optional Team Name (Home or Opponent)
   team?: string;                  // Optional Team Name alias
+  jersey_number?: number | null;  // Jersey Number
+  position?: string;              // Position
   match_id: string;               // Foreign Key -> Match_Logs.match_id, Required
   sport_category: string;         // Required
   sport_stats: SportStatsPayload; // Map / JSON Object
@@ -108,35 +110,32 @@ export interface MatchSubmissionPayload {
   [key: string]: any;
   team_id: string;
   home_team_name?: string;
-  match_name?: string;
-  sport_type: SportType;
+  away_team_name?: string;
+  opponent_team_name?: string;
   match_type: string;
+  sport_type: SportType;
   match_date: string;
   location: string;
-  opponent_team_name: string;
-  game_result: GameResult;
+  court_number?: number;
+  notes?: string;
   home_score?: number;
   away_score?: number;
-  notes?: string;
-  player_stats: PlayerStatSubmission[];
+  game_result?: GameResult;
+  player_stats?: PlayerStatSubmission[];
+  scoresheet?: Express.Multer.File;
 }
 
 export interface ParsedScoresheetResult {
-  match_id: string;
-  scoresheet_url: string;
+  match_id?: string;
+  scoresheet_url?: string;
+  player_summary?: any[];
+  team_scores?: any[];
   parsed_tables: {
-    team_scores: { team: string; score: number }[];
-    player_summary: {
-      player_name: string;
-      jersey_number?: number;
-      points: number;
-      rebounds: number;
-      assists: number;
-      fouls: number;
-    }[];
+    team_scores: Array<{ team: string; score: number; is_home?: boolean }>;
+    player_summary: Array<Record<string, any>>;
   };
   raw_ocr_text?: string;
-  processed_at: string;
+  processed_at?: string;
   warning?: string;
   ocr_status?: string;
 }
@@ -145,6 +144,7 @@ export interface BoxscorePlayerMetric {
   metric_id: string;
   athlete_id: string;
   user_id: string;
+  player_name?: string;
   first_name: string;
   last_name: string;
   team_name?: string;
