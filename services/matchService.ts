@@ -556,11 +556,14 @@ function extractJsonFromAiText(content: string): any {
 }
 
 const OCR_MODEL_WATERFALL = [
-  'gemini-2.5-flash',
+  'gemini-1.5-flash-8b',
   'gemini-1.5-flash',
+  'gemini-2.0-flash-lite',
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-flash',
   'gemini-2.0-flash',
   'gemini-flash-latest',
-  'gemini-2.5-flash-lite',
+  'gemini-1.5-pro',
   'gemini-pro-latest',
 ];
 
@@ -880,15 +883,34 @@ Important:
         team_scores: teamScores,
         player_summary: playerSummary,
       },
-      raw_ocr_text: 'Processed via Google Gemini API (gemini-3.5-flash)',
+      raw_ocr_text: 'Processed via Google Gemini Vision OCR',
       processed_at: now,
     };
   } catch (aiErr: any) {
     console.error('❌ [OCR] Google Gemini failed:', aiErr.message);
-    if (aiErr instanceof ServiceError) {
-      throw aiErr;
+
+    // Save uploaded scoresheet_url to Match_Logs even if OCR quota is rate-limited
+    try {
+      await db.collection('Match_Logs').doc(matchId).set({
+        scoresheet_url: scoresheetUrl,
+        ocr_status: 'FAILED_RATE_LIMITED',
+        updated_at: now,
+      }, { merge: true });
+    } catch (saveErr) {
+      console.warn('⚠️ [OCR] Fallback scoresheet_url save warning:', saveErr);
     }
-    throw new ServiceError(`OCR Processing failed: ${aiErr.message}`, 500);
+
+    return {
+      match_id: matchId,
+      scoresheet_url: scoresheetUrl,
+      parsed_tables: {
+        team_scores: [],
+        player_summary: [],
+      },
+      warning: 'AI OCR service is temporarily busy or rate-limited. Scoresheet image was saved successfully; please enter boxscore stats manually.',
+      raw_ocr_text: aiErr.message || 'Rate limited',
+      processed_at: now,
+    };
   }
 }
 
@@ -1038,42 +1060,59 @@ Important:
     };
   }
 
-  const content = await callGeminiWithWaterfall(requestBody, geminiKey);
-  const parsedData = extractJsonFromAiText(content);
-
-  if (Array.isArray(parsedData.player_summary)) {
-    parsedData.player_summary = parsedData.player_summary.map((p: any) => {
-      const computed = calculateBasketballMetrics({
-        points: Number(p.points || 0),
-        rebounds: Number(p.rebounds || 0),
-        assists: Number(p.assists || 0),
-        steals: Number(p.steals || 0),
-        blocks: Number(p.blocks || 0),
-        turnovers: Number(p.turnovers || 0),
-        fouls: Number(p.fouls || 0),
-        fg_made: Number(p.fg_made || 0),
-        fg_attempted: Number(p.fg_attempted || 0),
-        ft_made: Number(p.ft_made || 0),
-        ft_attempted: Number(p.ft_attempted || 0),
-      });
-
-      return {
-        ...p,
-        calculated_efficiency: computed.efficiency,
-        true_shooting_pct: computed.trueShootingPct,
-      };
-    });
-  }
-
   const scoresheetUrl = await uploadScoresheetFileToStorage(`standalone_${Date.now()}`, file);
 
-  return {
-    filename,
-    file_size_bytes: file.size,
-    scoresheet_url: scoresheetUrl,
-    parsed_at: new Date().toISOString(),
-    ...parsedData,
-  };
+  try {
+    const content = await callGeminiWithWaterfall(requestBody, geminiKey);
+    const parsedData = extractJsonFromAiText(content);
+
+    if (Array.isArray(parsedData.player_summary)) {
+      parsedData.player_summary = parsedData.player_summary.map((p: any) => {
+        const computed = calculateBasketballMetrics({
+          points: Number(p.points || 0),
+          rebounds: Number(p.rebounds || 0),
+          assists: Number(p.assists || 0),
+          steals: Number(p.steals || 0),
+          blocks: Number(p.blocks || 0),
+          turnovers: Number(p.turnovers || 0),
+          fouls: Number(p.fouls || 0),
+          fg_made: Number(p.fg_made || 0),
+          fg_attempted: Number(p.fg_attempted || 0),
+          ft_made: Number(p.ft_made || 0),
+          ft_attempted: Number(p.ft_attempted || 0),
+        });
+
+        return {
+          ...p,
+          calculated_efficiency: computed.efficiency,
+          true_shooting_pct: computed.trueShootingPct,
+        };
+      });
+    }
+
+    return {
+      filename,
+      file_size_bytes: file.size,
+      scoresheet_url: scoresheetUrl,
+      parsed_at: new Date().toISOString(),
+      ...parsedData,
+    };
+  } catch (aiErr: any) {
+    console.warn('⚠️ [SCAN OCR] Google Gemini rate-limited or unavailable:', aiErr.message);
+    return {
+      filename,
+      file_size_bytes: file.size,
+      scoresheet_url: scoresheetUrl,
+      parsed_at: new Date().toISOString(),
+      match_info: {
+        sport_type: 'Basketball',
+        event_name: 'Tournament Match',
+      },
+      team_scores: [],
+      player_summary: [],
+      warning: 'AI OCR service is temporarily busy or rate-limited. Scoresheet image was saved successfully; please enter boxscore stats manually.',
+    };
+  }
 }
 
 

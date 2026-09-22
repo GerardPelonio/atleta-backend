@@ -137,6 +137,8 @@ export interface ParsedScoresheetResult {
   };
   raw_ocr_text?: string;
   processed_at: string;
+  warning?: string;
+  ocr_status?: string;
 }
 
 export interface BoxscorePlayerMetric {
