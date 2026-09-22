@@ -798,7 +798,7 @@ Important:
       const rawStats = {
         points: Number(item.points ?? item.pts ?? 0),
         assists: Number(item.assists ?? item.ast ?? 0),
-        rebounds: Number((item.offensive_rebounds || 0) + (item.defensive_rebounds || 0) || item.rebounds ?? item.reb ?? 0),
+        rebounds: Number(((item.offensive_rebounds || 0) + (item.defensive_rebounds || 0)) || (item.rebounds ?? item.reb ?? 0)),
         steals: Number(item.steals ?? item.stl ?? 0),
         blocks: Number(item.blocks ?? item.blk ?? 0),
         turnovers: Number(item.turnovers ?? item.to ?? 0),
@@ -1151,7 +1151,7 @@ export async function getMatchBoxscore(matchId: string): Promise<BoxscoreRespons
       const nameParts = pName.split(/\s+/);
       const rawStats = item.stats || item.sport_stats || {
         points: Number(item.points ?? item.pts ?? 0),
-        rebounds: Number((item.offensive_rebounds || 0) + (item.defensive_rebounds || 0) || item.rebounds ?? item.reb ?? 0),
+        rebounds: Number(((item.offensive_rebounds || 0) + (item.defensive_rebounds || 0)) || (item.rebounds ?? item.reb ?? 0)),
         assists: Number(item.assists ?? item.ast ?? 0),
         steals: Number(item.steals ?? item.stl ?? 0),
         blocks: Number(item.blocks ?? item.blk ?? 0),
@@ -1272,7 +1272,7 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
       const nameParts = pName.split(/\s+/);
       const rawStats = item.stats || item.sport_stats || {
         points: Number(item.points ?? item.pts ?? 0),
-        rebounds: Number((item.offensive_rebounds || 0) + (item.defensive_rebounds || 0) || item.rebounds ?? item.reb ?? 0),
+        rebounds: Number(((item.offensive_rebounds || 0) + (item.defensive_rebounds || 0)) || (item.rebounds ?? item.reb ?? 0)),
         assists: Number(item.assists ?? item.ast ?? 0),
         steals: Number(item.steals ?? item.stl ?? 0),
         blocks: Number(item.blocks ?? item.blk ?? 0),
