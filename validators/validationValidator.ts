@@ -26,14 +26,14 @@ export function validateCreateOfficialMatch(
     errors.push({ field: 'team_id', message: 'Team ID (team_id or home_team_id) is required.' });
   }
 
-  // sport_type (Required)
+  // sport_type (Required: dynamic sport name e.g. Basketball, Volleyball, Swimming, etc.)
   const sportType = typeof data.sport_type === 'string' ? data.sport_type.trim() : '';
   if (!sportType) {
     errors.push({ field: 'sport_type', message: 'Sport type (sport_type) is required.' });
-  } else if (!VALID_SPORTS.includes(sportType)) {
+  } else if (sportType.length > 100) {
     errors.push({
       field: 'sport_type',
-      message: `Invalid sport_type '${sportType}'. Must be one of: ${VALID_SPORTS.join(', ')}.`,
+      message: 'Sport type (sport_type) cannot exceed 100 characters.',
     });
   }
 

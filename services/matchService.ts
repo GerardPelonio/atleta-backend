@@ -597,34 +597,55 @@ async function callGeminiWithWaterfall(requestBody: any, geminiKey: string): Pro
 }
 
 /**
+ * Helper to upload scoresheet file buffer to cloud storage (Firebase Storage Bucket)
+ * with robust fallback to base64 Data URI so browser previews never break.
+ */
+export async function uploadScoresheetFileToStorage(matchId: string, file: Express.Multer.File): Promise<string> {
+  const mime = file.mimetype || 'image/jpeg';
+  const rawExt = (file.originalname || '').split('.').pop() || 'jpg';
+  const cleanExt = rawExt.toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+  const destPath = `scoresheets/${matchId}_${Date.now()}.${cleanExt}`;
+
+  // 1. Attempt upload to Firebase Storage bucket if available
+  try {
+    const adminStorage = require('firebase-admin/storage');
+    const bucket = adminStorage.getStorage().bucket();
+    if (bucket && bucket.name) {
+      const fileUpload = bucket.file(destPath);
+      await fileUpload.save(file.buffer, {
+        metadata: {
+          contentType: mime,
+        },
+        public: true,
+      });
+      return `https://storage.googleapis.com/${bucket.name}/${destPath}`;
+    }
+  } catch (storageErr: any) {
+    console.warn('⚠️ [STORAGE] Cloud Storage bucket upload fallback:', storageErr?.message || storageErr);
+  }
+
+  // 2. Resilient Fallback: High-fidelity base64 Data URI (works seamlessly in all browsers and iframes)
+  return `data:${mime};base64,${file.buffer.toString('base64')}`;
+}
+
+/**
  * Process scoresheet image/PDF upload via OCR.
  * POST /api/v1/matches/:matchId/scoresheet
  */
 export async function processScoresheetOCR(matchId: string, file?: Express.Multer.File): Promise<ParsedScoresheetResult> {
   validateScoresheetUpload(file);
 
-  // Save the uploaded file to the scratch folder for analysis
-  if (file && file.buffer) {
-    try {
-      const fs = require('fs');
-      const path = require('path');
-      const scratchDir = path.resolve(__dirname, '..', 'scratch');
-      if (!fs.existsSync(scratchDir)) {
-        fs.mkdirSync(scratchDir, { recursive: true });
-      }
-      fs.writeFileSync(path.join(scratchDir, 'last_uploaded.jpg'), file.buffer);
-    } catch (saveErr: any) {
-      console.warn('⚠️ [DEBUG] Could not save uploaded file to scratch:', saveErr.message);
-    }
-  }
-
   const matchDoc = await db.collection('Match_Logs').doc(matchId).get();
   if (!matchDoc.exists) {
     throw new ServiceError(`Match with ID '${matchId}' was not found.`, 404);
   }
 
-  const filename = file ? file.originalname : `scoresheet_${matchId}.png`;
-  const scoresheetUrl = `https://atleta.ph/uploads/scoresheets/${filename}`;
+  if (!file || !file.buffer) {
+    throw new ServiceError('No scoresheet file uploaded.', 400);
+  }
+
+  // Generate robust cloud storage URL or data URI
+  const scoresheetUrl = await uploadScoresheetFileToStorage(matchId, file);
   const now = new Date().toISOString();
 
   // Ensure dotenv is loaded so GEMINI_API_KEY is available
@@ -635,12 +656,9 @@ export async function processScoresheetOCR(matchId: string, file?: Express.Multe
     throw new ServiceError('GEMINI_API_KEY is not configured in .env', 500);
   }
 
-  if (!file || !file.buffer) {
-    throw new ServiceError('No scoresheet file uploaded.', 400);
-  }
-
   try {
     const mimeType = file.mimetype || 'image/jpeg';
+    const filename = file.originalname || `scoresheet_${matchId}.png`;
     let requestBody: any;
 
     if (mimeType === 'text/csv' || mimeType === 'application/vnd.ms-excel' || filename.endsWith('.csv')) {
@@ -733,73 +751,132 @@ Important:
 
     // Parse AI output cleanly
     const aiParsed = extractJsonFromAiText(content);
-    const playerSummary: any[] = aiParsed.player_summary || [];
+    const playerSummary: any[] = Array.isArray(aiParsed.player_summary) ? aiParsed.player_summary : [];
+    const teamScores: any[] = Array.isArray(aiParsed.team_scores) ? aiParsed.team_scores : [];
 
-    // Save scoresheet_url to Match_Logs
-    await db.collection('Match_Logs').doc(matchId).set({ scoresheet_url: scoresheetUrl }, { merge: true });
-
-    // Populate Performance_Metrics for matched roster athletes from OCR
     const matchData = matchDoc.data()!;
+    const homeTeamName = (matchData.home_team_name || matchData.team_name || 'Home Team').toUpperCase();
+    const awayTeamName = (matchData.opponent_team_name || matchData.away_team_name || 'Away Team').toUpperCase();
+
+    // Check if team roster exists in DB to match athlete IDs
     const teamId = matchData.team_id;
-
-    if (teamId && playerSummary.length > 0) {
-      const teamDoc = await db.collection('Teams').doc(teamId).get();
-      if (teamDoc.exists) {
-        const roster = teamDoc.data()?.roster_list || [];
-        const batch = db.batch();
-        let metricCount = 0;
-
-        for (const item of playerSummary) {
-          const jerseyNum = Number(item.jersey_number);
-          const pName = String(item.player_name || '').toLowerCase();
-
-          // Find athlete in team roster matching jersey number or name
-          const matchedAthlete = roster.find((r: any) => {
-            if (jerseyNum > 0 && Number(r.jersey_number) === jerseyNum) return true;
-            const rName = `${r.first_name || ''} ${r.last_name || ''}`.toLowerCase();
-            return pName.length > 0 && (rName.includes(pName) || pName.includes(rName));
-          });
-
-          if (matchedAthlete && matchedAthlete.athlete_id) {
-            const athleteId = matchedAthlete.athlete_id;
-            const metricId = `metric_${matchId}_${athleteId}`;
-
-            const rawStats = {
-              points: Number(item.points || 0),
-              assists: Number(item.assists || 0),
-              rebounds: Number(item.rebounds || 0),
-              fouls: Number(item.fouls || 0),
-            };
-
-            const computed = calculateBasketballMetrics(rawStats);
-            const metric: PerformanceMetric = {
-              metric_id: metricId,
-              athlete_id: athleteId,
-              match_id: matchId,
-              sport_category: matchData.sport_type || 'Basketball',
-              sport_stats: computed.enrichedStats,
-              calculated_player_efficiency: computed.efficiency,
-              timestamp: now,
-            };
-
-            const metricRef = db.collection('Performance_Metrics').doc(metricId);
-            batch.set(metricRef, metric);
-            metricCount++;
-          }
+    let roster: any[] = [];
+    if (teamId) {
+      try {
+        const teamDoc = await db.collection('Teams').doc(teamId).get();
+        if (teamDoc.exists) {
+          roster = teamDoc.data()?.roster_list || [];
         }
+      } catch {}
+    }
 
-        if (metricCount > 0) {
-          await batch.commit();
-          console.log(`✅ [OCR METRICS] Populated ${metricCount} player Performance_Metrics records from OCR.`);
-        }
+    // Format all OCR extracted players into rich player_stats with complete metrics
+    const halfCount = Math.ceil(playerSummary.length / 2);
+    const batch = db.batch();
+
+    const formattedPlayerStats = playerSummary.map((item: any, idx: number) => {
+      let resolvedTeam = item.team_name || item.team ? String(item.team_name || item.team).toUpperCase() : '';
+      if (!resolvedTeam) {
+        resolvedTeam = (item.is_home === true || idx >= halfCount) ? homeTeamName : awayTeamName;
       }
+
+      const jerseyNum = item.jersey_number !== undefined && item.jersey_number !== null
+        ? Number(item.jersey_number)
+        : (idx + 1);
+
+      const pName = String(item.player_name || `Player ${jerseyNum}`);
+
+      // Try to find athlete in registered team roster
+      const matchedAthlete = roster.find((r: any) => {
+        if (jerseyNum > 0 && Number(r.jersey_number) === jerseyNum) return true;
+        const rName = `${r.first_name || ''} ${r.last_name || ''}`.toLowerCase();
+        return pName.length > 0 && (rName.includes(pName.toLowerCase()) || pName.toLowerCase().includes(rName));
+      });
+
+      const athleteId = matchedAthlete?.athlete_id || item.athlete_id || `ath_ocr_${matchId}_${idx + 1}`;
+
+      const rawStats = {
+        points: Number(item.points ?? item.pts ?? 0),
+        assists: Number(item.assists ?? item.ast ?? 0),
+        rebounds: Number((item.offensive_rebounds || 0) + (item.defensive_rebounds || 0) || item.rebounds ?? item.reb ?? 0),
+        steals: Number(item.steals ?? item.stl ?? 0),
+        blocks: Number(item.blocks ?? item.blk ?? 0),
+        turnovers: Number(item.turnovers ?? item.to ?? 0),
+        fouls: Number(item.fouls ?? item.pf ?? 0),
+        fg_made: Number(item.fg_made ?? item.fgm ?? 0),
+        fg_attempted: Number(item.fg_attempted ?? item.fga ?? 0),
+        ft_made: Number(item.ft_made ?? item.ftm ?? 0),
+        ft_attempted: Number(item.ft_attempted ?? item.fta ?? 0),
+      };
+
+      const isBasketball = !matchData.sport_type || String(matchData.sport_type).toLowerCase().includes('basket');
+      const computed = isBasketball ? calculateBasketballMetrics(rawStats) : calculateDynamicSportMetrics(rawStats);
+
+      const playerStatObj = {
+        athlete_id: athleteId,
+        player_name: pName,
+        team_name: resolvedTeam,
+        jersey_number: jerseyNum,
+        position: item.position || 'G',
+        stats: rawStats,
+        sport_stats: computed.enrichedStats,
+        calculated_player_efficiency: computed.efficiency,
+        calculated_efficiency: computed.efficiency,
+        true_shooting_pct: (computed as any).trueShootingPct || 0,
+      };
+
+      // Always write a Performance_Metrics record for this match & player so boxscore queries find it
+      const metricId = `metric_${matchId}_${athleteId}`;
+      const metric: PerformanceMetric = {
+        metric_id: metricId,
+        athlete_id: athleteId,
+        match_id: matchId,
+        sport_category: matchData.sport_type || 'Basketball',
+        sport_stats: computed.enrichedStats,
+        calculated_player_efficiency: computed.efficiency,
+        timestamp: now,
+        team_name: resolvedTeam,
+        player_name: pName,
+      };
+      batch.set(db.collection('Performance_Metrics').doc(metricId), metric, { merge: true });
+
+      return playerStatObj;
+    });
+
+    // Save scoresheet_url, player_stats, scoresheet_data, and parsed_tables directly onto Match_Logs
+    const updatePayload: any = {
+      scoresheet_url: scoresheetUrl,
+      player_stats: formattedPlayerStats,
+      scoresheet_data: {
+        team_scores: teamScores,
+        player_summary: playerSummary,
+      },
+      parsed_tables: {
+        team_scores: teamScores,
+        player_summary: playerSummary,
+      },
+      updated_at: now,
+    };
+
+    if (teamScores.length >= 2) {
+      updatePayload.home_score = teamScores[0].score;
+      updatePayload.away_score = teamScores[1].score;
+      updatePayload.game_result = Number(teamScores[0].score) >= Number(teamScores[1].score) ? 'WIN' : 'LOSS';
+    }
+
+    await db.collection('Match_Logs').doc(matchId).set(updatePayload, { merge: true });
+
+    // Commit all Performance_Metrics
+    if (formattedPlayerStats.length > 0) {
+      await batch.commit();
+      console.log(`✅ [OCR METRICS] Successfully persisted ${formattedPlayerStats.length} player stats to Match_Logs & Performance_Metrics.`);
     }
 
     return {
       match_id: matchId,
       scoresheet_url: scoresheetUrl,
       parsed_tables: {
-        team_scores: aiParsed.team_scores || [],
+        team_scores: teamScores,
         player_summary: playerSummary,
       },
       raw_ocr_text: 'Processed via Google Gemini API (gemini-3.5-flash)',
@@ -987,9 +1064,12 @@ Important:
     });
   }
 
+  const scoresheetUrl = await uploadScoresheetFileToStorage(`standalone_${Date.now()}`, file);
+
   return {
     filename,
     file_size_bytes: file.size,
+    scoresheet_url: scoresheetUrl,
     parsed_at: new Date().toISOString(),
     ...parsedData,
   };
@@ -1058,22 +1138,44 @@ export async function getMatchBoxscore(matchId: string): Promise<BoxscoreRespons
     });
   }
 
-  // Fallback to matchData.player_stats if Performance_Metrics were not queried or written yet
-  if (playerMetrics.length === 0 && Array.isArray(matchData.player_stats) && matchData.player_stats.length > 0) {
-    for (const item of matchData.player_stats) {
-      const pName = (item as any).player_name || 'Athlete';
+  // Fallback to matchData.player_stats or scoresheet_data if Performance_Metrics were not queried or written yet
+  const fallbackList: any[] = Array.isArray(matchData.player_stats) && matchData.player_stats.length > 0
+    ? matchData.player_stats
+    : (Array.isArray((matchData as any).scoresheet_data?.player_summary) && (matchData as any).scoresheet_data.player_summary.length > 0
+      ? (matchData as any).scoresheet_data.player_summary
+      : (Array.isArray((matchData as any).parsed_tables?.player_summary) ? (matchData as any).parsed_tables.player_summary : []));
+
+  if (playerMetrics.length === 0 && fallbackList.length > 0) {
+    for (const item of fallbackList) {
+      const pName = String(item.player_name || 'Athlete');
       const nameParts = pName.split(/\s+/);
+      const rawStats = item.stats || item.sport_stats || {
+        points: Number(item.points ?? item.pts ?? 0),
+        rebounds: Number((item.offensive_rebounds || 0) + (item.defensive_rebounds || 0) || item.rebounds ?? item.reb ?? 0),
+        assists: Number(item.assists ?? item.ast ?? 0),
+        steals: Number(item.steals ?? item.stl ?? 0),
+        blocks: Number(item.blocks ?? item.blk ?? 0),
+        turnovers: Number(item.turnovers ?? item.to ?? 0),
+        fouls: Number(item.fouls ?? item.pf ?? 0),
+        fg_made: Number(item.fg_made ?? item.fgm ?? 0),
+        fg_attempted: Number(item.fg_attempted ?? item.fga ?? 0),
+        ft_made: Number(item.ft_made ?? item.ftm ?? 0),
+        ft_attempted: Number(item.ft_attempted ?? item.fta ?? 0),
+      };
+
+      const computed = calculateBasketballMetrics(rawStats);
+
       playerMetrics.push({
-        metric_id: `metric_${matchId}_${(item as any).athlete_id || 'player'}`,
-        athlete_id: (item as any).athlete_id || 'athlete_id',
-        user_id: (item as any).athlete_id || 'user_id',
+        metric_id: `metric_${matchId}_${item.athlete_id || item.jersey_number || 'player'}`,
+        athlete_id: item.athlete_id || 'athlete_id',
+        user_id: item.athlete_id || 'user_id',
         first_name: nameParts[0] || 'Athlete',
         last_name: nameParts.slice(1).join(' ') || '',
-        team_name: (item as any).team_name || (item as any).team || '',
-        position: 'Player',
-        jersey_number: (item as any).jersey_number ?? null,
-        sport_stats: (item as any).stats || (item as any).sport_stats || {},
-        calculated_player_efficiency: 0,
+        team_name: item.team_name || item.team || '',
+        position: item.position || 'Player',
+        jersey_number: item.jersey_number !== undefined ? Number(item.jersey_number) : null,
+        sport_stats: computed.enrichedStats,
+        calculated_player_efficiency: item.calculated_efficiency || item.calculated_player_efficiency || computed.efficiency || 0,
       });
     }
   }
@@ -1157,22 +1259,44 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
     });
   }
 
-  // Fallback to matchData.player_stats if Performance_Metrics were not queried or written yet
-  if (playerMetrics.length === 0 && Array.isArray(matchData.player_stats) && matchData.player_stats.length > 0) {
-    for (const item of matchData.player_stats) {
-      const pName = (item as any).player_name || 'Athlete';
+  // Fallback to matchData.player_stats or scoresheet_data if Performance_Metrics were not queried or written yet
+  const detailsFallbackList: any[] = Array.isArray(matchData.player_stats) && matchData.player_stats.length > 0
+    ? matchData.player_stats
+    : (Array.isArray(matchData.scoresheet_data?.player_summary) && matchData.scoresheet_data.player_summary.length > 0
+      ? matchData.scoresheet_data.player_summary
+      : (Array.isArray(matchData.parsed_tables?.player_summary) ? matchData.parsed_tables.player_summary : []));
+
+  if (playerMetrics.length === 0 && detailsFallbackList.length > 0) {
+    for (const item of detailsFallbackList) {
+      const pName = String(item.player_name || 'Athlete');
       const nameParts = pName.split(/\s+/);
+      const rawStats = item.stats || item.sport_stats || {
+        points: Number(item.points ?? item.pts ?? 0),
+        rebounds: Number((item.offensive_rebounds || 0) + (item.defensive_rebounds || 0) || item.rebounds ?? item.reb ?? 0),
+        assists: Number(item.assists ?? item.ast ?? 0),
+        steals: Number(item.steals ?? item.stl ?? 0),
+        blocks: Number(item.blocks ?? item.blk ?? 0),
+        turnovers: Number(item.turnovers ?? item.to ?? 0),
+        fouls: Number(item.fouls ?? item.pf ?? 0),
+        fg_made: Number(item.fg_made ?? item.fgm ?? 0),
+        fg_attempted: Number(item.fg_attempted ?? item.fga ?? 0),
+        ft_made: Number(item.ft_made ?? item.ftm ?? 0),
+        ft_attempted: Number(item.ft_attempted ?? item.fta ?? 0),
+      };
+
+      const computed = calculateBasketballMetrics(rawStats);
+
       playerMetrics.push({
-        metric_id: `metric_${matchId}_${(item as any).athlete_id || 'player'}`,
-        athlete_id: (item as any).athlete_id || 'athlete_id',
-        user_id: (item as any).athlete_id || 'user_id',
+        metric_id: `metric_${matchId}_${item.athlete_id || item.jersey_number || 'player'}`,
+        athlete_id: item.athlete_id || 'athlete_id',
+        user_id: item.athlete_id || 'user_id',
         first_name: nameParts[0] || 'Athlete',
         last_name: nameParts.slice(1).join(' ') || '',
-        team_name: (item as any).team_name || (item as any).team || '',
-        position: 'Player',
-        jersey_number: (item as any).jersey_number ?? null,
-        sport_stats: (item as any).stats || (item as any).sport_stats || {},
-        calculated_player_efficiency: 0,
+        team_name: item.team_name || item.team || '',
+        position: item.position || 'Player',
+        jersey_number: item.jersey_number !== undefined ? Number(item.jersey_number) : null,
+        sport_stats: computed.enrichedStats,
+        calculated_player_efficiency: item.calculated_efficiency || item.calculated_player_efficiency || computed.efficiency || 0,
       });
     }
   }

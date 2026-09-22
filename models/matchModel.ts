@@ -1,7 +1,7 @@
 // ─── Match Log Entity ────────────────────────────────────────────────────────
 // Stored in Firestore "Match_Logs" collection.
 
-export type SportType = 'Basketball' | 'Swimming' | 'Track & Field';
+export type SportType = 'Basketball' | 'Swimming' | 'Track & Field' | (string & {});
 export type GameResult = 'WIN' | 'LOSS' | 'TBD';
 export type ValidationStatus = 'Pending' | 'Approved' | 'Rejected';
 
