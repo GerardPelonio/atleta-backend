@@ -653,14 +653,21 @@ export async function processScoresheetOCR(matchId: string, file?: Express.Multe
   const now = new Date().toISOString();
 
   // Ensure dotenv is loaded so GEMINI_API_KEY is available
-  require('dotenv').config();
-  const geminiKey = process.env.GEMINI_API_KEY;
+  try {
+    require('dotenv').config();
+  } catch {}
 
-  if (!geminiKey) {
-    throw new ServiceError('GEMINI_API_KEY is not configured in .env', 500);
-  }
+  const geminiKey = process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GEMINI_KEY ||
+    '';
 
   try {
+    if (!geminiKey) {
+      throw new Error('GEMINI_API_KEY is not configured in environment');
+    }
+
     const mimeType = file.mimetype || 'image/jpeg';
     const filename = file.originalname || `scoresheet_${matchId}.png`;
     let requestBody: any;
@@ -925,12 +932,15 @@ export async function scanScoresheetStandalone(file?: Express.Multer.File): Prom
     throw new ServiceError('No scoresheet file uploaded.', 400);
   }
 
-  require('dotenv').config();
-  const geminiKey = process.env.GEMINI_API_KEY;
+  try {
+    require('dotenv').config();
+  } catch {}
 
-  if (!geminiKey) {
-    throw new ServiceError('GEMINI_API_KEY is not configured in .env', 500);
-  }
+  const geminiKey = process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GEMINI_KEY ||
+    '';
 
   const mimeType = file.mimetype || 'image/jpeg';
   const filename = file.originalname || 'scoresheet.png';
@@ -1220,12 +1230,17 @@ export async function getMatchBoxscore(matchId: string): Promise<BoxscoreRespons
     }
   }
 
+  const hName = (matchData as any).home_team_name || teamName;
+  const aName = (matchData as any).away_team_name || matchData.opponent_team_name;
+
   return {
     match: matchData,
+    home_team_name: hName,
+    away_team_name: aName,
     team_summary: {
       team_id: matchData.team_id,
-      team_name: (matchData as any).home_team_name || teamName,
-      opponent_team_name: matchData.opponent_team_name,
+      team_name: hName,
+      opponent_team_name: aName,
       game_result: matchData.game_result,
       match_date: matchData.match_date,
       location: matchData.location,

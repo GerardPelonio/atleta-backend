@@ -156,6 +156,8 @@ export interface BoxscorePlayerMetric {
 
 export interface BoxscoreResponse {
   match: MatchLog;
+  home_team_name?: string;
+  away_team_name?: string;
   team_summary: {
     team_id: string;
     team_name: string;
