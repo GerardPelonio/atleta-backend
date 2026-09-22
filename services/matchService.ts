@@ -564,7 +564,8 @@ const OCR_MODEL_WATERFALL = [
   'gemini-pro-latest',
 ];
 
-async function callGeminiWithWaterfall(requestBody: any, geminiKey: string): Promise<string> {
+async function callGeminiWithWaterfall(requestBody: any, rawKey: string): Promise<string> {
+  const geminiKey = (rawKey || '').trim().replace(/^["']|["']$/g, '');
   let lastErrorMsg = '';
 
   for (const model of OCR_MODEL_WATERFALL) {
@@ -575,7 +576,7 @@ async function callGeminiWithWaterfall(requestBody: any, geminiKey: string): Pro
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody),
-          signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(15000) : undefined,
+          signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(25000) : undefined,
         }
       );
 
@@ -585,7 +586,7 @@ async function callGeminiWithWaterfall(requestBody: any, geminiKey: string): Pro
         if (content) return content;
       } else {
         const errText = await response.text();
-        lastErrorMsg = `Model ${model} returned ${response.status}: ${errText.substring(0, 100)}`;
+        lastErrorMsg = `Model ${model} returned ${response.status}: ${errText.substring(0, 150)}`;
         console.warn(`⚠️ [OCR WATERFALL] ${lastErrorMsg}. Retrying with next candidate model...`);
       }
     } catch (fetchErr: any) {
@@ -697,13 +698,13 @@ Important:
       let sendBuffer = file.buffer;
       let sendMime = mimeType;
 
-      // Optimize and compress large camera photos before sending to AI (1600px for crisp handwriting legibility)
+      // Optimize and compress large camera photos before sending to AI (1200px for instant transfer and crisp legibility)
       if (mimeType.startsWith('image/')) {
         try {
           const sharp = require('sharp');
           sendBuffer = await sharp(file.buffer)
-            .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
-            .jpeg({ quality: 85 })
+            .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true })
+            .jpeg({ quality: 75 })
             .toBuffer();
           sendMime = 'image/jpeg';
         } catch (sharpErr) {
@@ -1104,13 +1105,13 @@ Important:
     let sendBuffer = file.buffer;
     let sendMime = mimeType;
 
-    // Optimize and compress large camera photos before sending to AI
+    // Optimize and compress large camera photos before sending to AI (1200px for instant transfer)
     if (mimeType.startsWith('image/')) {
       try {
         const sharp = require('sharp');
         sendBuffer = await sharp(file.buffer)
-          .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
-          .jpeg({ quality: 85 })
+          .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 75 })
           .toBuffer();
         sendMime = 'image/jpeg';
       } catch (sharpErr) {
