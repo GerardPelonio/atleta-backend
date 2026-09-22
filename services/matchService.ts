@@ -1469,6 +1469,7 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
         user_id: item.athlete_id || 'user_id',
         first_name: nameParts[0] || 'Athlete',
         last_name: nameParts.slice(1).join(' ') || '',
+        player_name: pName,
         team_name: item.team_name || item.team || '',
         position: item.position || 'Player',
         jersey_number: item.jersey_number !== undefined ? Number(item.jersey_number) : null,
