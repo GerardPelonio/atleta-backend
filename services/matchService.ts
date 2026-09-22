@@ -556,11 +556,12 @@ function extractJsonFromAiText(content: string): any {
 }
 
 const OCR_MODEL_WATERFALL = [
-  'gemini-3.5-flash-lite',
-  'gemini-3.6-flash',
+  'gemini-2.5-flash',
+  'gemini-1.5-flash',
+  'gemini-2.0-flash',
   'gemini-flash-latest',
+  'gemini-2.5-flash-lite',
   'gemini-pro-latest',
-  'gemini-3.5-flash',
 ];
 
 async function callGeminiWithWaterfall(requestBody: any, geminiKey: string): Promise<string> {
@@ -574,7 +575,7 @@ async function callGeminiWithWaterfall(requestBody: any, geminiKey: string): Pro
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody),
-          signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(45000) : undefined,
+          signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(15000) : undefined,
         }
       );
 
