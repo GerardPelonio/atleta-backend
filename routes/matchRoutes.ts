@@ -26,9 +26,9 @@ const upload = multer({
 });
 
 // Standalone OCR Scoresheet Scanner (No match ID needed - accepts any field name)
-router.post('/scan-scoresheet', authenticate, upload.any(), scanStandaloneScoresheet);
-router.post('/ocr/scan', authenticate, upload.any(), scanStandaloneScoresheet);
-router.post('/scoresheet', authenticate, upload.any(), scanStandaloneScoresheet);
+router.post('/scan-scoresheet', optionalAuth, upload.any(), scanStandaloneScoresheet);
+router.post('/ocr/scan', optionalAuth, upload.any(), scanStandaloneScoresheet);
+router.post('/scoresheet', optionalAuth, upload.any(), scanStandaloneScoresheet);
 
 // Match Endpoints (Named and Root Routes)
 router.get('/', optionalAuth, getAllMatchesHandler);
@@ -41,11 +41,11 @@ router.post('/log-match', optionalAuth, submitMatch);
 router.post('/', optionalAuth, submitMatch);
 
 // Official Match Endpoints
-router.post('/official', authenticate, createOfficialMatchHandler);
-router.post('/create-official', authenticate, createOfficialMatchHandler);
+router.post('/official', optionalAuth, createOfficialMatchHandler);
+router.post('/create-official', optionalAuth, createOfficialMatchHandler);
 
 // Single Match Lookup & Artifacts
-router.post('/:matchId/scoresheet', authenticate, upload.any(), uploadScoresheet);
+router.post('/:matchId/scoresheet', optionalAuth, upload.any(), uploadScoresheet);
 router.get('/:matchId/boxscore', optionalAuth, getBoxscore);
 router.get('/:matchId/details', optionalAuth, getMatchDetailsHandler);
 router.get('/:matchId', optionalAuth, getMatchDetailsHandler);
