@@ -20,6 +20,12 @@ export interface CreateOfficialMatchDto {
   notes?: string;
   scoresheet_url?: string;
   official_id?: string;
+  home_score?: number;
+  away_score?: number;
+  game_result?: 'WIN' | 'LOSS' | 'TBD';
+  player_stats?: any[];
+  scoresheet_data?: any;
+  parsed_tables?: any;
 }
 
 export interface CertifyValidationDto {
@@ -78,7 +84,7 @@ export async function createOfficialMatchService(
     location: data.location,
     opponent_team_name: awayName,
     game_name: data.game_name || `${homeName} vs ${awayName}`,
-    game_result: 'TBD',
+    game_result: data.game_result || 'TBD',
     notes: data.notes || '',
     scoresheet_url: data.scoresheet_url || '',
     idempotency_key: idempotencyKey,
@@ -86,12 +92,18 @@ export async function createOfficialMatchService(
     home_team_id: data.home_team_id || teamId,
     away_team_id: data.away_team_id || awayName,
     assigned_coaches: data.assigned_coaches || [],
+    player_stats: data.player_stats || [],
     is_official: true,
     official_id: officialId || uid,
     is_certified: false,
     is_locked: false,
     timestamp: now,
   };
+
+  if (data.home_score !== undefined) (matchLog as any).home_score = Number(data.home_score);
+  if (data.away_score !== undefined) (matchLog as any).away_score = Number(data.away_score);
+  if (data.scoresheet_data) (matchLog as any).scoresheet_data = data.scoresheet_data;
+  if (data.parsed_tables) (matchLog as any).parsed_tables = data.parsed_tables;
 
   // 4. Construct Official Audit (Validation) Entity
   const auditDoc: OfficialAudit = {
@@ -109,6 +121,46 @@ export async function createOfficialMatchService(
   const batch = db.batch();
   batch.set(db.collection('Match_Logs').doc(matchId), matchLog);
   batch.set(db.collection('Official_Audits').doc(validationId), auditDoc);
+
+  // Write Performance_Metrics for provided players
+  if (Array.isArray(data.player_stats) && data.player_stats.length > 0) {
+    for (let idx = 0; idx < data.player_stats.length; idx++) {
+      const p = data.player_stats[idx];
+      const pName = p.player_name || `Player ${idx + 1}`;
+      const pTeam = p.team_name || p.team || homeName;
+      const athleteId = p.athlete_id || `ath_ocr_${matchId}_${idx + 1}`;
+      const pJersey = p.jersey_number !== undefined ? Number(p.jersey_number) : (idx + 1);
+      const rawStats = p.stats || p.sport_stats || {
+        points: Number(p.points ?? p.pts ?? 0),
+        rebounds: Number(((p.offensive_rebounds || 0) + (p.defensive_rebounds || 0)) || (p.rebounds ?? p.reb ?? 0)),
+        assists: Number(p.assists ?? p.ast ?? 0),
+        steals: Number(p.steals ?? p.stl ?? 0),
+        blocks: Number(p.blocks ?? p.blk ?? 0),
+        turnovers: Number(p.turnovers ?? p.to ?? 0),
+        fouls: Number(p.fouls ?? p.pf ?? 0),
+        fg_made: Number(p.fg_made ?? p.fgm ?? 0),
+        fg_attempted: Number(p.fg_attempted ?? p.fga ?? 0),
+        ft_made: Number(p.ft_made ?? p.ftm ?? 0),
+        ft_attempted: Number(p.ft_attempted ?? p.fta ?? 0),
+      };
+
+      const metricId = `metric_${matchId}_${athleteId}`;
+      batch.set(db.collection('Performance_Metrics').doc(metricId), {
+        metric_id: metricId,
+        athlete_id: athleteId,
+        match_id: matchId,
+        player_name: pName,
+        team_name: pTeam,
+        jersey_number: pJersey,
+        position: p.position || 'G',
+        sport_category: data.sport_type || 'Basketball',
+        sport_stats: rawStats,
+        calculated_player_efficiency: p.calculated_efficiency || p.calculated_player_efficiency || 0,
+        timestamp: now,
+      }, { merge: true });
+    }
+  }
+
   await batch.commit();
 
   const response = {
