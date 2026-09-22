@@ -168,9 +168,8 @@ export async function getTeam(req: AuthRequest, res: Response): Promise<void> {
 
 export async function getAthleteTeamHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const athleteId = Array.isArray(req.params.athleteId)
-      ? req.params.athleteId[0]
-      : req.params.athleteId;
+    const rawParam = req.params.athleteId;
+    const athleteId = (Array.isArray(rawParam) ? rawParam[0] : rawParam) || req.user?.uid;
 
     if (!athleteId) {
       res.status(400).json({ error: 'Athlete ID is required.' });

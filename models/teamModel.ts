@@ -54,12 +54,29 @@ export interface RosterAthlete {
   user_id: string;
   first_name: string;
   last_name: string;
+  full_name?: string;
   position: string;
   jersey_number?: number | null;
   sport_type: string;
+  sport_category?: string;
   avatar_url?: string;
   eligibility_documents: string[];
   is_eligibility_verified: boolean; // Computed based on submitted documents
+  recruitment_status?: string;
+  province?: string;
+  location?: string;
+  height_cm?: number | null;
+  weight_kg?: number | null;
+  wingspan_cm?: number | null;
+  stats?: Record<string, any>;
+  averages?: Record<string, any>;
+  calculated_per?: number;
+  efficiency_pct?: number;
+  physical_attributes?: {
+    height_cm?: number;
+    weight_kg?: number;
+    wingspan_cm?: number;
+  };
 }
 
 // ─── API DTOs & Response Types ──────────────────────────────────────────────

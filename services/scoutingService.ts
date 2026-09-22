@@ -117,22 +117,50 @@ export async function searchRegionalAthletes(
     }
   }
 
-  // Fetch Athlete Profiles, Users, and Performance Metrics in parallel to minimize network latency
-  const [profilesSnapshot, usersSnapshot, metricsSnapshot] = await Promise.all([
+  // Fetch Athlete Profiles, Users, Performance Metrics, and Teams in parallel
+  const [profilesSnapshot, usersSnapshot, metricsSnapshot, teamsSnapshot] = await Promise.all([
     db.collection('Athlete_Profiles').get(),
     db.collection('Users').where('role', '==', 'Athlete').get(),
-    db.collection('Performance_Metrics').get()
+    db.collection('Performance_Metrics').get(),
+    db.collection('Teams').get(),
   ]);
+
+  const signedAthleteIds = new Set<string>();
+  teamsSnapshot.docs.forEach((doc) => {
+    const t = doc.data();
+    if (Array.isArray(t.roster_list)) {
+      t.roster_list.forEach((item: any) => {
+        const id = typeof item === 'string' ? item : item.athlete_id || item.user_id;
+        if (id) {
+          const clean = String(id).trim();
+          signedAthleteIds.add(clean);
+          signedAthleteIds.add(clean.replace(/^ath_/, ''));
+          signedAthleteIds.add(`ath_${clean.replace(/^ath_/, '')}`);
+        }
+      });
+    }
+  });
 
   const profiles: any[] = [];
   profilesSnapshot.docs.forEach((doc: any) => {
     const data = doc.data();
-    profiles.push({
-      athlete_id: doc.id,
-      province: data.province || '',
-      sport_type: data.sport_type || '',
-      recruitment_status: data.recruitment_status || null,
-    });
+    const rawStatus = (data.recruitment_status || '').toUpperCase();
+    const isRecruited =
+      rawStatus === 'RECRUITED' ||
+      rawStatus === 'SIGNED' ||
+      rawStatus === 'COMMITTED' ||
+      rawStatus === 'UNAVAILABLE' ||
+      signedAthleteIds.has(doc.id) ||
+      signedAthleteIds.has(doc.id.replace(/^ath_/, ''));
+
+    if (!isRecruited) {
+      profiles.push({
+        athlete_id: doc.id,
+        province: data.province || '',
+        sport_type: data.sport_type || '',
+        recruitment_status: data.recruitment_status || 'Available',
+      });
+    }
   });
 
   const usersMap = new Map<string, any>();

@@ -478,8 +478,49 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
       };
     }
   } catch (err) {
-    // Gracefully handle if Workload_Analysis query fails
+    // Continue if workload query encounters error
   }
+
+  // Fetch recent performance metrics to derive real match scoring history & last 5 games scores
+  let realScoringTrend: number[] = [];
+  try {
+    const metricsSnapshot = await db
+      .collection('Performance_Metrics')
+      .where('athlete_id', 'in', [athleteId, rawUid, canonicalAthleteId])
+      .get();
+
+    if (!metricsSnapshot.empty) {
+      const sortedMetrics = metricsSnapshot.docs
+        .map((d) => d.data())
+        .sort(
+          (a, b) =>
+            new Date(b.timestamp || b.created_at || 0).getTime() -
+            new Date(a.timestamp || a.created_at || 0).getTime()
+        );
+
+      realScoringTrend = sortedMetrics.map((m: any) => {
+        const s = m.sport_stats || {};
+        if (s.points !== undefined) return Number(s.points);
+        if (s.finish_time_ms) return parseFloat((Number(s.finish_time_ms) / 1000).toFixed(2));
+        if (s.time) return parseFloat(String(s.time)) || 0;
+        return Number(m.calculated_player_efficiency || 0);
+      });
+    }
+  } catch (err) {
+    // Gracefully fallback if metrics query encounters index issue
+  }
+
+  const derivedScores = realScoringTrend.length > 0 ? realScoringTrend.slice(0, 5).reverse() : fiveGameTrend;
+
+  // Calculate default or derived radar competencies if not explicitly defined
+  const rawRadar = profileData.analytics?.radar_competencies;
+  const radarCompetencies = {
+    speed: rawRadar?.speed || (stats.apg > 0 ? Math.min(99, Math.round(stats.apg * 12 + 40)) : 78),
+    agility: rawRadar?.agility || (stats.apg > 0 || stats.ppg > 0 ? Math.min(99, Math.round((stats.apg + stats.ppg) * 2.5 + 45)) : 82),
+    power: rawRadar?.power || (stats.rpg > 0 ? Math.min(99, Math.round(stats.rpg * 8 + 42)) : 75),
+    iq: rawRadar?.iq || (stats.efficiency_rating > 0 ? Math.min(99, Math.round(stats.efficiency_rating * 3.2 + 30)) : 85),
+    tech: rawRadar?.tech || (fgPct > 0 ? Math.min(99, Math.round(fgPct * 0.9 + 35)) : 80),
+  };
 
   const summary: AthleteHomeSummary = {
     athlete_id: athleteId,
@@ -490,14 +531,8 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
       apg: stats.apg,
       bpg: stats.bpg,
       efficiency_rating: stats.efficiency_rating,
-      scoring_trend: profileData.analytics?.scoring_trend || [],
-      radar_competencies: profileData.analytics?.radar_competencies || {
-        speed: 0,
-        agility: 0,
-        power: 0,
-        iq: 0,
-        tech: 0,
-      },
+      scoring_trend: realScoringTrend.length > 0 ? realScoringTrend.slice(0, 10) : (profileData.analytics?.scoring_trend || []),
+      radar_competencies: radarCompetencies,
     },
     shooting_efficiency: {
       fg_pct: fgPct,
@@ -505,10 +540,11 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
       ft_pct: ftPct,
       efg_pct: efgPct,
     },
-    five_game_trend: fiveGameTrend,
+    five_game_trend: derivedScores,
+    last_5_games_scores: derivedScores,
     current_team_summary: currentTeamSummary,
     workload_summary: workloadSummary,
-  };
+  } as any;
 
   // Cache response for 300 seconds
   homeCache.set(athleteId, { data: summary, cachedAt: Date.now() });
@@ -671,6 +707,8 @@ export async function getAthleteExpandedCareerStats(athleteId: string): Promise<
       efficiency: maxEff,
     },
     historical_per_trend: perList,
+    last_5_games_scores: metrics.length > 0 ? metrics.slice(0, 5).map((m: any) => Number(m.sport_stats?.points ?? m.calculated_player_efficiency ?? 0)).reverse() : (profileData.stats?.last_5_games_scores || profileData.five_game_trend || []),
+    recent_scores: metrics.length > 0 ? metrics.slice(0, 5).map((m: any) => Number(m.sport_stats?.points ?? m.calculated_player_efficiency ?? 0)).reverse() : [],
     workload_analytics: profileData.workload_analytics || profileData.workload || (await getAthleteWorkloadSummary(athleteId).catch(() => undefined)),
     workload: profileData.workload_analytics || profileData.workload || (await getAthleteWorkloadSummary(athleteId).catch(() => undefined)),
     workload_target: profileData.workload_target || undefined,

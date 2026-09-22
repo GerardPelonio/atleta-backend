@@ -377,7 +377,7 @@ export async function respondToRecruitmentInquiry(
         updateCoachDoc(db.collection('Users').doc(rawCoachId)),
       ]);
 
-      // Fire notification to coach portal
+      // Fire single notification to coach portal (deduplicated)
       await createNotification({
         recipient_id: rawCoachId,
         sender_id: rawAthUid,
@@ -385,16 +385,6 @@ export async function respondToRecruitmentInquiry(
         title: 'Recruitment Accepted! 🎉',
         message: `${athleteName} has accepted your recruitment inquiry for ${sportType}.`,
       }).catch((err) => console.warn('Notification error on inquiry accept:', err));
-
-      if (canonicalCoachId !== rawCoachId) {
-        await createNotification({
-          recipient_id: canonicalCoachId,
-          sender_id: rawAthUid,
-          type: 'RECRUITMENT_INQUIRY',
-          title: 'Recruitment Accepted! 🎉',
-          message: `${athleteName} has accepted your recruitment inquiry for ${sportType}.`,
-        }).catch(() => null);
-      }
     }
   }
 
