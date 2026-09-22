@@ -634,7 +634,7 @@ export async function uploadScoresheetFileToStorage(matchId: string, file: Expre
  * Process scoresheet image/PDF upload via OCR.
  * POST /api/v1/matches/:matchId/scoresheet
  */
-export async function processScoresheetOCR(matchId: string, file?: Express.Multer.File): Promise<ParsedScoresheetResult> {
+export async function processScoresheetOCR(matchId: string, file?: Express.Multer.File, customKey?: string): Promise<ParsedScoresheetResult> {
   validateScoresheetUpload(file);
 
   const matchDoc = await db.collection('Match_Logs').doc(matchId).get();
@@ -656,11 +656,12 @@ export async function processScoresheetOCR(matchId: string, file?: Express.Multe
     require('dotenv').config();
   } catch {}
 
-  const geminiKey = process.env.GEMINI_API_KEY ||
+  const geminiKey = (customKey ||
+    process.env.GEMINI_API_KEY ||
     process.env.GOOGLE_GEMINI_API_KEY ||
     process.env.GOOGLE_API_KEY ||
     process.env.GEMINI_KEY ||
-    '';
+    '').trim().replace(/^["']|["']$/g, '');
 
   try {
     if (!geminiKey) {
@@ -1035,7 +1036,7 @@ Important:
  * Standalone OCR Scanner: Parse a PNG, JPG, PDF, or CSV scoresheet without needing an existing match ID.
  * POST /api/v1/matches/scan-scoresheet
  */
-export async function scanScoresheetStandalone(file?: Express.Multer.File): Promise<any> {
+export async function scanScoresheetStandalone(file?: Express.Multer.File, customKey?: string): Promise<any> {
   validateScoresheetUpload(file);
 
   if (!file || !file.buffer) {
@@ -1046,11 +1047,12 @@ export async function scanScoresheetStandalone(file?: Express.Multer.File): Prom
     require('dotenv').config();
   } catch {}
 
-  const geminiKey = process.env.GEMINI_API_KEY ||
+  const geminiKey = (customKey ||
+    process.env.GEMINI_API_KEY ||
     process.env.GOOGLE_GEMINI_API_KEY ||
     process.env.GOOGLE_API_KEY ||
     process.env.GEMINI_KEY ||
-    '';
+    '').trim().replace(/^["']|["']$/g, '');
 
   const mimeType = file.mimetype || 'image/jpeg';
   const filename = file.originalname || 'scoresheet.png';
