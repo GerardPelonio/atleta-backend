@@ -12,6 +12,7 @@ import {
   SportType,
 } from '../models/matchModel';
 import { ServiceError, validateScoresheetUpload } from '../validators/matchValidator';
+import { generateStandardId } from '../utils/idGenerator';
 
 // ─── Multi-Sport Efficiency Calculation Formulas ─────────────────────────────
 
@@ -207,7 +208,7 @@ export async function submitMatchSession(
     }
   }
 
-  const matchId = explicitMatchId || `match_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  const matchId = explicitMatchId || (await generateStandardId('MATCH'));
   const now = new Date().toISOString();
 
   // Resolve Home Team and Away Team names
@@ -228,7 +229,7 @@ export async function submitMatchSession(
   if (!homeTeamQuery.empty) {
     homeTeamId = homeTeamQuery.docs[0].id;
   } else {
-    homeTeamId = `team_${homeTeamName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now()}`;
+    homeTeamId = await generateStandardId('TEAM');
     await db.collection('Teams').doc(homeTeamId).set({
       team_id: homeTeamId,
       team_name: homeTeamName,
@@ -251,7 +252,7 @@ export async function submitMatchSession(
   if (!oppTeamQuery.empty) {
     oppTeamId = oppTeamQuery.docs[0].id;
   } else {
-    oppTeamId = `team_${oppTeamName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now()}`;
+    oppTeamId = await generateStandardId('TEAM');
     await db.collection('Teams').doc(oppTeamId).set({
       team_id: oppTeamId,
       team_name: oppTeamName,
@@ -699,13 +700,15 @@ Important:
       let sendBuffer = file.buffer;
       let sendMime = mimeType;
 
-      // Optimize and compress large camera photos before sending to AI (1200px for instant transfer and crisp legibility)
+      // High-precision preprocessing for scoresheet OCR (1800px, normalize contrast stretch, sharpen handwritten strokes)
       if (mimeType.startsWith('image/')) {
         try {
           const sharp = require('sharp');
           sendBuffer = await sharp(file.buffer)
-            .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true })
-            .jpeg({ quality: 75 })
+            .resize({ width: 1800, height: 1800, fit: 'inside', withoutEnlargement: true })
+            .normalize()
+            .sharpen({ sigma: 1.0, m1: 1.0, m2: 2.0 })
+            .jpeg({ quality: 85 })
             .toBuffer();
           sendMime = 'image/jpeg';
         } catch (sharpErr) {
@@ -714,19 +717,22 @@ Important:
       }
 
       const base64Image = sendBuffer.toString('base64');
-      const promptText = `Analyze this basketball scoresheet carefully (image or PDF).
-Extract the match overview, final team scores, and individual player statistics into this exact JSON format:
+      const promptText = `You are an expert sports scoresheet OCR and data extraction system.
+Carefully examine the provided document image/PDF (e.g., Basketball, Volleyball, Track & Field, Swimming, or other sports scoresheet).
+
+Extract the match overview, team scores, and individual athlete statistics in this strict JSON structure:
 {
   "match_info": {
     "sport_type": "Basketball",
-    "event_name": "Tournament / League Name",
-    "opponent_team_name": "Opponent Team Name",
+    "event_name": "Tournament / Event / League Name",
     "home_team_name": "Home Team Name",
+    "opponent_team_name": "Opponent / Away Team Name",
     "game_result": "WIN",
     "final_score": "0 - 0"
   },
   "team_scores": [
-    {"team": "TeamName", "score": 0}
+    {"team": "HomeTeamName", "score": 0},
+    {"team": "AwayTeamName", "score": 0}
   ],
   "player_summary": [
     {
@@ -748,11 +754,12 @@ Extract the match overview, final team scores, and individual player statistics 
   ]
 }
 
-Important:
-- Read all handwritten and printed player names and jersey numbers carefully.
-- Extract all players from both teams.
-- Compute player points, rebounds, assists, fouls, etc. accurately.
-- Return ONLY valid JSON, nothing else.`;
+Strict Rules:
+1. Parse ALL printed and handwritten player names, jersey numbers, and rows for BOTH teams.
+2. Read handwritten numbers with high fidelity, distinguishing between 0, 1, 7, 8, 3, etc. based on surrounding grid layout and column headers.
+3. Validate row totals against individual metric columns (e.g. 2PT made + 3PT made + FT made vs total PTS).
+4. If a team name is not explicitly labeled, derive it from the header or team name printed above the roster block.
+5. Return ONLY valid JSON, nothing else.`;
 
       requestBody = {
         contents: [
@@ -1107,13 +1114,15 @@ Important:
     let sendBuffer = file.buffer;
     let sendMime = mimeType;
 
-    // Optimize and compress large camera photos before sending to AI (1200px for instant transfer)
+    // High-precision preprocessing for scoresheet OCR (1800px, normalize contrast stretch, sharpen handwritten strokes)
     if (mimeType.startsWith('image/')) {
       try {
         const sharp = require('sharp');
         sendBuffer = await sharp(file.buffer)
-          .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true })
-          .jpeg({ quality: 75 })
+          .resize({ width: 1800, height: 1800, fit: 'inside', withoutEnlargement: true })
+          .normalize()
+          .sharpen({ sigma: 1.0, m1: 1.0, m2: 2.0 })
+          .jpeg({ quality: 85 })
           .toBuffer();
         sendMime = 'image/jpeg';
       } catch (sharpErr) {
@@ -1122,23 +1131,27 @@ Important:
     }
 
     const base64Image = sendBuffer.toString('base64');
-    const promptText = `Analyze this basketball scoresheet carefully (image or PDF).
-Extract the match overview, final team scores, and individual player statistics into this exact JSON format:
+    const promptText = `You are an expert sports scoresheet OCR and data extraction system.
+Carefully examine the provided document image/PDF (e.g., Basketball, Volleyball, Track & Field, Swimming, or other sports scoresheet).
+
+Extract the match overview, team scores, and individual athlete statistics in this strict JSON structure:
 {
   "match_info": {
     "sport_type": "Basketball",
-    "event_name": "Tournament / League Name",
-    "opponent_team_name": "Opponent Team Name",
+    "event_name": "Tournament / Event / League Name",
     "home_team_name": "Home Team Name",
+    "opponent_team_name": "Opponent / Away Team Name",
     "game_result": "WIN",
     "final_score": "0 - 0"
   },
   "team_scores": [
-    {"team": "TeamName", "score": 0}
+    {"team": "HomeTeamName", "score": 0},
+    {"team": "AwayTeamName", "score": 0}
   ],
   "player_summary": [
     {
       "player_name": "Full Name",
+      "team_name": "TeamName",
       "jersey_number": 0,
       "points": 0,
       "rebounds": 0,
@@ -1155,10 +1168,12 @@ Extract the match overview, final team scores, and individual player statistics 
   ]
 }
 
-Important:
-- Extract all players from both teams.
-- Compute player points, rebounds, assists, fouls, etc. accurately.
-- Return ONLY the JSON object.`;
+Strict Rules:
+1. Parse ALL printed and handwritten player names, jersey numbers, and rows for BOTH teams.
+2. Read handwritten numbers with high fidelity, distinguishing between 0, 1, 7, 8, 3, etc. based on surrounding grid layout and column headers.
+3. Validate row totals against individual metric columns (e.g. 2PT made + 3PT made + FT made vs total PTS).
+4. If a team name is not explicitly labeled, derive it from the header or team name printed above the roster block.
+5. Return ONLY the JSON object.`;
 
     requestBody = {
       contents: [

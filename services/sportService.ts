@@ -7,6 +7,7 @@ import {
 } from '../models/sportModel';
 import { ServiceError } from '../validators/matchValidator';
 import { logAdminAudit } from './adminService';
+import { generateStandardId } from '../utils/idGenerator';
 
 export const DEFAULT_SPORTS_CONFIGURATIONS: SportsConfiguration[] = [
   {
@@ -165,7 +166,7 @@ export async function createSportService(
   }
 
   // 3. Create Sports_Configuration document
-  const sportId = crypto.randomUUID();
+  const sportId = await generateStandardId('SPORT');
   const now = new Date().toISOString();
 
   const newSport: SportsConfiguration = {

@@ -13,6 +13,9 @@ import {
   registerCoachService,
   loginUserService,
   getUserProfileService,
+  updateUserProfileService,
+  getUserSettingsService,
+  updateUserSettingsService,
   requestPasswordResetService,
   resetPasswordConfirmService,
   changePasswordService,
@@ -147,6 +150,50 @@ export async function getMe(req: AuthRequest, res: Response): Promise<void> {
       return;
     }
     console.error('GetMe error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function updateUserProfileHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const uid = req.user!.uid;
+    const result = await updateUserProfileService(uid, req.body || {});
+    res.status(200).json({
+      message: 'Profile updated successfully.',
+      ...result,
+    });
+  } catch (error: any) {
+    if (error.code === 'USER_NOT_FOUND') {
+      res.status(404).json({ error: error.message });
+      return;
+    }
+    console.error('updateUserProfileHandler error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function getUserSettingsHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const uid = req.user!.uid;
+    const settings = await getUserSettingsService(uid);
+    res.status(200).json(settings);
+  } catch (error: any) {
+    console.error('getUserSettingsHandler error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function updateUserSettingsHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const uid = req.user!.uid;
+    const settings = await updateUserSettingsService(uid, req.body || {});
+    res.status(200).json({
+      message: 'Settings updated successfully.',
+      settings,
+      ...settings,
+    });
+  } catch (error: any) {
+    console.error('updateUserSettingsHandler error:', error);
     res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
   }
 }

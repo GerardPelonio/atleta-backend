@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { db } from '../utils/firebaseAdmin';
 import { MatchLog, OfficialAudit, SportType } from '../models/matchModel';
 import { ServiceError } from '../validators/matchValidator';
+import { generateStandardId } from '../utils/idGenerator';
 
 export interface CreateOfficialMatchDto {
   reference_id?: string;
@@ -64,8 +65,8 @@ export async function createOfficialMatchService(
     }
   }
 
-  const matchId = crypto.randomUUID();
-  const validationId = crypto.randomUUID();
+  const matchId = await generateStandardId('MATCH');
+  const validationId = await generateStandardId('VAL');
   const now = new Date().toISOString();
 
   const teamId = data.team_id || data.home_team_id || data.home_team_name || '';

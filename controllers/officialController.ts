@@ -10,6 +10,7 @@ import {
   registerOfficialService,
   loginOfficialService,
   getOfficialProfile,
+  updateOfficialProfile,
   getOfficialSettings,
   updateOfficialSettings,
   ServiceError,
@@ -126,6 +127,7 @@ export async function updateOfficialSettingsHandler(req: AuthRequest, res: Respo
     res.status(200).json({
       message: 'Official settings updated successfully.',
       settings,
+      ...settings,
     });
   } catch (error: any) {
     console.error('Update official settings error:', error);
@@ -148,3 +150,24 @@ export async function getOfficialProfileHandler(req: AuthRequest, res: Response)
     res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
   }
 }
+
+export async function updateOfficialProfileHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== 'Official') {
+      res.status(401).json({ error: 'Unauthorized. Official role required.' });
+      return;
+    }
+
+    const uid = req.user.uid;
+    const updatedProfile = await updateOfficialProfile(uid, req.body || {});
+    res.status(200).json({
+      message: 'Official profile updated successfully.',
+      profile: updatedProfile,
+      ...updatedProfile,
+    });
+  } catch (error: any) {
+    console.error('Update official profile error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+

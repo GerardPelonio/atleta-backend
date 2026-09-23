@@ -8,6 +8,9 @@ import {
   loginUser,
   socialLogin,
   getMe,
+  updateUserProfileHandler,
+  getUserSettingsHandler,
+  updateUserSettingsHandler,
   requestPasswordReset,
   resetPassword,
   changePassword,
@@ -40,9 +43,20 @@ router.post('/google-login', socialLogin as any);
 router.post('/facebook-login', socialLogin as any);
 router.post('/social-login', socialLogin as any);
 
-// User Profile
+// User Profile & Settings
 router.get('/profile', authenticate, getMe);
 router.get('/me', authenticate, getMe);
+router.patch('/profile', authenticate, updateUserProfileHandler);
+router.put('/profile', authenticate, updateUserProfileHandler);
+router.patch('/me', authenticate, updateUserProfileHandler);
+router.put('/me', authenticate, updateUserProfileHandler);
+
+router.get('/settings', authenticate, getUserSettingsHandler);
+router.get('/me/settings', authenticate, getUserSettingsHandler);
+router.patch('/settings', authenticate, updateUserSettingsHandler);
+router.put('/settings', authenticate, updateUserSettingsHandler);
+router.patch('/me/settings', authenticate, updateUserSettingsHandler);
+router.put('/me/settings', authenticate, updateUserSettingsHandler);
 
 // Password Reset Request
 router.post('/password-reset', requestPasswordReset);

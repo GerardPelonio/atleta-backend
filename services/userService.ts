@@ -1043,3 +1043,183 @@ export async function changePasswordService(uid: string, newPassword: string) {
   );
 }
 
+export async function updateUserProfileService(uid: string, payload: Record<string, any>) {
+  const userDoc = await db.collection('Users').doc(uid).get();
+  if (!userDoc.exists) {
+    throw { code: 'USER_NOT_FOUND', message: 'User not found.' };
+  }
+
+  const userData = userDoc.data()!;
+  const role = userData.role as UserRole;
+  const profileCollection = ROLE_COLLECTION_MAP[role] || 'Athlete_Profiles';
+  const prefix = role === 'Athlete' ? 'ath_' : role === 'Coach' ? 'coach_' : role === 'Official' ? 'off_' : role === 'System Admin' ? 'admin_' : '';
+  const canonicalRoleDocId = prefix ? `${prefix}${uid}` : uid;
+
+  const now = new Date();
+  const userUpdates: Record<string, any> = { updated_at: now };
+  const profileUpdates: Record<string, any> = { updated_at: now };
+
+  if (payload.full_legal_name !== undefined || payload.full_name !== undefined) {
+    const val = (payload.full_legal_name || payload.full_name || '').trim();
+    userUpdates.full_legal_name = val;
+    userUpdates.full_name = val;
+    const parts = val.split(' ');
+    userUpdates.first_name = parts[0] || '';
+    userUpdates.last_name = parts.slice(1).join(' ') || '';
+  }
+  if (payload.first_name !== undefined) {
+    userUpdates.first_name = payload.first_name;
+  }
+  if (payload.last_name !== undefined) {
+    userUpdates.last_name = payload.last_name;
+  }
+  if (payload.contact_number !== undefined) {
+    userUpdates.contact_number = payload.contact_number;
+    profileUpdates.contact_number = payload.contact_number;
+  }
+  if (payload.organization_name !== undefined || payload.organization !== undefined) {
+    const org = payload.organization_name || payload.organization;
+    userUpdates.organization_name = org;
+    userUpdates.organization = org;
+    profileUpdates.organization_name = org;
+  }
+  if (payload.official_license_number !== undefined) {
+    userUpdates.official_license_number = payload.official_license_number;
+    profileUpdates.official_license_number = payload.official_license_number;
+  }
+  if (payload.assigned_tournaments !== undefined) {
+    userUpdates.assigned_tournaments = payload.assigned_tournaments;
+    profileUpdates.assigned_tournaments = payload.assigned_tournaments;
+  }
+  if (payload.sport !== undefined) {
+    userUpdates.sport = payload.sport;
+    profileUpdates.sport = payload.sport;
+  }
+  if (payload.team_name !== undefined || payload.team !== undefined) {
+    const team = payload.team_name || payload.team;
+    userUpdates.team_name = team;
+    profileUpdates.team_name = team;
+  }
+
+  // Any other custom profile fields
+  for (const key of Object.keys(payload)) {
+    if (!['password', 'role', 'user_id', 'email'].includes(key) && profileUpdates[key] === undefined) {
+      profileUpdates[key] = payload[key];
+    }
+  }
+
+  const batch = db.batch();
+  batch.set(db.collection('Users').doc(uid), userUpdates, { merge: true });
+  batch.set(db.collection(profileCollection).doc(uid), profileUpdates, { merge: true });
+  if (canonicalRoleDocId !== uid) {
+    batch.set(db.collection(profileCollection).doc(canonicalRoleDocId), profileUpdates, { merge: true });
+  }
+  await batch.commit();
+
+  return await getUserProfileService(uid);
+}
+
+export async function getUserSettingsService(uid: string) {
+  const userDoc = await db.collection('Users').doc(uid).get();
+  const userData = userDoc.exists ? userDoc.data()! : {};
+  const role = userData.role;
+
+  if (role === 'Official') {
+    const canonicalOffId = `off_${uid}`;
+    let sDoc = await db.collection('Official_Settings').doc(canonicalOffId).get();
+    if (!sDoc.exists) sDoc = await db.collection('Official_Settings').doc(uid).get();
+    if (sDoc.exists) return sDoc.data();
+    return {
+      setting_id: uid,
+      official_id: canonicalOffId,
+      split_screen_defaults: true,
+      discrepancy_presets: true,
+      match_reminders: true,
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  if (role === 'Coach') {
+    const canonicalCoachId = `coach_${uid}`;
+    let sDoc = await db.collection('Coach_Settings').doc(canonicalCoachId).get();
+    if (!sDoc.exists) sDoc = await db.collection('Coach_Settings').doc(uid).get();
+    if (sDoc.exists) return sDoc.data();
+    return {
+      setting_id: uid,
+      coach_id: canonicalCoachId,
+      email_alerts: true,
+      sms_notifications: false,
+      game_log_updates: true,
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  let sDoc = await db.collection('User_Settings').doc(uid).get();
+  if (!sDoc.exists) {
+    sDoc = await db.collection('Athlete_Settings').doc(uid).get();
+  }
+  if (sDoc.exists) return sDoc.data();
+
+  return {
+    setting_id: uid,
+    user_id: uid,
+    notifications_enabled: true,
+    email_alerts: true,
+    match_reminders: true,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+export async function updateUserSettingsService(uid: string, payload: Record<string, any>) {
+  const userDoc = await db.collection('Users').doc(uid).get();
+  const userData = userDoc.exists ? userDoc.data()! : {};
+  const role = userData.role;
+  const nowStr = new Date().toISOString();
+
+  if (role === 'Official') {
+    const canonicalOffId = `off_${uid}`;
+    const current = await getUserSettingsService(uid);
+    const updated = {
+      ...current,
+      ...payload,
+      official_id: canonicalOffId,
+      updated_at: nowStr,
+    };
+    const batch = db.batch();
+    batch.set(db.collection('Official_Settings').doc(canonicalOffId), updated, { merge: true });
+    batch.set(db.collection('Official_Settings').doc(uid), updated, { merge: true });
+    await batch.commit();
+    return updated;
+  }
+
+  if (role === 'Coach') {
+    const canonicalCoachId = `coach_${uid}`;
+    const current = await getUserSettingsService(uid);
+    const updated = {
+      ...current,
+      ...payload,
+      coach_id: canonicalCoachId,
+      updated_at: nowStr,
+    };
+    const batch = db.batch();
+    batch.set(db.collection('Coach_Settings').doc(canonicalCoachId), updated, { merge: true });
+    batch.set(db.collection('Coach_Settings').doc(uid), updated, { merge: true });
+    await batch.commit();
+    return updated;
+  }
+
+  const current = await getUserSettingsService(uid);
+  const updated = {
+    ...current,
+    ...payload,
+    user_id: uid,
+    updated_at: nowStr,
+  };
+  const batch = db.batch();
+  batch.set(db.collection('User_Settings').doc(uid), updated, { merge: true });
+  batch.set(db.collection('Athlete_Settings').doc(uid), updated, { merge: true });
+  await batch.commit();
+  return updated;
+}
+
+

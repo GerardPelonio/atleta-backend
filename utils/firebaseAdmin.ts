@@ -87,7 +87,19 @@ let dbInstance: Firestore;
 let authInstance: Auth;
 
 try {
-  dbInstance = getFirestore();
+  const app = getApps()[0];
+  const targetDatabaseId = process.env.FIRESTORE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID || 'atleta_v2';
+  
+  try {
+    if (app && targetDatabaseId && targetDatabaseId !== '(default)') {
+      dbInstance = getFirestore(app, targetDatabaseId);
+    } else {
+      dbInstance = getFirestore();
+    }
+  } catch (errNamed: any) {
+    console.warn(`⚠️ Named database '${targetDatabaseId}' connection note:`, errNamed?.message || errNamed);
+    dbInstance = getFirestore();
+  }
 } catch (e: any) {
   console.warn('⚠️ Firestore initialization warning:', e?.message || e);
   dbInstance = {} as Firestore;
@@ -103,3 +115,4 @@ try {
 // Export Firestore and Auth instances
 export const db: Firestore = dbInstance;
 export const auth: Auth = authInstance;
+

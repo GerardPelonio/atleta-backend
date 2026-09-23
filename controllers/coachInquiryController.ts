@@ -158,6 +158,7 @@ export async function updateCoachSettingsHandler(req: AuthRequest, res: Response
     res.status(200).json({
       message: 'Coach settings updated successfully.',
       settings,
+      ...settings,
     });
   } catch (error: any) {
     console.error('updateCoachSettingsHandler error:', error);
@@ -174,6 +175,7 @@ export async function updateCoachProfileHandler(req: AuthRequest, res: Response)
     res.status(200).json({
       message: 'Coach profile updated successfully.',
       profile: updatedProfile,
+      ...updatedProfile,
     });
   } catch (error: any) {
     console.error('updateCoachProfileHandler error:', error);

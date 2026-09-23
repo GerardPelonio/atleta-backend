@@ -305,3 +305,58 @@ export async function getOfficialProfile(uid: string) {
     created_at: userData.created_at || new Date().toISOString(),
   };
 }
+
+export async function updateOfficialProfile(
+  uid: string,
+  payload: {
+    full_legal_name?: string;
+    first_name?: string;
+    last_name?: string;
+    organization_name?: string;
+    official_license_number?: string;
+    assigned_tournaments?: string[];
+  }
+) {
+  const rawUid = uid.replace(/^off_/, '');
+  const canonicalOfficialId = `off_${rawUid}`;
+
+  const now = new Date();
+  const userUpdates: any = { updated_at: now };
+  const profileUpdates: any = { updated_at: now };
+
+  if (payload.full_legal_name !== undefined) {
+    userUpdates.full_legal_name = payload.full_legal_name;
+    userUpdates.full_name = payload.full_legal_name;
+    const parts = payload.full_legal_name.split(' ');
+    userUpdates.first_name = parts[0] || '';
+    userUpdates.last_name = parts.slice(1).join(' ') || '';
+  }
+  if (payload.first_name !== undefined) {
+    userUpdates.first_name = payload.first_name;
+  }
+  if (payload.last_name !== undefined) {
+    userUpdates.last_name = payload.last_name;
+  }
+  if (payload.organization_name !== undefined) {
+    userUpdates.organization_name = payload.organization_name;
+    userUpdates.organization = payload.organization_name;
+    profileUpdates.organization_name = payload.organization_name;
+  }
+  if (payload.official_license_number !== undefined) {
+    userUpdates.official_license_number = payload.official_license_number;
+    profileUpdates.official_license_number = payload.official_license_number;
+  }
+  if (payload.assigned_tournaments !== undefined) {
+    userUpdates.assigned_tournaments = payload.assigned_tournaments;
+    profileUpdates.assigned_tournaments = payload.assigned_tournaments;
+  }
+
+  const batch = db.batch();
+  batch.set(db.collection('Users').doc(rawUid), userUpdates, { merge: true });
+  batch.set(db.collection('Official_Profiles').doc(canonicalOfficialId), profileUpdates, { merge: true });
+  batch.set(db.collection('Official_Profiles').doc(rawUid), profileUpdates, { merge: true });
+  await batch.commit();
+
+  return await getOfficialProfile(rawUid);
+}
+
