@@ -135,7 +135,7 @@ export async function uploadScoresheet(req: AuthRequest, res: Response): Promise
   try {
     const matchId = Array.isArray(req.params.matchId) ? req.params.matchId[0] : req.params.matchId;
     const file = extractFile(req);
-    const customKey = (req.headers['x-gemini-key'] as string) || (req.headers['x-api-key'] as string) || (req.query.gemini_key as string);
+    const customKey = (req.headers['x-gemini-key'] as string) || (req.headers['x-api-key'] as string) || (req.query.gemini_key as string) || (req.query.apiKey as string) || (req.body?.gemini_key as string) || (req.body?.apiKey as string);
 
     if (!matchId) {
       res.status(400).json({ error: 'Match ID is required.' });
@@ -160,7 +160,7 @@ export async function uploadScoresheet(req: AuthRequest, res: Response): Promise
 export async function scanStandaloneScoresheet(req: AuthRequest, res: Response): Promise<void> {
   try {
     const file = extractFile(req);
-    const customKey = (req.headers['x-gemini-key'] as string) || (req.headers['x-api-key'] as string) || (req.query.gemini_key as string);
+    const customKey = (req.headers['x-gemini-key'] as string) || (req.headers['x-api-key'] as string) || (req.query.gemini_key as string) || (req.query.apiKey as string) || (req.body?.gemini_key as string) || (req.body?.apiKey as string);
 
     const result = await scanScoresheetStandalone(file, customKey);
     res.status(200).json({

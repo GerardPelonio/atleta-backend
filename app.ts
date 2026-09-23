@@ -21,8 +21,14 @@ app.use(cors({
     'Pragma',
     'Accept',
     'X-Requested-With',
+    'x-gemini-key',
+    'x-api-key',
+    'gemini-key',
   ],
+  exposedHeaders: ['X-Response-Time-Ms', 'ETag', 'Idempotency-Key'],
 }));
+
+app.options('*', cors());
 
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));

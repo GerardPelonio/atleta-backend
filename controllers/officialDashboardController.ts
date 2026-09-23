@@ -8,21 +8,19 @@ import {
   markAllOfficialNotificationsAsRead,
 } from '../services/officialDashboardService';
 
-async function getOfficialIdFromUid(uid: string): Promise<string | null> {
-  const officialId = `off_${uid}`;
-  let profileDoc = await db.collection('Official_Profiles').doc(officialId).get();
-  if (profileDoc.exists) {
-    return profileDoc.data()!.official_id || officialId;
-  }
-  profileDoc = await db.collection('Official_Profiles').doc(uid).get();
-  if (profileDoc.exists) {
-    return profileDoc.data()!.official_id || officialId;
-  }
-  const userDoc = await db.collection('Users').doc(uid).get();
-  if (userDoc.exists && userDoc.data()?.role === 'Official') {
-    return officialId;
-  }
-  return null;
+async function getOfficialIdFromUid(uid: string): Promise<string> {
+  const officialId = uid.startsWith('off_') ? uid : `off_${uid}`;
+  try {
+    let profileDoc = await db.collection('Official_Profiles').doc(officialId).get();
+    if (profileDoc.exists) {
+      return profileDoc.data()!.official_id || officialId;
+    }
+    profileDoc = await db.collection('Official_Profiles').doc(uid).get();
+    if (profileDoc.exists) {
+      return profileDoc.data()!.official_id || officialId;
+    }
+  } catch (_) {}
+  return officialId;
 }
 
 export async function getDashboardHandler(req: AuthRequest, res: Response): Promise<void> {
@@ -34,11 +32,6 @@ export async function getDashboardHandler(req: AuthRequest, res: Response): Prom
     }
 
     const officialId = await getOfficialIdFromUid(req.user.uid);
-    if (!officialId) {
-      res.status(404).json({ error: 'Official profile not found.' });
-      return;
-    }
-
     const dashboardData = await getOfficialDashboardMetrics(officialId);
     const duration = Date.now() - startTime;
 
@@ -59,10 +52,6 @@ export async function getSchedulesHandler(req: AuthRequest, res: Response): Prom
     }
 
     const officialId = await getOfficialIdFromUid(req.user.uid);
-    if (!officialId) {
-      res.status(404).json({ error: 'Official profile not found.' });
-      return;
-    }
 
     const monthParam = req.query.month ? Number(req.query.month) : undefined;
     const yearParam = req.query.year ? Number(req.query.year) : undefined;
