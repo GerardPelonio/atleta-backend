@@ -55,10 +55,26 @@ function getFirebaseCredential() {
     });
   }
 
-  // 4. Check for local serviceAccountKey.json file (Local development)
+  // 4. Check for local serviceAccountKey file (Local development)
+  const targetProject = process.env.FIREBASE_PROJECT_ID;
+  if (targetProject === 'atleta-v2') {
+    const v2Path = path.resolve(__dirname, '..', 'serviceAccountKey.v2.json');
+    if (fs.existsSync(v2Path)) return cert(v2Path);
+  }
+
+  const customPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
+  if (customPath && fs.existsSync(customPath)) {
+    return cert(customPath);
+  }
+
   const serviceAccountPath = path.resolve(__dirname, '..', 'serviceAccountKey.json');
   if (fs.existsSync(serviceAccountPath)) {
     return cert(serviceAccountPath);
+  }
+
+  const v2FallbackPath = path.resolve(__dirname, '..', 'serviceAccountKey.v2.json');
+  if (fs.existsSync(v2FallbackPath)) {
+    return cert(v2FallbackPath);
   }
 
   console.warn('⚠️ No Firebase Admin credentials found! Please configure FIREBASE_SERVICE_ACCOUNT in Vercel.');

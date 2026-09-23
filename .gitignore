@@ -12,6 +12,7 @@ build/
 
 # Service Accounts and Secret Keys
 serviceAccountKey.json
+serviceAccountKey*.json
 *.pem
 *.key
 
