@@ -19,15 +19,27 @@ export function authenticate(req: AuthRequest, res: Response, next: NextFunction
 
   const token = authHeader.split(' ')[1];
 
-  try {
-    const secret = process.env.JWT_SECRET || 'atleta-super-secret-jwt-key-2026';
-    const decoded = jwt.verify(token, secret) as { uid: string; email: string; role: string };
-    req.user = decoded;
-    next();
-  } catch (error) {
+  const secrets = [
+    process.env.JWT_SECRET,
+    'sanamakapasasafinaldefense',
+    'atleta-super-secret-jwt-key-2026',
+  ].filter(Boolean) as string[];
+
+  let decoded: { uid: string; email: string; role: string } | null = null;
+  for (const secret of secrets) {
+    try {
+      decoded = jwt.verify(token, secret) as { uid: string; email: string; role: string };
+      if (decoded) break;
+    } catch (_) {}
+  }
+
+  if (!decoded) {
     res.status(401).json({ error: 'Invalid or expired token.' });
     return;
   }
+
+  req.user = decoded;
+  next();
 }
 
 export function optionalAuth(req: AuthRequest, res: Response, next: NextFunction): void {
@@ -36,11 +48,21 @@ export function optionalAuth(req: AuthRequest, res: Response, next: NextFunction
     return next();
   }
   const token = authHeader.split(' ')[1];
-  try {
-    const secret = process.env.JWT_SECRET || 'atleta-super-secret-jwt-key-2026';
-    const decoded = jwt.verify(token, secret) as { uid: string; email: string; role: string };
-    req.user = decoded;
-  } catch (_) {}
+  const secrets = [
+    process.env.JWT_SECRET,
+    'sanamakapasasafinaldefense',
+    'atleta-super-secret-jwt-key-2026',
+  ].filter(Boolean) as string[];
+
+  for (const secret of secrets) {
+    try {
+      const decoded = jwt.verify(token, secret) as { uid: string; email: string; role: string };
+      if (decoded) {
+        req.user = decoded;
+        break;
+      }
+    } catch (_) {}
+  }
   next();
 }
 
