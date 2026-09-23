@@ -1,11 +1,13 @@
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 
+const targetProjectId = process.env.FIREBASE_PROJECT_ID || 'atleta-v1';
+
 const firebaseConfig = {
   apiKey: process.env.FIREBASE_API_KEY || 'AIzaSyDummyApiKeyForNodeTesting12345',
-  authDomain: process.env.FIREBASE_AUTH_DOMAIN || 'atleta-v2.firebaseapp.com',
-  projectId: process.env.FIREBASE_PROJECT_ID || 'atleta-v2',
-  storageBucket: process.env.FIREBASE_STORAGE_BUCKET || 'atleta-v2.appspot.com',
+  authDomain: process.env.FIREBASE_AUTH_DOMAIN || `${targetProjectId}.firebaseapp.com`,
+  projectId: targetProjectId,
+  storageBucket: process.env.FIREBASE_STORAGE_BUCKET || `${targetProjectId}.appspot.com`,
   messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || '123456789',
   appId: process.env.FIREBASE_APP_ID || '1:123456789:web:abcdef',
 };

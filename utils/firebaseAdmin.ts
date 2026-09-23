@@ -75,7 +75,7 @@ if (!getApps().length) {
       });
     } else {
       initializeApp({
-        projectId: process.env.FIREBASE_PROJECT_ID || 'atleta-v2',
+        projectId: process.env.FIREBASE_PROJECT_ID || 'atleta-v1',
       });
     }
   } catch (err: any) {
