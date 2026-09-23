@@ -5,6 +5,7 @@ import { ServiceError } from '../validators/matchValidator';
 import { generateStandardId } from '../utils/idGenerator';
 
 export interface CreateOfficialMatchDto {
+  match_id?: string;
   reference_id?: string;
   team_id?: string;
   home_team_id?: string;
@@ -65,7 +66,11 @@ export async function createOfficialMatchService(
     }
   }
 
-  const matchId = await generateStandardId('MATCH');
+  const explicitId = data.match_id
+    ? String(data.match_id).replace(/^#/, '').trim().toUpperCase()
+    : (data.game_name && /^MATCH-\d+$/i.test(data.game_name.trim()) ? data.game_name.trim().toUpperCase() : null);
+
+  const matchId = explicitId || (await generateStandardId('MATCH'));
   const validationId = await generateStandardId('VAL');
   const now = new Date().toISOString();
 
@@ -120,8 +125,18 @@ export async function createOfficialMatchService(
 
   // 5. Save atomically
   const batch = db.batch();
-  batch.set(db.collection('Match_Logs').doc(matchId), matchLog);
-  batch.set(db.collection('Official_Audits').doc(validationId), auditDoc);
+  batch.set(db.collection('Match_Logs').doc(matchId), matchLog, { merge: true });
+  batch.set(db.collection('Official_Audits').doc(validationId), auditDoc, { merge: true });
+
+  // If match already had an audit, update its scoresheet_url too
+  try {
+    const existingAudits = await db.collection('Official_Audits').where('match_id', '==', matchId).get();
+    if (!existingAudits.empty) {
+      for (const aDoc of existingAudits.docs) {
+        batch.set(aDoc.ref, { scoresheet_url: data.scoresheet_url || '', updated_at: now }, { merge: true });
+      }
+    }
+  } catch (_) {}
 
   // Write Performance_Metrics for provided players
   if (Array.isArray(data.player_stats) && data.player_stats.length > 0) {

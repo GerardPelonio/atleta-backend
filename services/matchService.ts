@@ -914,6 +914,16 @@ Strict Rules:
 
     await db.collection('Match_Logs').doc(matchId).set(updatePayload, { merge: true });
 
+    // Also update Official_Audits if present so audit queries find scoresheet_url
+    try {
+      const auditsSnap = await db.collection('Official_Audits').where('match_id', '==', matchId).get();
+      if (!auditsSnap.empty) {
+        for (const auditDoc of auditsSnap.docs) {
+          await auditDoc.ref.set({ scoresheet_url: scoresheetUrl, updated_at: now }, { merge: true });
+        }
+      }
+    } catch (_) {}
+
     // Commit all Performance_Metrics
     if (formattedPlayerStats.length > 0) {
       await batch.commit();
@@ -1253,10 +1263,27 @@ export async function getMatchBoxscore(matchId: string): Promise<BoxscoreRespons
   const hName = (matchData as any).home_team_name || teamName;
   const aName = (matchData as any).away_team_name || matchData.opponent_team_name;
 
+  let boxScoresheetUrl = (matchData as any).scoresheet_url || '';
+  if (!boxScoresheetUrl) {
+    try {
+      const auditSnap = await db.collection('Official_Audits').where('match_id', '==', matchId).limit(1).get();
+      if (!auditSnap.empty) {
+        boxScoresheetUrl = auditSnap.docs[0].data()?.scoresheet_url || '';
+      }
+    } catch (_) {}
+  }
+
   return {
-    match: matchData,
+    match: {
+      ...matchData,
+      scoresheet_url: boxScoresheetUrl,
+    },
+    scoresheet_url: boxScoresheetUrl,
     home_team_name: hName,
     away_team_name: aName,
+    home_score: (matchData as any).home_score ?? null,
+    away_score: (matchData as any).away_score ?? null,
+    game_result: matchData.game_result,
     team_summary: {
       team_id: matchData.team_id,
       team_name: hName,
@@ -1283,6 +1310,16 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
   }
 
   const matchData = matchDoc.data() as any;
+
+  let scoresheetUrl = matchData.scoresheet_url || '';
+  if (!scoresheetUrl) {
+    try {
+      const auditSnap = await db.collection('Official_Audits').where('match_id', '==', matchId).limit(1).get();
+      if (!auditSnap.empty) {
+        scoresheetUrl = auditSnap.docs[0].data()?.scoresheet_url || '';
+      }
+    } catch (_) {}
+  }
 
   // Fetch team summary
   let teamName = matchData.home_team_name || 'Home Team';
@@ -1512,12 +1549,20 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
       team_id: matchData.team_id,
       team_name: teamName,
       opponent_team_name: matchData.opponent_team_name,
-      game_result: matchData.game_result,
-      match_date: matchData.match_date,
-      location: matchData.location,
     },
+    scoresheet_url: scoresheetUrl,
+    home_team_name: matchData.home_team_name || teamName,
+    away_team_name: matchData.away_team_name || matchData.opponent_team_name || '',
+    home_score: matchData.home_score !== undefined ? matchData.home_score : null,
+    away_score: matchData.away_score !== undefined ? matchData.away_score : null,
+    game_name: matchData.game_name || `${matchData.home_team_name || teamName} vs ${matchData.away_team_name || matchData.opponent_team_name || ''}`,
+    player_stats: matchData.player_stats || [],
+    scoresheet_data: matchData.scoresheet_data || null,
+    parsed_tables: matchData.parsed_tables || null,
+    assigned_coaches: matchData.assigned_coaches || [],
     sport_specific_details: sportSpecificDetails,
     player_metrics: playerMetrics,
+    match: matchData,
   };
 }
 
