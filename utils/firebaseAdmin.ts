@@ -75,7 +75,7 @@ if (!getApps().length) {
       });
     } else {
       initializeApp({
-        projectId: process.env.FIREBASE_PROJECT_ID || 'atleta-v1',
+        projectId: process.env.FIREBASE_PROJECT_ID || 'atleta-v2',
       });
     }
   } catch (err: any) {
@@ -88,10 +88,10 @@ let authInstance: Auth;
 
 try {
   const app = getApps()[0];
-  const targetDatabaseId = process.env.FIRESTORE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID || 'atleta_v2';
+  const targetDatabaseId = process.env.FIRESTORE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID || '(default)';
   
   try {
-    if (app && targetDatabaseId && targetDatabaseId !== '(default)') {
+    if (app && targetDatabaseId && targetDatabaseId !== '(default)' && targetDatabaseId !== 'default') {
       dbInstance = getFirestore(app, targetDatabaseId);
     } else {
       dbInstance = getFirestore();
