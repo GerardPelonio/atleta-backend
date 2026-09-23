@@ -56,10 +56,24 @@ function getFirebaseCredential() {
   }
 
   // 4. Check for local serviceAccountKey file (Local development)
+  function findServiceAccountFile(filename: string): string | null {
+    const candidates = [
+      path.resolve(process.cwd(), filename),
+      path.resolve(process.cwd(), 'Backend', filename),
+      path.resolve(__dirname, '..', filename),
+      path.resolve(__dirname, '../..', filename),
+      path.resolve(__dirname, '../../..', filename),
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) return c;
+    }
+    return null;
+  }
+
   const targetProject = process.env.FIREBASE_PROJECT_ID;
   if (targetProject === 'atleta-v2') {
-    const v2Path = path.resolve(__dirname, '..', 'serviceAccountKey.v2.json');
-    if (fs.existsSync(v2Path)) return cert(v2Path);
+    const v2Path = findServiceAccountFile('serviceAccountKey.v2.json');
+    if (v2Path) return cert(v2Path);
   }
 
   const customPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
@@ -67,13 +81,13 @@ function getFirebaseCredential() {
     return cert(customPath);
   }
 
-  const serviceAccountPath = path.resolve(__dirname, '..', 'serviceAccountKey.json');
-  if (fs.existsSync(serviceAccountPath)) {
+  const serviceAccountPath = findServiceAccountFile('serviceAccountKey.json');
+  if (serviceAccountPath) {
     return cert(serviceAccountPath);
   }
 
-  const v2FallbackPath = path.resolve(__dirname, '..', 'serviceAccountKey.v2.json');
-  if (fs.existsSync(v2FallbackPath)) {
+  const v2FallbackPath = findServiceAccountFile('serviceAccountKey.v2.json');
+  if (v2FallbackPath) {
     return cert(v2FallbackPath);
   }
 
@@ -109,12 +123,14 @@ try {
   try {
     if (app && targetDatabaseId && targetDatabaseId !== '(default)' && targetDatabaseId !== 'default') {
       dbInstance = getFirestore(app, targetDatabaseId);
+    } else if (app) {
+      dbInstance = getFirestore(app);
     } else {
       dbInstance = getFirestore();
     }
   } catch (errNamed: any) {
     console.warn(`⚠️ Named database '${targetDatabaseId}' connection note:`, errNamed?.message || errNamed);
-    dbInstance = getFirestore();
+    dbInstance = app ? getFirestore(app) : getFirestore();
   }
 } catch (e: any) {
   console.warn('⚠️ Firestore initialization warning:', e?.message || e);
@@ -122,7 +138,8 @@ try {
 }
 
 try {
-  authInstance = getAuth();
+  const app = getApps()[0];
+  authInstance = app ? getAuth(app) : getAuth();
 } catch (e: any) {
   console.warn('⚠️ Firebase Auth initialization warning:', e?.message || e);
   authInstance = {} as Auth;
