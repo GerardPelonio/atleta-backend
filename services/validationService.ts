@@ -140,10 +140,12 @@ export async function createOfficialMatchService(
 
   // Write Performance_Metrics for provided players
   if (Array.isArray(data.player_stats) && data.player_stats.length > 0) {
+    const halfCount = Math.ceil(data.player_stats.length / 2);
     for (let idx = 0; idx < data.player_stats.length; idx++) {
       const p = data.player_stats[idx];
       const pName = p.player_name || `Player ${idx + 1}`;
-      const pTeam = p.team_name || p.team || homeName;
+      const isHome = p.is_home !== undefined ? Boolean(p.is_home) : (p.team_side === 'home' ? true : p.team_side === 'away' ? false : (idx < halfCount));
+      const pTeam = isHome ? (homeName || p.team_name || p.team || 'HOME TEAM') : (awayName || p.team_name || p.team || 'AWAY TEAM');
       const athleteId = p.athlete_id || `ath_ocr_${matchId}_${idx + 1}`;
       const pJersey = p.jersey_number !== undefined ? Number(p.jersey_number) : (idx + 1);
       const rawStats = p.stats || p.sport_stats || {
@@ -172,6 +174,8 @@ export async function createOfficialMatchService(
         sport_category: data.sport_type || 'Basketball',
         sport_stats: rawStats,
         calculated_player_efficiency: p.calculated_efficiency || p.calculated_player_efficiency || 0,
+        is_home: isHome,
+        team_side: isHome ? 'home' : 'away',
         timestamp: now,
       }, { merge: true });
     }
