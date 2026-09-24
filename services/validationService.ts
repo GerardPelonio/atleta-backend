@@ -146,7 +146,7 @@ export async function createOfficialMatchService(
       const pName = p.player_name || `Player ${idx + 1}`;
       const isHome = p.is_home !== undefined ? Boolean(p.is_home) : (p.team_side === 'home' ? true : p.team_side === 'away' ? false : (idx < halfCount));
       const pTeam = isHome ? (homeName || p.team_name || p.team || 'HOME TEAM') : (awayName || p.team_name || p.team || 'AWAY TEAM');
-      const athleteId = p.athlete_id || `ath_ocr_${matchId}_${idx + 1}`;
+      const athleteId = p.athlete_id || `ath_ocr_${matchId}_${String(idx + 1).padStart(3, '0')}`;
       const pJersey = p.jersey_number !== undefined ? Number(p.jersey_number) : (idx + 1);
       const rawStats = p.stats || p.sport_stats || {
         points: Number(p.points ?? p.pts ?? 0),
