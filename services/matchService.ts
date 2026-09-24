@@ -1372,6 +1372,8 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
       team_name: pTeam,
       position: pPosition,
       jersey_number: pJersey,
+      is_home: data.is_home,
+      team_side: data.team_side,
       sport_stats: data.sport_stats || {},
       calculated_player_efficiency: data.calculated_player_efficiency || 0,
     });
@@ -1385,7 +1387,8 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
       : (Array.isArray(matchData.parsed_tables?.player_summary) ? matchData.parsed_tables.player_summary : []));
 
   if (playerMetrics.length === 0 && detailsFallbackList.length > 0) {
-    for (const item of detailsFallbackList) {
+    for (let fIdx = 0; fIdx < detailsFallbackList.length; fIdx++) {
+      const item = detailsFallbackList[fIdx];
       const pName = String(item.player_name || 'Athlete');
       const nameParts = pName.split(/\s+/);
       const rawStats = item.stats || item.sport_stats || {
@@ -1414,6 +1417,8 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
         team_name: item.team_name || item.team || '',
         position: item.position || 'Player',
         jersey_number: item.jersey_number !== undefined ? Number(item.jersey_number) : null,
+        is_home: item.is_home !== undefined ? item.is_home : (fIdx < Math.ceil(detailsFallbackList.length / 2)),
+        team_side: item.team_side || (item.is_home === true ? 'home' : item.is_home === false ? 'away' : (fIdx < Math.ceil(detailsFallbackList.length / 2) ? 'home' : 'away')),
         sport_stats: computed.enrichedStats,
         calculated_player_efficiency: item.calculated_efficiency || item.calculated_player_efficiency || computed.efficiency || 0,
       });
