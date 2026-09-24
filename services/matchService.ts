@@ -521,11 +521,11 @@ function extractJsonFromAiText(content: string): any {
   try {
     return JSON.parse(repaired);
   } catch (err: any) {
-    // 5. Fallback: Extract player rows and team scores via regex pattern matching
+    // 5. Extract player rows and team scores via regex pattern matching if JSON was slightly malformed
     const teamScores: any[] = [];
     const playerSummary: any[] = [];
 
-    const playerRegex = /\{[^{}]*"player_name"[^{}]*\}/g;
+    const playerRegex = /\{[\s\S]*?"player_name"[\s\S]*?\}/g;
     let match;
     while ((match = playerRegex.exec(content)) !== null) {
       try {
@@ -533,7 +533,7 @@ function extractJsonFromAiText(content: string): any {
       } catch (_) { }
     }
 
-    const teamRegex = /\{[^{}]*"team"[^{}]*"score"[^{}]*\}/g;
+    const teamRegex = /\{[\s\S]*?"team"[\s\S]*?"score"[\s\S]*?\}/g;
     while ((match = teamRegex.exec(content)) !== null) {
       try {
         teamScores.push(JSON.parse(match[0].replace(/,\s*\}/g, '}')));
@@ -557,11 +557,11 @@ function extractJsonFromAiText(content: string): any {
 }
 
 const OCR_MODEL_WATERFALL = [
-  'gemini-3.5-flash',
   'gemini-3.5-flash-lite',
-  'gemini-3.6-flash',
+  'gemini-3.5-flash',
   'gemini-flash-latest',
   'gemini-3.7-flash',
+  'gemini-3.6-flash',
   'gemini-pro-latest',
 ];
 
@@ -740,16 +740,14 @@ Important:
       }
 
       const base64Image = sendBuffer.toString('base64');
-      const promptText = `You are an expert sports scoresheet OCR and data extraction system.
-Carefully examine the provided document image/PDF (e.g., Basketball, Volleyball, Track & Field, Swimming, or other sports scoresheet).
-
-Extract the match overview, team scores, and ALL individual athlete statistics into this strict JSON structure:
+      const promptText = `Analyze this basketball scoresheet image/PDF/CSV.
+Extract the match overview, team scores, and ALL player rows from both teams into valid JSON:
 {
   "match_info": {
     "sport_type": "Basketball",
-    "event_name": "Tournament / Event / League Name",
+    "event_name": "Event / Tournament Name",
     "home_team_name": "Home Team Name",
-    "opponent_team_name": "Opponent / Away Team Name",
+    "opponent_team_name": "Away Team Name",
     "game_result": "WIN",
     "final_score": "0 - 0"
   },
@@ -759,33 +757,26 @@ Extract the match overview, team scores, and ALL individual athlete statistics i
   ],
   "player_summary": [
     {
-      "player_name": "Full Name",
+      "player_name": "Player Name",
       "team_name": "TeamName",
-      "jersey_number": 0,
+      "jersey_number": 5,
       "position": "G",
-      "minutes": "0",
-      "points": 0,
-      "rebounds": 0,
-      "assists": 0,
-      "fouls": 0,
-      "steals": 0,
-      "blocks": 0,
-      "turnovers": 0,
-      "fg_made": 0,
-      "fg_attempted": 0,
-      "ft_made": 0,
-      "ft_attempted": 0
+      "points": 20,
+      "rebounds": 5,
+      "assists": 6,
+      "fouls": 2,
+      "fg_made": 8,
+      "fg_attempted": 18,
+      "ft_made": 2,
+      "ft_attempted": 4
     }
   ]
 }
 
 CRITICAL RULES:
-1. You MUST transcribe EVERY player row from BOTH teams shown on the scoresheet into the "player_summary" array.
-2. For each player, include their exact jersey number, player name, team name, and individual statistics (points, rebounds, assists, steals, blocks, turnovers, fouls, fg_made, fg_attempted, ft_made, ft_attempted).
-3. Read handwritten numbers with high fidelity, distinguishing between 0, 1, 7, 8, 3, etc. based on surrounding grid layout and column headers.
-4. Validate row totals against individual metric columns (e.g. 2PT made + 3PT made + FT made vs total PTS).
-5. If a team name is not explicitly labeled, derive it from the header or team name printed above the roster block.
-6. Return ONLY valid JSON, nothing else.`;
+1. Extract EVERY player row from BOTH teams (e.g. Left and Right columns / Team A and Team B) shown on the sheet.
+2. Read the exact jersey numbers, actual names, and exact points/shots recorded.
+3. Return ONLY valid JSON adhering to the structure above.`;
 
       requestBody = {
         contents: [
@@ -802,9 +793,11 @@ CRITICAL RULES:
           },
         ],
         generationConfig: {
-          responseMimeType: 'application/json',
           temperature: 0.1,
           maxOutputTokens: 8192,
+          thinkingConfig: {
+            thinkingBudget: 0,
+          },
         },
       };
     }
@@ -1073,16 +1066,14 @@ Important:
     }
 
     const base64Image = sendBuffer.toString('base64');
-    const promptText = `You are an expert sports scoresheet OCR and data extraction system.
-Carefully examine the provided document image/PDF (e.g., Basketball, Volleyball, Track & Field, Swimming, or other sports scoresheet).
-
-Extract the match overview, team scores, and ALL individual athlete statistics in this strict JSON structure:
+    const promptText = `Analyze this basketball scoresheet image/PDF/CSV.
+Extract the match overview, team scores, and ALL player rows from both teams into valid JSON:
 {
   "match_info": {
     "sport_type": "Basketball",
-    "event_name": "Tournament / Event / League Name",
+    "event_name": "Event / Tournament Name",
     "home_team_name": "Home Team Name",
-    "opponent_team_name": "Opponent / Away Team Name",
+    "opponent_team_name": "Away Team Name",
     "game_result": "WIN",
     "final_score": "0 - 0"
   },
@@ -1092,33 +1083,26 @@ Extract the match overview, team scores, and ALL individual athlete statistics i
   ],
   "player_summary": [
     {
-      "player_name": "Full Name",
+      "player_name": "Player Name",
       "team_name": "TeamName",
-      "jersey_number": 0,
+      "jersey_number": 5,
       "position": "G",
-      "minutes": "0",
-      "points": 0,
-      "rebounds": 0,
-      "assists": 0,
-      "steals": 0,
-      "blocks": 0,
-      "turnovers": 0,
-      "fouls": 0,
-      "fg_made": 0,
-      "fg_attempted": 0,
-      "ft_made": 0,
-      "ft_attempted": 0
+      "points": 20,
+      "rebounds": 5,
+      "assists": 6,
+      "fouls": 2,
+      "fg_made": 8,
+      "fg_attempted": 18,
+      "ft_made": 2,
+      "ft_attempted": 4
     }
   ]
 }
 
 CRITICAL RULES:
-1. You MUST transcribe EVERY player row from BOTH teams shown on the scoresheet into the "player_summary" array.
-2. For each player, include their exact jersey number, player name, team name, and individual statistics (points, rebounds, assists, steals, blocks, turnovers, fouls, fg_made, fg_attempted, ft_made, ft_attempted).
-3. Read handwritten numbers with high fidelity, distinguishing between 0, 1, 7, 8, 3, etc. based on surrounding grid layout and column headers.
-4. Validate row totals against individual metric columns (e.g. 2PT made + 3PT made + FT made vs total PTS).
-5. If a team name is not explicitly labeled, derive it from the header or team name printed above the roster block.
-6. Return ONLY the JSON object.`;
+1. Extract EVERY player row from BOTH teams (e.g. Left and Right columns / Team A and Team B) shown on the sheet.
+2. Read the exact jersey numbers, actual names, and exact points/shots recorded.
+3. Return ONLY valid JSON adhering to the structure above.`;
 
     requestBody = {
       contents: [
@@ -1135,9 +1119,11 @@ CRITICAL RULES:
         },
       ],
       generationConfig: {
-        responseMimeType: 'application/json',
         temperature: 0.1,
         maxOutputTokens: 8192,
+        thinkingConfig: {
+          thinkingBudget: 0,
+        },
       },
     };
   }
