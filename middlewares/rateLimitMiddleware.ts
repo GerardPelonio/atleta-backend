@@ -7,7 +7,7 @@ interface RateLimitRecord {
 
 const ipLimitMap = new Map<string, RateLimitRecord>();
 const WINDOW_MS = 60 * 1000;
-const MAX_REQUESTS = 100;
+const MAX_REQUESTS = 5;
 
 export function authRateLimiter(req: Request, res: Response, next: NextFunction): void {
   const clientIp = (req.headers['x-forwarded-for'] as string) || req.ip || req.socket.remoteAddress || '127.0.0.1';

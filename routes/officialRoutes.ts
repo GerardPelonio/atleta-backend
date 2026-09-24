@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { authenticate } from '../middlewares/authMiddleware';
 import {
+  registerOfficialHandler,
+  loginOfficialHandler,
   getOfficialProfileHandler,
   updateOfficialProfileHandler,
   getOfficialSettingsHandler,
@@ -13,15 +15,11 @@ import {
   markAllOfficialNotificationsAsReadHandler,
 } from '../controllers/officialDashboardController';
 
-import { authRateLimiter } from '../middlewares/rateLimitMiddleware';
-import { loginOfficialHandler } from '../controllers/officialController';
-import { registerOfficialHandler } from '../controllers/userController';
-
 const router = Router();
 
-// Authentication & Registration
-router.post('/login', authRateLimiter, loginOfficialHandler);
-router.post('/register', authRateLimiter, registerOfficialHandler);
+// Authentication
+router.post('/login', loginOfficialHandler);
+router.post('/register', registerOfficialHandler);
 
 // Profile & Identity (Named and Root Routes)
 router.get('/profile', authenticate, getOfficialProfileHandler);

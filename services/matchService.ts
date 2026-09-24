@@ -637,8 +637,21 @@ export async function uploadScoresheetFileToStorage(matchId: string, file: Expre
     console.warn('⚠️ [STORAGE] Cloud Storage bucket upload fallback:', storageErr?.message || storageErr);
   }
 
-  // 2. Resilient Fallback: High-fidelity base64 Data URI (works seamlessly in all browsers and iframes)
-  return `data:${mime};base64,${file.buffer.toString('base64')}`;
+  // 2. Resilient Fallback: High-fidelity compressed base64 Data URI (works seamlessly in all browsers and fits Firestore's 1MB limit)
+  let bufferToEncode = file.buffer;
+  let encodeMime = mime;
+  try {
+    const sharp = require('sharp');
+    if (mime.startsWith('image/')) {
+      bufferToEncode = await sharp(file.buffer)
+        .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 75 })
+        .toBuffer();
+      encodeMime = 'image/jpeg';
+    }
+  } catch {}
+
+  return `data:${encodeMime};base64,${bufferToEncode.toString('base64')}`;
 }
 
 /**
@@ -802,8 +815,11 @@ Strict Rules:
     const teamScores: any[] = Array.isArray(aiParsed.team_scores) ? aiParsed.team_scores : [];
 
     const matchData = matchDoc.data()!;
-    const homeTeamName = (matchData.home_team_name || matchData.team_name || 'Home Team').toUpperCase();
-    const awayTeamName = (matchData.opponent_team_name || matchData.away_team_name || 'Away Team').toUpperCase();
+    const detectedHome = aiParsed.match_info?.home_team_name || aiParsed.match_info?.home_team || (teamScores.length > 0 ? teamScores[0]?.team : undefined);
+    const detectedAway = aiParsed.match_info?.opponent_team_name || aiParsed.match_info?.away_team_name || aiParsed.match_info?.away_team || (teamScores.length > 1 ? teamScores[1]?.team : undefined);
+
+    const homeTeamName = (detectedHome || matchData.home_team_name || matchData.team_name || 'Home Team').toUpperCase();
+    const awayTeamName = (detectedAway || matchData.opponent_team_name || matchData.away_team_name || 'Away Team').toUpperCase();
 
     // Check if team roster exists in DB to match athlete IDs
     const teamId = matchData.team_id;
@@ -908,9 +924,22 @@ Strict Rules:
     };
 
     if (teamScores.length >= 2) {
-      updatePayload.home_score = teamScores[0].score;
-      updatePayload.away_score = teamScores[1].score;
+      updatePayload.home_score = Number(teamScores[0].score);
+      updatePayload.away_score = Number(teamScores[1].score);
       updatePayload.game_result = Number(teamScores[0].score) >= Number(teamScores[1].score) ? 'WIN' : 'LOSS';
+    }
+
+    if (detectedHome) {
+      updatePayload.home_team_name = homeTeamName;
+    }
+    if (detectedAway) {
+      updatePayload.away_team_name = awayTeamName;
+      updatePayload.opponent_team_name = awayTeamName;
+    }
+    if (detectedHome || detectedAway) {
+      updatePayload.teams = [homeTeamName, awayTeamName];
+      updatePayload.match_name = `${homeTeamName} vs ${awayTeamName}`;
+      updatePayload.game_name = `${homeTeamName} vs ${awayTeamName}`;
     }
 
     await db.collection('Match_Logs').doc(matchId).set(updatePayload, { merge: true });
@@ -1114,36 +1143,49 @@ Strict Rules:
     const content = await callGeminiWithWaterfall(requestBody, geminiKey);
     const parsedData = extractJsonFromAiText(content);
 
-    if (Array.isArray(parsedData.player_summary)) {
-      parsedData.player_summary = parsedData.player_summary.map((p: any) => {
-        const computed = calculateBasketballMetrics({
-          points: Number(p.points || 0),
-          rebounds: Number(p.rebounds || 0),
-          assists: Number(p.assists || 0),
-          steals: Number(p.steals || 0),
-          blocks: Number(p.blocks || 0),
-          turnovers: Number(p.turnovers || 0),
-          fouls: Number(p.fouls || 0),
-          fg_made: Number(p.fg_made || 0),
-          fg_attempted: Number(p.fg_attempted || 0),
-          ft_made: Number(p.ft_made || 0),
-          ft_attempted: Number(p.ft_attempted || 0),
-        });
+    const playerSummary: any[] = Array.isArray(parsedData.player_summary)
+      ? parsedData.player_summary
+      : (Array.isArray(parsedData.players) ? parsedData.players : (Array.isArray(parsedData.roster) ? parsedData.roster : []));
 
-        return {
-          ...p,
-          calculated_efficiency: computed.efficiency,
-          true_shooting_pct: computed.trueShootingPct,
-        };
+    const teamScores: any[] = Array.isArray(parsedData.team_scores)
+      ? parsedData.team_scores
+      : (Array.isArray(parsedData.teams) ? parsedData.teams : []);
+
+    const enrichedPlayers = playerSummary.map((p: any) => {
+      const computed = calculateBasketballMetrics({
+        points: Number(p.points || 0),
+        rebounds: Number(p.rebounds || 0),
+        assists: Number(p.assists || 0),
+        steals: Number(p.steals || 0),
+        blocks: Number(p.blocks || 0),
+        turnovers: Number(p.turnovers || 0),
+        fouls: Number(p.fouls || 0),
+        fg_made: Number(p.fg_made || 0),
+        fg_attempted: Number(p.fg_attempted || 0),
+        ft_made: Number(p.ft_made || 0),
+        ft_attempted: Number(p.ft_attempted || 0),
       });
-    }
+
+      return {
+        ...p,
+        points: Number(p.points || 0),
+        calculated_efficiency: computed.efficiency,
+        true_shooting_pct: computed.trueShootingPct,
+      };
+    });
 
     return {
       filename,
       file_size_bytes: file.size,
       scoresheet_url: scoresheetUrl,
       parsed_at: new Date().toISOString(),
-      ...parsedData,
+      match_info: parsedData.match_info || {},
+      team_scores: teamScores,
+      player_summary: enrichedPlayers,
+      parsed_tables: {
+        team_scores: teamScores,
+        player_summary: enrichedPlayers,
+      },
     };
   } catch (aiErr: any) {
     console.error('❌ [SCAN OCR] Google Gemini failed:', aiErr.message);
@@ -1372,8 +1414,6 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
       team_name: pTeam,
       position: pPosition,
       jersey_number: pJersey,
-      is_home: data.is_home,
-      team_side: data.team_side,
       sport_stats: data.sport_stats || {},
       calculated_player_efficiency: data.calculated_player_efficiency || 0,
     });
@@ -1387,8 +1427,7 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
       : (Array.isArray(matchData.parsed_tables?.player_summary) ? matchData.parsed_tables.player_summary : []));
 
   if (playerMetrics.length === 0 && detailsFallbackList.length > 0) {
-    for (let fIdx = 0; fIdx < detailsFallbackList.length; fIdx++) {
-      const item = detailsFallbackList[fIdx];
+    for (const item of detailsFallbackList) {
       const pName = String(item.player_name || 'Athlete');
       const nameParts = pName.split(/\s+/);
       const rawStats = item.stats || item.sport_stats || {
@@ -1417,8 +1456,6 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
         team_name: item.team_name || item.team || '',
         position: item.position || 'Player',
         jersey_number: item.jersey_number !== undefined ? Number(item.jersey_number) : null,
-        is_home: item.is_home !== undefined ? item.is_home : (fIdx < Math.ceil(detailsFallbackList.length / 2)),
-        team_side: item.team_side || (item.is_home === true ? 'home' : item.is_home === false ? 'away' : (fIdx < Math.ceil(detailsFallbackList.length / 2) ? 'home' : 'away')),
         sport_stats: computed.enrichedStats,
         calculated_player_efficiency: item.calculated_efficiency || item.calculated_player_efficiency || computed.efficiency || 0,
       });

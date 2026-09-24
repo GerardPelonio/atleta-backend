@@ -151,53 +151,50 @@ export async function registerOfficialService(data: RegisterOfficialDto) {
  * Validate credentials and issue Bearer JWT specifically for officials.
  */
 export async function loginOfficialService(email: string, password: string) {
-  const cleanEmail = (email || '').trim().toLowerCase();
-
-  // 1. Fetch user document by email from Firestore (case-insensitive + raw)
-  const userQuery = await db.collection('Users').where('email', '==', cleanEmail).limit(1).get();
-  let userDoc = userQuery.empty ? null : userQuery.docs[0];
-
-  if (!userDoc) {
-    const rawQuery = await db.collection('Users').where('email', '==', email.trim()).limit(1).get();
-    userDoc = rawQuery.empty ? null : rawQuery.docs[0];
+  // 1. Fetch user document by email from Firestore first
+  const userSnapshot = await db.collection('Users').where('email', '==', email).limit(1).get();
+  if (userSnapshot.empty) {
+    throw new ServiceError('User profile not found in Firestore.', 404);
   }
 
-  let uid = '';
-  let firebaseIdToken = '';
+  const userDoc = userSnapshot.docs[0];
+  const userData = userDoc.data();
+  const uid = userDoc.id;
 
+  if (userData.role !== 'Official') {
+    throw new ServiceError('Access denied. Official role required.', 403);
+  }
+
+  // 2. Attempt client-side authentication with Firebase Auth Client SDK
+  let firebaseIdToken = '';
   try {
-    const userCredential = await signInWithEmailAndPassword(clientAuth, cleanEmail, password);
+    const userCredential = await signInWithEmailAndPassword(clientAuth, email, password);
     firebaseIdToken = await userCredential.user.getIdToken();
-    uid = userCredential.user.uid;
   } catch (err: any) {
-    if (userDoc) {
-      const userData = userDoc.data();
+    // If client SDK fails due to API key errors, fall back to stored password comparison for local testing
+    const isApiKeyError = err.code === 'auth/api-key-not-valid.-please-pass-a-valid-api-key.' || 
+                          err.code === 'auth/invalid-api-key' ||
+                          err.message?.includes('api-key-not-valid');
+                          
+    if (isApiKeyError) {
       if (userData.password && userData.password === password) {
-        uid = userDoc.id;
-        firebaseIdToken = await auth.createCustomToken(uid).catch(() => 'mock_token');
+        firebaseIdToken = 'mock_firebase_id_token';
       } else {
-        throw { code: 'auth/wrong-password', message: 'Invalid email or password.' };
+        throw {
+          code: 'auth/wrong-password',
+          message: 'Invalid email or password.'
+        };
       }
     } else {
+      // Re-throw or format as invalid credential
       throw {
         code: err.code || 'auth/invalid-credential',
-        message: err.message || 'Invalid email or password.',
+        message: err.message || 'Invalid email or password.'
       };
     }
   }
 
-  if (!userDoc) {
-    const docRef = await db.collection('Users').doc(uid).get();
-    if (!docRef.exists) {
-      throw new ServiceError('User profile not found in Firestore.', 404);
-    }
-    userDoc = docRef as any;
-  }
-
-  const userData = userDoc!.data()!;
-  const canonicalUid = userDoc!.id;
-
-  const token = generateToken(canonicalUid, userData.email, 'Official');
+  const token = generateToken(uid, userData.email, 'Official');
 
   return {
     user: {
