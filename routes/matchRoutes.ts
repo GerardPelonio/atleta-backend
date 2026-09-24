@@ -25,7 +25,11 @@ const upload = multer({
   limits: { fileSize: 30 * 1024 * 1024 },
 });
 
-// Standalone OCR Scoresheet Scanner (No match ID needed - accepts any field name)
+// Dedicated Web & Mobile OCR Scoresheet Scanners
+router.post('/web/scan-scoresheet', optionalAuth, upload.any(), scanStandaloneScoresheet);
+router.post('/web/ocr', optionalAuth, upload.any(), scanStandaloneScoresheet);
+router.post('/mobile/scan-scoresheet', optionalAuth, upload.any(), scanStandaloneScoresheet);
+router.post('/mobile/ocr', optionalAuth, upload.any(), scanStandaloneScoresheet);
 router.post('/scan-scoresheet', optionalAuth, upload.any(), scanStandaloneScoresheet);
 router.post('/ocr/scan', optionalAuth, upload.any(), scanStandaloneScoresheet);
 router.post('/scoresheet', optionalAuth, upload.any(), scanStandaloneScoresheet);
