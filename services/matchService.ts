@@ -580,12 +580,24 @@ async function callGeminiWithWaterfall(requestBody: any, rawKey?: string): Promi
 
   for (const model of OCR_MODEL_WATERFALL) {
     try {
+      const payloadToSend = JSON.parse(JSON.stringify(requestBody));
+      if (model === 'gemini-3.5-flash-lite') {
+        if (payloadToSend.generationConfig?.thinkingConfig) {
+          delete payloadToSend.generationConfig.thinkingConfig;
+        }
+      } else if (model === 'gemini-3.5-flash') {
+        payloadToSend.generationConfig = {
+          ...(payloadToSend.generationConfig || {}),
+          thinkingConfig: { thinkingBudget: 0 },
+        };
+      }
+
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody),
+          body: JSON.stringify(payloadToSend),
           signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(45000) : undefined,
         }
       );
@@ -784,8 +796,8 @@ CRITICAL RULES:
             parts: [
               { text: promptText },
               {
-                inlineData: {
-                  mimeType: sendMime,
+                inline_data: {
+                  mime_type: sendMime,
                   data: base64Image,
                 },
               },
@@ -1110,8 +1122,8 @@ CRITICAL RULES:
           parts: [
             { text: promptText },
             {
-              inlineData: {
-                mimeType: sendMime,
+              inline_data: {
+                mime_type: sendMime,
                 data: base64Image,
               },
             },
