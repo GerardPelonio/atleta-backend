@@ -13,7 +13,15 @@ import {
   markAllOfficialNotificationsAsReadHandler,
 } from '../controllers/officialDashboardController';
 
+import { authRateLimiter } from '../middlewares/rateLimitMiddleware';
+import { loginOfficialHandler } from '../controllers/officialController';
+import { registerOfficialHandler } from '../controllers/userController';
+
 const router = Router();
+
+// Authentication & Registration
+router.post('/login', authRateLimiter, loginOfficialHandler);
+router.post('/register', authRateLimiter, registerOfficialHandler);
 
 // Profile & Identity (Named and Root Routes)
 router.get('/profile', authenticate, getOfficialProfileHandler);
