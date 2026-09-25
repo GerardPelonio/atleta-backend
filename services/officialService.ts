@@ -4,6 +4,7 @@ import { clientAuth } from '../utils/firebaseClient';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { OfficialProfile, OfficialSettings, RegisterOfficialDto, UpdateOfficialSettingsDto, User } from '../models/userModel';
 import { generateToken } from './userService';
+import { generateElevatedAdminToken } from './adminService';
 
 export class ServiceError extends Error {
   statusCode: number;
@@ -213,14 +214,23 @@ export async function loginOfficialService(email: string, password: string) {
     }
   }
 
-  const token = generateToken(uid, userData.email, 'Official');
+  const rawRole = String(userData.role || '').trim();
+  const isAdmin = rawRole.toLowerCase().includes('admin');
+  const actualRole = isAdmin ? 'SystemAdmin' : (userData.role || 'Official');
+  const token = isAdmin
+    ? generateElevatedAdminToken(uid, userData.email, 'SystemAdmin', Number(userData.clearance_level || 4), userData.department_code || 'SYS_ADMIN')
+    : generateToken(uid, userData.email, actualRole as any);
 
   return {
     user: {
       user_id: uid,
-      full_legal_name: userData.full_legal_name || `${userData.first_name || ''} ${userData.last_name || ''}`.trim(),
+      uid: uid,
+      full_legal_name: userData.full_legal_name || userData.full_name || `${userData.first_name || ''} ${userData.last_name || ''}`.trim(),
       email: userData.email,
-      role: 'Official',
+      role: actualRole,
+      institution: userData.institution || userData.organization_name || userData.organization || '',
+      clearance_level: userData.clearance_level,
+      department_code: userData.department_code,
     },
     token,
     firebase_id_token: firebaseIdToken,
