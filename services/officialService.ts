@@ -325,7 +325,7 @@ export async function getOfficialProfile(uid: string) {
     user_id: rawUid,
     full_legal_name: userData.full_legal_name || userData.full_name || `${userData.first_name || ''} ${userData.last_name || ''}`.trim(),
     email: userData.email,
-    role: 'Official',
+    role: userData.role || 'Official',
     organization_name: profileData.organization_name || userData.organization_name || userData.organization || 'General Tournament Association',
     official_license_number: profileData.official_license_number || userData.official_license_number || 'OFF-LIC-2026',
     assigned_tournaments: profileData.assigned_tournaments || userData.assigned_tournaments || [],
