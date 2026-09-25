@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middlewares/authMiddleware';
 import { db } from '../utils/firebaseAdmin';
+import { serverCache } from '../utils/cache';
 import {
   submitMatchSession,
   processScoresheetOCR,
@@ -16,19 +17,33 @@ export async function getAllMatchesHandler(req: AuthRequest, res: Response): Pro
     const coachId = req.user?.uid || (typeof req.query.coach_id === 'string' ? req.query.coach_id : undefined);
     const showAll = req.query.all === 'true';
 
-    const snap = await db.collection('Match_Logs').get();
-    const allMatches = snap.docs.map((doc) => ({
-      id: doc.id,
-      match_id: doc.id,
-      ...doc.data(),
-    }));
+    res.setHeader('Cache-Control', 'public, max-age=10, stale-while-revalidate=30');
+
+    // Check fast server cache for all matches
+    const cacheKey = `all_matches_raw`;
+    let allMatches = serverCache.get<any[]>(cacheKey);
+
+    if (!allMatches) {
+      const snap = await db.collection('Match_Logs').get();
+      allMatches = snap.docs.map((doc) => ({
+        id: doc.id,
+        match_id: doc.id,
+        ...doc.data(),
+      }));
+      serverCache.set(cacheKey, allMatches, 30, ['matches']);
+    }
 
     let matches = allMatches;
     if (coachId && !showAll) {
       const possibleCoachIds = [coachId, `coach_${coachId}`, coachId.replace('coach_', '')];
       // Find teams managed by this coach
-      const teamsSnap = await db.collection('Teams').where('coach_id', 'in', possibleCoachIds).get();
-      const coachTeamIds = new Set(teamsSnap.docs.map((d) => d.id));
+      const teamsCacheKey = `coach_teams_${coachId}`;
+      let coachTeamIds = serverCache.get<Set<string>>(teamsCacheKey);
+      if (!coachTeamIds) {
+        const teamsSnap = await db.collection('Teams').where('coach_id', 'in', possibleCoachIds).get();
+        coachTeamIds = new Set(teamsSnap.docs.map((d) => d.id));
+        serverCache.set(teamsCacheKey, coachTeamIds, 60, ['teams']);
+      }
 
       const coachMatches = allMatches.filter((m: any) => {
         // Official matches (created by Tournament Officials) are always visible to all coaches
@@ -106,6 +121,7 @@ export async function submitMatch(req: AuthRequest, res: Response): Promise<void
     }
 
     const result = await submitMatchSession(coachId, payload, idempotencyKey);
+    serverCache.invalidateTags(['matches', 'dashboard', 'validations']);
     res.status(201).json(result);
   } catch (error: any) {
     if (error instanceof ServiceError) {
@@ -143,6 +159,7 @@ export async function uploadScoresheet(req: AuthRequest, res: Response): Promise
     }
 
     const parsedResult = await processScoresheetOCR(matchId, file, customKey);
+    serverCache.invalidateTags(['matches', 'dashboard', 'validations', `match_${matchId}`]);
     res.status(200).json({
       message: 'Scoresheet uploaded and OCR table parsing completed successfully.',
       ...parsedResult,
@@ -186,7 +203,15 @@ export async function getBoxscore(req: AuthRequest, res: Response): Promise<void
       return;
     }
 
-    const boxscore = await getMatchBoxscore(matchId);
+    res.setHeader('Cache-Control', 'public, max-age=15, stale-while-revalidate=60');
+
+    const cacheKey = `boxscore_${matchId}`;
+    let boxscore = serverCache.get<any>(cacheKey);
+    if (!boxscore) {
+      boxscore = await getMatchBoxscore(matchId);
+      serverCache.set(cacheKey, boxscore, 60, ['matches', `match_${matchId}`]);
+    }
+
     res.status(200).json(boxscore);
   } catch (error: any) {
     if (error instanceof ServiceError) {
@@ -207,7 +232,15 @@ export async function getMatchDetailsHandler(req: AuthRequest, res: Response): P
       return;
     }
 
-    const details = await getMatchResultDetails(matchId);
+    res.setHeader('Cache-Control', 'public, max-age=15, stale-while-revalidate=60');
+
+    const cacheKey = `details_${matchId}`;
+    let details = serverCache.get<any>(cacheKey);
+    if (!details) {
+      details = await getMatchResultDetails(matchId);
+      serverCache.set(cacheKey, details, 60, ['matches', `match_${matchId}`]);
+    }
+
     res.status(200).json(details);
   } catch (error: any) {
     if (error instanceof ServiceError) {

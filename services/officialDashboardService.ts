@@ -1,4 +1,5 @@
 import { db } from '../utils/firebaseAdmin';
+import { serverCache } from '../utils/cache';
 import { OfficialNotification, OfficialSchedule } from '../models/userModel';
 
 /**
@@ -6,6 +7,10 @@ import { OfficialNotification, OfficialSchedule } from '../models/userModel';
  * Optimised to respond under 200ms by running queries in parallel.
  */
 export async function getOfficialDashboardMetrics(officialId: string) {
+  const cacheKey = `dashboard_metrics_${officialId}`;
+  const cached = serverCache.get<any>(cacheKey);
+  if (cached) return cached;
+
   let totalMatches = 0;
   let pendingCount = 0;
   let auditedCount = 0;
@@ -63,12 +68,15 @@ export async function getOfficialDashboardMetrics(officialId: string) {
     };
   });
 
-  return {
+  const result = {
     total_matches: totalMatches,
     pending_count: pendingCount,
     audited_count: auditedCount,
     audit_queue: auditQueue
   };
+
+  serverCache.set(cacheKey, result, 20, ['dashboard', 'matches']);
+  return result;
 }
 
 /**

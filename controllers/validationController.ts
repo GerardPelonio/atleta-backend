@@ -1,5 +1,6 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middlewares/authMiddleware';
+import { serverCache } from '../utils/cache';
 import {
   validateCreateOfficialMatch,
   validateCertifyValidation,
@@ -28,6 +29,7 @@ export async function createOfficialMatchHandler(req: AuthRequest, res: Response
     }
 
     const result = await createOfficialMatchService(uid, req.body, idempotencyKey);
+    serverCache.invalidateTags(['matches', 'dashboard', 'validations']);
     res.status(201).json(result);
   } catch (error: any) {
     if (error instanceof ServiceError) {
@@ -46,7 +48,15 @@ export async function getPendingValidationsHandler(req: AuthRequest, res: Respon
       return;
     }
 
-    const pendingValidations = await getPendingValidationsService();
+    res.setHeader('Cache-Control', 'public, max-age=10, stale-while-revalidate=30');
+
+    const cacheKey = `pending_validations`;
+    let pendingValidations = serverCache.get<any[]>(cacheKey);
+    if (!pendingValidations) {
+      pendingValidations = await getPendingValidationsService();
+      serverCache.set(cacheKey, pendingValidations, 20, ['validations', 'matches']);
+    }
+
     res.status(200).json(pendingValidations);
   } catch (error: any) {
     if (error instanceof ServiceError) {
@@ -78,6 +88,7 @@ export async function certifyValidationHandler(req: AuthRequest, res: Response):
     }
 
     const result = await certifyValidationService(validationId, req.user.uid, req.body);
+    serverCache.invalidateTags(['matches', 'dashboard', 'validations', `match_${validationId}`]);
     res.status(200).json(result);
   } catch (error: any) {
     if (error instanceof ServiceError) {
@@ -103,6 +114,7 @@ export async function deleteMatchHandler(req: AuthRequest, res: Response): Promi
     }
 
     const result = await deleteMatchService(matchId);
+    serverCache.invalidateTags(['matches', 'dashboard', 'validations', `match_${matchId}`]);
     res.status(200).json(result);
   } catch (error: any) {
     if (error instanceof ServiceError) {
