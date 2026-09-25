@@ -20,12 +20,6 @@ export function validateCreateOfficialMatch(
     });
   }
 
-  // team_id / home_team_id (Required)
-  const teamId = typeof data.team_id === 'string' ? data.team_id.trim() : (typeof data.home_team_id === 'string' ? data.home_team_id.trim() : '');
-  if (!teamId) {
-    errors.push({ field: 'team_id', message: 'Team ID (team_id or home_team_id) is required.' });
-  }
-
   // sport_type (Required: dynamic sport name e.g. Basketball, Volleyball, Swimming, etc.)
   const sportType = typeof data.sport_type === 'string' ? data.sport_type.trim() : '';
   if (!sportType) {
@@ -37,20 +31,38 @@ export function validateCreateOfficialMatch(
     });
   }
 
+  const isIndividual = /swim|track|field|run|race|individual|athletics/i.test(sportType);
+
+  // team_id / home_team_id
+  const teamId = typeof data.team_id === 'string'
+    ? data.team_id.trim()
+    : (typeof data.home_team_id === 'string'
+      ? data.home_team_id.trim()
+      : (typeof data.home_team_name === 'string' ? data.home_team_name.trim() : ''));
+  if (!teamId && !isIndividual && !data.game_name && !data.event_name) {
+    errors.push({ field: 'team_id', message: 'Team ID (team_id or home_team_id) is required.' });
+  }
+
   // match_date (Required)
   if (!data.match_date) {
     errors.push({ field: 'match_date', message: 'Match date (match_date) is required.' });
   }
 
   // location (Required)
-  const location = typeof data.location === 'string' ? data.location.trim() : '';
+  const location = typeof data.location === 'string'
+    ? data.location.trim()
+    : (typeof data.venue === 'string' ? data.venue.trim() : '');
   if (!location) {
     errors.push({ field: 'location', message: 'Location is required.' });
   }
 
-  // opponent_team_name / away_team_name (Required)
-  const opponent = typeof data.opponent_team_name === 'string' ? data.opponent_team_name.trim() : (typeof data.away_team_id === 'string' ? data.away_team_id.trim() : '');
-  if (!opponent) {
+  // opponent_team_name / away_team_name
+  const opponent = typeof data.opponent_team_name === 'string'
+    ? data.opponent_team_name.trim()
+    : (typeof data.away_team_id === 'string'
+      ? data.away_team_id.trim()
+      : (typeof data.away_team_name === 'string' ? data.away_team_name.trim() : ''));
+  if (!opponent && !isIndividual && !data.game_name && !data.event_name) {
     errors.push({ field: 'opponent_team_name', message: 'Opponent team name or away team ID is required.' });
   }
 

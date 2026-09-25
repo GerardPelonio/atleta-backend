@@ -54,7 +54,7 @@ router.get('/:matchId/boxscore', optionalAuth, getBoxscore);
 router.get('/:matchId/details', optionalAuth, getMatchDetailsHandler);
 router.get('/:matchId', optionalAuth, getMatchDetailsHandler);
 router.post('/:matchId/audit-request', authenticate, requireCoach, submitAuditRequestController);
-router.get('/:matchId/pdf', authenticate, requireCoach, exportMatchPdfController);
+router.get('/:matchId/pdf', authenticate, exportMatchPdfController);
 router.delete('/:matchId', authenticate, deleteMatchHandler);
 
 export default router;

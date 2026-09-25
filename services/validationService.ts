@@ -74,9 +74,15 @@ export async function createOfficialMatchService(
   const validationId = await generateStandardId('VAL');
   const now = new Date().toISOString();
 
-  const teamId = data.team_id || data.home_team_id || data.home_team_name || '';
-  const homeName = data.home_team_name || data.home_team_id || data.team_id || '';
-  const awayName = data.away_team_name || data.opponent_team_name || data.away_team_id || '';
+  const rawSport = String(data.sport_type || '').toLowerCase();
+  const isIndividual = rawSport.includes('swim') || rawSport.includes('track') || rawSport.includes('field') || rawSport.includes('run') || rawSport.includes('individual') || rawSport.includes('athletics');
+
+  const defaultHome = isIndividual ? 'Event Participants' : 'Home Team';
+  const defaultAway = isIndividual ? 'Heat / Field' : 'Opponent';
+
+  const teamId = data.team_id || data.home_team_id || data.home_team_name || defaultHome;
+  const homeName = data.home_team_name || data.home_team_id || data.team_id || defaultHome;
+  const awayName = data.away_team_name || data.opponent_team_name || data.away_team_id || defaultAway;
 
   // 3. Construct Match Log — include display-friendly team names so coaches can see the match
   const matchLog: MatchLog = {
