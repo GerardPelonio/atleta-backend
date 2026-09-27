@@ -79,7 +79,13 @@ export async function requireSystemAdmin(
 
   try {
 
-    if (decoded.role !== 'SystemAdmin' && decoded.role !== 'System Admin') {
+    const normRole = String(decoded.role || '').toLowerCase().replace(/[\s_-]+/g, '');
+    const isAdmin =
+      normRole === 'systemadmin' ||
+      normRole === 'systemadministrator' ||
+      normRole === 'admin';
+
+    if (!isAdmin) {
       await logAdminAudit({
         user_id: decoded.uid || 'UNKNOWN',
         email: decoded.email || 'UNKNOWN',
