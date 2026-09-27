@@ -371,14 +371,27 @@ export async function loginUserService(email: string, password: string) {
   let uid = '';
   let firebaseIdToken = '';
 
+  const cleanPassword = (password || '').trim();
+
   try {
-    const userCredential = await signInWithEmailAndPassword(clientAuth, cleanEmail, password);
+    let userCredential;
+    try {
+      userCredential = await signInWithEmailAndPassword(clientAuth, cleanEmail, password);
+    } catch {
+      userCredential = await signInWithEmailAndPassword(clientAuth, cleanEmail, cleanPassword);
+    }
     firebaseIdToken = await userCredential.user.getIdToken();
     uid = userCredential.user.uid;
   } catch (err: any) {
     if (userDoc) {
       const userData = userDoc.data();
-      if (userData.password && userData.password === password) {
+      const storedPass = String(userData.password || '');
+      const isMatch = storedPass && (
+        storedPass === password ||
+        storedPass === cleanPassword ||
+        storedPass.toLowerCase() === cleanPassword.toLowerCase()
+      );
+      if (isMatch) {
         uid = userDoc.id;
         firebaseIdToken = await auth.createCustomToken(uid).catch(() => '');
       } else {
