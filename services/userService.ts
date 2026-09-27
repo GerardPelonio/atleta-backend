@@ -386,10 +386,12 @@ export async function loginUserService(email: string, password: string) {
     if (userDoc) {
       const userData = userDoc.data();
       const storedPass = String(userData.password || '');
+      const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
       const isMatch = storedPass && (
         storedPass === password ||
         storedPass === cleanPassword ||
-        storedPass.toLowerCase() === cleanPassword.toLowerCase()
+        storedPass.toLowerCase() === cleanPassword.toLowerCase() ||
+        (normalize(storedPass).length >= 6 && normalize(storedPass) === normalize(cleanPassword))
       );
       if (isMatch) {
         uid = userDoc.id;
