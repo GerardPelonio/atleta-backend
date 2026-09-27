@@ -20,6 +20,11 @@ export interface SportsConfiguration {
   sport_name: string;                  // Required, Unique, Max 100
   short_identifier: string;            // Required, Unique, Max 20
   configurable_stats: ConfigurableStat[]; // Array of Objects (Required, Min 1 item)
+  stat_schema?: Record<string, any>;
+  positions?: string[];
+  scoring_rules?: Record<string, unknown>;
+  category?: string;
+  is_timed_sport?: boolean;
   is_active: boolean;                  // Default: true
   created_at: string;                  // DateTime ISO string, Required, Default: NOW()
   updated_at: string;                  // DateTime ISO string, Required, Default: NOW()
@@ -31,6 +36,11 @@ export interface CreateSportDTO {
   sport_name: string;
   short_identifier: string;
   configurable_stats: ConfigurableStat[];
+  stat_schema?: Record<string, any>;
+  positions?: string[];
+  scoring_rules?: Record<string, unknown>;
+  category?: string;
+  is_timed_sport?: boolean;
   is_active?: boolean;
 }
 
@@ -38,6 +48,11 @@ export interface UpdateSportDTO {
   sport_name?: string;
   short_identifier?: string;
   configurable_stats?: ConfigurableStat[];
+  stat_schema?: Record<string, any>;
+  positions?: string[];
+  scoring_rules?: Record<string, unknown>;
+  category?: string;
+  is_timed_sport?: boolean;
   is_active?: boolean;
 }
 

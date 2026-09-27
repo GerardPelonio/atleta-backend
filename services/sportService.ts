@@ -176,6 +176,11 @@ export async function createSportService(
     short_identifier: trimmedShortId,
     configurable_stats: payload.configurable_stats,
     is_active: payload.is_active !== undefined ? Boolean(payload.is_active) : true,
+    ...(payload.positions && { positions: payload.positions }),
+    ...(payload.scoring_rules && { scoring_rules: payload.scoring_rules }),
+    ...(payload.stat_schema && { stat_schema: payload.stat_schema }),
+    ...(payload.category && { category: payload.category }),
+    ...(payload.is_timed_sport !== undefined && { is_timed_sport: Boolean(payload.is_timed_sport) }),
     created_at: now,
     updated_at: now,
   };
@@ -268,6 +273,11 @@ export async function updateSportService(
     ...(payload.short_identifier && { short_identifier: payload.short_identifier.trim().toUpperCase() }),
     ...(payload.configurable_stats && { configurable_stats: payload.configurable_stats }),
     ...(payload.is_active !== undefined && { is_active: Boolean(payload.is_active) }),
+    ...(payload.positions && { positions: payload.positions }),
+    ...(payload.scoring_rules && { scoring_rules: payload.scoring_rules }),
+    ...(payload.stat_schema && { stat_schema: payload.stat_schema }),
+    ...(payload.category && { category: payload.category }),
+    ...(payload.is_timed_sport !== undefined && { is_timed_sport: Boolean(payload.is_timed_sport) }),
     updated_at: now,
   };
 
