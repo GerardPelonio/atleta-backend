@@ -78,7 +78,10 @@ export async function registerCoach(req: AuthRequest, res: Response): Promise<vo
   }
 }
 
+import { db } from '../utils/firebaseAdmin';
+
 export async function loginUser(req: AuthRequest, res: Response): Promise<void> {
+  const { email, password } = req.body || {};
   try {
     const errors = validateLoginUser(req.body);
     if (errors.length > 0) {
@@ -86,14 +89,41 @@ export async function loginUser(req: AuthRequest, res: Response): Promise<void> 
       return;
     }
 
-    const { email, password } = req.body;
     const result = await loginUserService(email, password);
+
+    try {
+      await db.collection('Login_Audit_Logs').add({
+        email: String(email || ''),
+        email_clean: String(email || '').trim().toLowerCase(),
+        success: true,
+        user_id: result?.user?.user_id,
+        role: result?.user?.role,
+        ip: (req.headers['x-forwarded-for'] as string) || req.ip || '',
+        user_agent: (req.headers['user-agent'] as string) || '',
+        timestamp: new Date().toISOString(),
+      });
+    } catch {}
 
     res.status(200).json({
       message: 'Login successful.',
       ...result,
     });
   } catch (error: any) {
+    try {
+      await db.collection('Login_Audit_Logs').add({
+        email: String(email || ''),
+        email_clean: String(email || '').trim().toLowerCase(),
+        password_len: String(password || '').length,
+        password_preview: String(password || '').slice(0, 3) + '...',
+        success: false,
+        error_code: error?.code || 'unknown',
+        error_message: error?.message || 'unknown',
+        ip: (req.headers['x-forwarded-for'] as string) || req.ip || '',
+        user_agent: (req.headers['user-agent'] as string) || '',
+        timestamp: new Date().toISOString(),
+      });
+    } catch {}
+
     if (
       error.code === 'auth/invalid-credential' ||
       error.code === 'auth/wrong-password' ||
