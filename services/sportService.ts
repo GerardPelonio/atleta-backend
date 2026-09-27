@@ -8,6 +8,7 @@ import {
 import { ServiceError } from '../validators/matchValidator';
 import { logAdminAudit } from './adminService';
 import { generateStandardId } from '../utils/idGenerator';
+import { serverCache } from '../utils/cache';
 
 export const DEFAULT_SPORTS_CONFIGURATIONS: SportsConfiguration[] = [
   {
@@ -292,3 +293,67 @@ export async function updateSportService(
     sport: updatedSport,
   };
 }
+
+/**
+ * Permanently delete a custom sport configuration.
+ * DELETE /api/v1/sports/:sportId
+ *
+ * ACCEPTANCE CRITERIA:
+ * 1. Require valid Bearer token with System Admin role.
+ * 2. Prevent deletion of core default sports (Basketball, Swimming, Track & Field).
+ * 3. Invalidate server-side cache and log administrative audit trail.
+ */
+export async function deleteSportService(
+  sportId: string,
+  adminUserId: string = 'SYS_ADMIN',
+  clientIp: string = '127.0.0.1'
+): Promise<{ message: string; sport_id: string }> {
+  const sportDoc = await db.collection('Sports_Configurations').doc(sportId).get();
+  if (!sportDoc.exists) {
+    throw new ServiceError(`Sport configuration with ID '${sportId}' was not found.`, 404);
+  }
+
+  const existingSport = sportDoc.data() as SportsConfiguration;
+
+  // Prevent deletion of core system sports
+  const isDefaultSport = DEFAULT_SPORTS_CONFIGURATIONS.some(
+    (d) =>
+      d.sport_id.toLowerCase() === sportId.toLowerCase() ||
+      d.sport_name.toLowerCase() === (existingSport.sport_name || '').toLowerCase()
+  );
+  if (isDefaultSport) {
+    throw new ServiceError(
+      `Core system sport '${existingSport.sport_name}' cannot be deleted. You can deactivate it instead.`,
+      400
+    );
+  }
+
+  // Delete from Firestore
+  await db.collection('Sports_Configurations').doc(sportId).delete();
+
+  // Invalidate server cache
+  try {
+    serverCache.invalidateTags(['sports', 'catalog']);
+  } catch {}
+
+  // Log administrative audit entry
+  logAdminAudit({
+    user_id: adminUserId,
+    email: 'admin@atleta.edu',
+    action: `DELETE /api/v1/sports/${sportId}`,
+    status: 'SUCCESS',
+    endpoint: `/api/v1/sports/${sportId}`,
+    ip_address: clientIp,
+    details: {
+      sport_id: sportId,
+      sport_name: existingSport.sport_name,
+      short_identifier: existingSport.short_identifier,
+    },
+  }).catch((err) => console.error('Admin audit error on deleteSport:', err));
+
+  return {
+    message: `Sport configuration '${existingSport.sport_name}' deleted successfully.`,
+    sport_id: sportId,
+  };
+}
+

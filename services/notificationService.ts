@@ -22,25 +22,40 @@ eventBus.on(EVENTS.PUSH_NOTIFICATION, async (payload: { recipient_id: string; ti
   }
 });
 
-/**
- * Create a new notification doc in Firestore Notifications collection.
- */
 export async function createNotification(params: {
   recipient_id: string;
+  recipient_email?: string;
   sender_id?: string;
-  type: NotificationType;
+  sender_name?: string;
+  type?: NotificationType;
   title: string;
   message: string;
   action_url?: string;
+  metadata?: Record<string, any>;
 }): Promise<Notification> {
   const notificationId = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const now = new Date().toISOString();
 
-  const notificationData: Notification = {
+  let targetRecipientId = (params.recipient_id || '').trim();
+  let targetEmail = (params.recipient_email || '').trim().toLowerCase();
+
+  if (targetRecipientId.includes('@')) {
+    targetEmail = targetRecipientId.toLowerCase();
+    try {
+      const userSnap = await db.collection('Users').where('email', '==', targetEmail).limit(1).get();
+      if (!userSnap.empty) {
+        targetRecipientId = userSnap.docs[0].id;
+      }
+    } catch {}
+  }
+
+  const notificationData: any = {
     notification_id: notificationId,
-    recipient_id: params.recipient_id,
+    recipient_id: targetRecipientId || params.recipient_id,
+    recipient_email: targetEmail || null,
     sender_id: params.sender_id || null,
-    type: params.type,
+    sender_name: params.sender_name || params.metadata?.sender_name || null,
+    type: params.type || 'SYSTEM',
     title: params.title,
     message: params.message,
     is_read: false,
@@ -48,8 +63,12 @@ export async function createNotification(params: {
     created_at: now,
   };
 
+  if (params.metadata) {
+    notificationData.metadata = params.metadata;
+  }
+
   await db.collection('Notifications').doc(notificationId).set(notificationData);
-  return notificationData;
+  return notificationData as Notification;
 }
 
 /**

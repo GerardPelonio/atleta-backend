@@ -6,6 +6,7 @@ import {
   getSportByIdHandler,
   createSportHandler,
   updateSportHandler,
+  deleteSportHandler,
 } from '../controllers/sportController';
 
 const router = Router();
@@ -24,6 +25,7 @@ router.post('/', requireSystemAdmin, createSportHandler);
 router.get('/:sportId', authenticate, getSportByIdHandler);
 router.patch('/:sportId', requireSystemAdmin, updateSportHandler);
 router.put('/:sportId', requireSystemAdmin, updateSportHandler);
+router.delete('/:sportId', requireSystemAdmin, deleteSportHandler);
 
 export default router;
 

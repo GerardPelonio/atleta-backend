@@ -4,6 +4,7 @@ import {
   getNotifications,
   markAsRead,
   markAllAsRead,
+  createNotificationHandler,
 } from '../controllers/notificationController';
 import {
   getOfficialNotificationsHandler,
@@ -31,6 +32,11 @@ router.get('/', authenticate, getNotifications);
 // Mark All As Read
 router.patch('/read-all', authenticate, handleReadAll);
 router.post('/read-all', authenticate, handleReadAll);
+
+// Create / Send Notifications
+router.post('/create', authenticate, createNotificationHandler);
+router.post('/send', authenticate, createNotificationHandler);
+router.post('/', authenticate, createNotificationHandler);
 
 // Mark Specific Notification As Read
 router.patch('/:notificationId/read', authenticate, markAsRead);

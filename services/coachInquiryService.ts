@@ -5,6 +5,7 @@ import {
   EnrichedInquiry,
 } from '../models/inquiryModel';
 import { eventBus, EVENTS } from '../utils/eventBus';
+import { createNotification } from './notificationService';
 
 export class ServiceError extends Error {
   statusCode: number;
@@ -227,12 +228,39 @@ export async function submitRecruitmentInquiry(
 
   await db.collection('Scouting_Registry').doc(scoutId).set(inquiry);
 
-  // 6. Emit push notification to coach with the full message
+  // 6. Resolve athlete name and create in-app notification
+  let athleteName = 'An athlete';
+  try {
+    const userDoc = await db.collection('Users').doc(rawAthleteUid).get();
+    if (userDoc.exists) {
+      const uData = userDoc.data();
+      athleteName = `${uData?.first_name || ''} ${uData?.last_name || ''}`.trim() || 'An athlete';
+    }
+  } catch {}
+
+  await createNotification({
+    recipient_id: coachProfile.user_id,
+    recipient_email: coachProfile.email,
+    sender_id: rawAthleteUid,
+    sender_name: athleteName,
+    type: 'RECRUITMENT_INQUIRY',
+    title: 'New Recruitment Inquiry Received',
+    message: `${athleteName} sent you a recruitment inquiry. Message: "${message ? message.trim() : 'No message attached'}"`,
+    action_url: '/discovery',
+    metadata: {
+      scout_id: scoutId,
+      athlete_id: athleteId,
+      athlete_name: athleteName,
+      message: message ? message.trim() : null,
+    },
+  }).catch(() => {});
+
+  // Emit push notification to coach with the full message
   eventBus.emit(EVENTS.PUSH_NOTIFICATION, {
     recipient_id: coachProfile.user_id,
     type: 'RECRUITMENT_INQUIRY',
     title: 'New Recruitment Inquiry Received',
-    message: `An athlete sent you a recruitment inquiry. Message: "${message ? message.trim() : 'No message attached'}"`,
+    message: `${athleteName} sent you a recruitment inquiry. Message: "${message ? message.trim() : 'No message attached'}"`,
   });
 
   return inquiry;
@@ -285,8 +313,6 @@ export async function getAthleteInquiries(athleteId: string): Promise<EnrichedIn
     (a, b) => new Date(b.date_initiated || b.updated_at).getTime() - new Date(a.date_initiated || a.updated_at).getTime(),
   );
 }
-
-import { createNotification } from './notificationService';
 
 /**
  * Response to a recruitment inquiry (Coach or Athlete).

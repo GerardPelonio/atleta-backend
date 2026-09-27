@@ -6,6 +6,7 @@ import {
   getSportByIdService,
   createSportService,
   updateSportService,
+  deleteSportService,
 } from '../services/sportService';
 import { validateCreateSport, validateUpdateSport } from '../validators/sportValidator';
 import { ServiceError } from '../validators/matchValidator';
@@ -105,3 +106,27 @@ export async function updateSportHandler(req: AdminAuthRequest, res: Response): 
     res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
   }
 }
+
+export async function deleteSportHandler(req: AdminAuthRequest, res: Response): Promise<void> {
+  try {
+    const sportId = Array.isArray(req.params.sportId) ? req.params.sportId[0] : req.params.sportId;
+    const clientIp = req.ip || (req.headers['x-forwarded-for'] as string) || '127.0.0.1';
+    const adminUserId = req.adminUser?.uid || req.user?.uid || 'SYS_ADMIN';
+
+    if (!sportId) {
+      res.status(400).json({ error: 'Sport ID parameter is required.' });
+      return;
+    }
+
+    const result = await deleteSportService(sportId, adminUserId, clientIp);
+    res.status(200).json(result);
+  } catch (error: any) {
+    if (error instanceof ServiceError) {
+      res.status(error.statusCode).json({ error: error.message });
+      return;
+    }
+    console.error('deleteSportHandler error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
