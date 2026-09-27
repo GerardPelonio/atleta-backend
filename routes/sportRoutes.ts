@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate } from '../middlewares/authMiddleware';
+import { authenticate, optionalAuth } from '../middlewares/authMiddleware';
 import { requireSystemAdmin } from '../middlewares/adminMiddleware';
 import {
   getSportsHandler,
@@ -12,10 +12,10 @@ import {
 const router = Router();
 
 // Sports Directory Catalog (Named and Root Routes)
-router.get('/list', authenticate, getSportsHandler);
-router.get('/all', authenticate, getSportsHandler);
-router.get('/browse', authenticate, getSportsHandler);
-router.get('/', authenticate, getSportsHandler);
+router.get('/list', optionalAuth, getSportsHandler);
+router.get('/all', optionalAuth, getSportsHandler);
+router.get('/browse', optionalAuth, getSportsHandler);
+router.get('/', optionalAuth, getSportsHandler);
 
 // Sport Creation (Admin)
 router.post('/create', requireSystemAdmin, createSportHandler);

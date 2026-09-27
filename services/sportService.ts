@@ -87,13 +87,55 @@ export async function getAllSportsService(onlyActive: boolean = false): Promise<
   await seedDefaultSportsIfEmpty();
 
   const snapshot = await db.collection('Sports_Configurations').get();
-  const sports: SportsConfiguration[] = snapshot.docs.map((doc) => doc.data() as SportsConfiguration);
+  let rawSports: any[] = snapshot.docs.map((doc) => ({
+    sport_id: doc.id,
+    ...(doc.data() as object),
+  }));
 
-  if (onlyActive) {
-    return sports.filter((s) => s.is_active !== false);
+  try {
+    const lowerSnap = await db.collection('sports_configuration').get();
+    if (!lowerSnap.empty) {
+      const lowerList = lowerSnap.docs.map((doc) => ({
+        sport_id: doc.id,
+        ...(doc.data() as object),
+      }));
+      rawSports = [...rawSports, ...lowerList];
+    }
+  } catch {}
+
+  const seenNames = new Set<string>();
+  const normalizedSports: SportsConfiguration[] = [];
+
+  for (const item of rawSports) {
+    const rawName = String(item.sport_name || item.name || '').trim();
+    if (!rawName) continue;
+    const normKey = rawName.toLowerCase();
+    if (seenNames.has(normKey)) continue;
+    seenNames.add(normKey);
+
+    const sportObj: SportsConfiguration = {
+      sport_id: item.sport_id || item.id || `sport_${normKey.replace(/[^a-z0-9]/g, '_')}`,
+      sport_name: rawName,
+      short_identifier: item.short_identifier || rawName.slice(0, 5).toUpperCase(),
+      category: item.category || 'Team',
+      is_active: item.is_active !== false,
+      configurable_stats: item.configurable_stats || item.metric_keys || [],
+      created_at: item.created_at || new Date().toISOString(),
+      updated_at: item.updated_at || new Date().toISOString(),
+      ...(item.is_timed_sport !== undefined ? { is_timed_sport: item.is_timed_sport } : {}),
+      ...(item.measurement_type ? { measurement_type: item.measurement_type } : {}),
+      ...(item.positions ? { positions: item.positions } : {}),
+      ...(item.stat_schema ? { stat_schema: item.stat_schema } : {}),
+    };
+
+    normalizedSports.push(sportObj);
   }
 
-  return sports;
+  if (onlyActive) {
+    return normalizedSports.filter((s) => s.is_active !== false);
+  }
+
+  return normalizedSports;
 }
 
 /**
