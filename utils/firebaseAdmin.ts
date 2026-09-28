@@ -4,6 +4,12 @@ import { getAuth, Auth } from 'firebase-admin/auth';
 import path from 'path';
 import fs from 'fs';
 
+const ATLETA_V2_CREDENTIAL = {
+  projectId: 'atleta-v2',
+  clientEmail: 'firebase-adminsdk-fbsvc@atleta-v2.iam.gserviceaccount.com',
+  privateKey: "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDC91+3ZSpGEPKc\nyxR0+KZrYsYMrPO5JuTIkiq1/r2o39itIkqGfdrOsltWjuvZfsNJL2kRSobawzgb\nCiuMTwkWm0IB0FsBxQ4PfW83OZAU4KbTps/TPpaY7DaFT1aMg5x2YUONPM7A2PYP\nqUVpt6SW4zknIdCngsjycYOqnS2/LCy4YVJTg0GV/3kdxNkSKYVOmoM4am1lTYz9\n2cwYHX+wMpP8XSYIfjCo8DDBMqyHscjeV7ztnjC9bYX8Zx0E9v9sS3HpdWy2iFtu\n820N40bXav8imQD2iO+BkoAK3dVFpehFf2miDC50+qTlczl5vuj859o2H5OX0OD+\npFCdtfzVAgMBAAECggEAFZEKp/1LV1PRmpGGUkgdFJzo/ob1MOKCBUPR8K7cqP0V\n+VTlPIpYdWvaWbFWmokArixN6Yk+cJ2Oq8MMvSkS/squ2weCwafcHc+IyWmXLBAL\ntDbsH1h5jTH39/gmQUXfvWKV994lmsSFN4dIc+DKFpzM+iyt6ZG4i8UNxQY9BLv7\nBX6dejmKy2gpuZfokh8PEEd1Pu+HsXq4EqTVPKwESfSXjtCePjKl6YSm6xxa0NjO\ncS04Q2z9XmchgPZdRgqPRtraLz3aqnc2iqPeT/aT2ijEugh9XcEocpa/lvri4N2z\nEDHBKIXxZDnVH/zonvZ4Vr0PlkFYcEx9WpgRoDnnowKBgQD4I9KPulu/rcX8k9pt\n37xyDIw3A5U1e+WF+bs9kncSbb/rDTNqAxNkKlLC2DvmVefjqqxtaXNQ7RDtEWKg\nVA1r5wxvrtx0aVhjFCKV/qzGb3C5qOtNxCazSJOqNeyVQlOt7Z0fOCqWzpReDqe0\nHS5FUH3ciK8kLtlRXQ3gnIbyDwKBgQDJJF03oWYv3BQV6SZJJ4cKjySURA+D5443\nYbyjeuNuVmvlo+M6/qicJUDyiRkHula/b3c1bsJNf8utTtDsDaHKsyFqStcNlXWS\nRUu68FFvIT3qw4cNv3CVLzl7xrHMSLnI/jas/0AuQMdx8dNkUDhPukcgL0BZmWsv\n90bevC522wKBgAnc+qil4rG6yYzhn6QQaaAq6YPiS5MFqrjplUy8Pqln3WINc0a6\nepHXsNR33eGo9n+xMAtlTqUf1zVlJIN089efJnpl+/NQoKfHjBxkNB/rHBL1KO09\nZ8BmmSAB5raEHWljcYRlKiQ2b+VRNc9N/aHZsjcK49NPXWoDheKwthh3AoGBAIlQ\n9waUfBOuVlQDAG0uvAVcZaeGs2TkfvWWFtcwfPWFsFFsyiMrWWaIFEe/isP41WIJ\nscNbovCPjzf4t65/O/YKxoQvJZOTdlluT14G1EFe20tbQucCy9Q9EixLIHSLLbJm\nwmLmOyWYedBzPFKeZWMgk5AIUhEZKNDtKofCxqHDAoGBALT5gyHny250/mzIHOaH\nTy2/S7Xb8xq+SxF0J1DqHGPuLWMxrZtFUdBNLLzFz/Zv8vh9OlPhNZ2OeSih4Kmb\nhowxOwI0toJmTGKyRErIfhKBldQAqrzm6IsFkkToMgoBhh3eBK+90PfNvfW+vhGy\nTq6gaCZOpfd/j8l/tlIluWhf\n-----END PRIVATE KEY-----\n",
+};
+
 const ATLETA_V1_CREDENTIAL = {
   projectId: 'atleta-v1',
   clientEmail: 'firebase-adminsdk-fbsvc@atleta-v1.iam.gserviceaccount.com',
@@ -27,8 +33,7 @@ function getFirebaseCredential() {
       } else {
         parsed = envServiceAccount;
       }
-      // If environment credential is for atleta-v1, use it
-      if (parsed && (!parsed.project_id || parsed.project_id === 'atleta-v1')) {
+      if (parsed) {
         if (parsed.private_key) {
           parsed.private_key = parsed.private_key.replace(/\\n/g, '\n');
         }
@@ -59,8 +64,12 @@ function getFirebaseCredential() {
     return cert(serviceAccountPath);
   }
 
-  // 3. Always connect to atleta-v1 with embedded credential
-  return cert(ATLETA_V1_CREDENTIAL);
+  // 3. Fallback based on FIREBASE_PROJECT_ID
+  const targetProject = process.env.FIREBASE_PROJECT_ID || 'atleta-v2';
+  if (targetProject === 'atleta-v1') {
+    return cert(ATLETA_V1_CREDENTIAL);
+  }
+  return cert(ATLETA_V2_CREDENTIAL);
 }
 
 // Initialize Firebase Admin SDK (only if not already initialized)
@@ -73,7 +82,7 @@ if (!getApps().length) {
       });
     } else {
       initializeApp({
-        projectId: process.env.FIREBASE_PROJECT_ID || 'atleta-v1',
+        projectId: process.env.FIREBASE_PROJECT_ID || 'atleta-v2',
       });
     }
   } catch (err: any) {
