@@ -1,7 +1,7 @@
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 
-const targetProjectId = process.env.FIREBASE_PROJECT_ID || 'atleta-v2';
+const targetProjectId = process.env.FIREBASE_PROJECT_ID || 'atleta-v1';
 
 const firebaseConfig = {
   apiKey: process.env.FIREBASE_API_KEY || 'AIzaSyDTueY4OduMENmSef3BH6ZEmSqXLiQG5Ls',
