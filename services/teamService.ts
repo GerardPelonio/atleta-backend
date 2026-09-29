@@ -886,11 +886,18 @@ export async function searchAthletes(queryStr?: string, sportType?: string) {
   // 3. Search Teams collection roster_list array for any athletes
   for (const teamDoc of teamsSnapshot.docs) {
     const teamData = teamDoc.data() as Team;
+    const teamCoach = (teamData as any).coach_name || (teamData as any).head_coach || '';
     if (Array.isArray(teamData.roster_list)) {
       for (const item of teamData.roster_list) {
         if (typeof item === 'object' && item.athlete_id) {
           const athleteId = item.athlete_id;
-          if (!resultsMap.has(athleteId)) {
+          const existing = resultsMap.get(athleteId);
+          if (existing) {
+            existing.team_id = teamDoc.id;
+            existing.team_name = teamData.team_name;
+            existing.coach_name = teamCoach;
+            existing.has_coach = true;
+          } else {
             const firstName = item.first_name || 'Athlete';
             const lastName = item.last_name || '';
             const fullName = `${firstName} ${lastName}`.trim();
@@ -908,9 +915,13 @@ export async function searchAthletes(queryStr?: string, sportType?: string) {
               sport_category: (teamData.sport_type || '').toUpperCase(),
               eligibility_documents: docs,
               is_eligibility_verified: item.is_eligibility_verified ?? (docs.length > 0),
-              recruitment_status: 'Available',
+              recruitment_status: 'Rostered',
               province: 'Camarines Sur',
               location: 'Camarines Sur',
+              team_id: teamDoc.id,
+              team_name: teamData.team_name,
+              coach_name: teamCoach,
+              has_coach: true,
             };
 
             const searchHaystack = `${firstName} ${lastName} ${athleteObj.position} ${athleteId}`.toLowerCase();

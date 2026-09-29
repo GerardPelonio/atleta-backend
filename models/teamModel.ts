@@ -77,6 +77,10 @@ export interface RosterAthlete {
     weight_kg?: number;
     wingspan_cm?: number;
   };
+  team_id?: string;
+  team_name?: string;
+  coach_name?: string;
+  has_coach?: boolean;
 }
 
 // ─── API DTOs & Response Types ──────────────────────────────────────────────
