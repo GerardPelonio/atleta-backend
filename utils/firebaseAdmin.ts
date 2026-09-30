@@ -114,13 +114,16 @@ if (existingV2) {
 export const auth: Auth = getAuth(mainApp);
 
 // -------------------------------------------------------------
-// 4. Export Firestore db (connected to atleta-v2 Firestore Backup)
+// 4. Export Firestore db (connected to atleta-v1 Main Firebase)
 // -------------------------------------------------------------
-export const db: Firestore = getFirestore(firestoreApp);
+const targetFirestoreProject = process.env.FIRESTORE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || 'atleta-v1';
+export const db: Firestore = (targetFirestoreProject === 'atleta-v2' && firestoreApp)
+  ? getFirestore(firestoreApp)
+  : getFirestore(mainApp);
 
 // Specific named instances
-export const dbV2: Firestore = getFirestore(firestoreApp);
 export const dbV1: Firestore = getFirestore(mainApp);
+export const dbV2: Firestore = getFirestore(firestoreApp);
 export const authV1: Auth = getAuth(mainApp);
 export const v1App: App = mainApp;
 export const v2App: App = firestoreApp;
