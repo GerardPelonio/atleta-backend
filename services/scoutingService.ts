@@ -2,6 +2,7 @@ import { db } from '../utils/firebaseAdmin';
 import { ServiceError } from '../validators/matchValidator';
 import { eventBus, EVENTS } from '../utils/eventBus';
 import { createNotification } from './notificationService';
+import { serverCache } from '../utils/cache';
 import crypto from 'crypto';
 
 export interface RegionalAthleteSearchResult {
@@ -264,107 +265,116 @@ export async function getLeaderboardRankings(
   season?: string,
   region?: string,
 ): Promise<LeaderboardRankingResult[]> {
-  // Fetch Match Logs, Performance Metrics, Athlete Profiles, and Users in parallel to minimize network latency
-  const [matchSnapshot, metricsSnapshot, profilesSnapshot, usersSnapshot] = await Promise.all([
-    db.collection('Match_Logs').get(),
-    db.collection('Performance_Metrics').get(),
-    db.collection('Athlete_Profiles').get(),
-    db.collection('Users').where('role', '==', 'Athlete').get()
-  ]);
+  const cacheKey = `leaderboard_${(sport || 'all').toLowerCase()}_${(season || 'all').toLowerCase()}_${(region || 'all').toLowerCase()}`;
 
-  let validMatchIds = new Set<string>();
-  matchSnapshot.docs.forEach((doc: any) => {
-    const data = doc.data();
-    const matchId = doc.id;
-    const matchSport = data.sport_type || '';
-    const matchType = data.match_type || ''; // e.g. "UAAP Season 88"
+  return serverCache.getOrSet(
+    cacheKey,
+    async () => {
+      // Fetch Match Logs, Performance Metrics, Athlete Profiles, and Users in parallel to minimize network latency
+      const [matchSnapshot, metricsSnapshot, profilesSnapshot, usersSnapshot] = await Promise.all([
+        db.collection('Match_Logs').get(),
+        db.collection('Performance_Metrics').get(),
+        db.collection('Athlete_Profiles').get(),
+        db.collection('Users').where('role', '==', 'Athlete').get()
+      ]);
 
-    if (sport && matchSport.toLowerCase() !== sport.toLowerCase()) {
-      return;
-    }
+      let validMatchIds = new Set<string>();
+      matchSnapshot.docs.forEach((doc: any) => {
+        const data = doc.data();
+        const matchId = doc.id;
+        const matchSport = data.sport_type || '';
+        const matchType = data.match_type || ''; // e.g. "UAAP Season 88"
 
-    if (season && !matchType.toLowerCase().includes(season.toLowerCase())) {
-      return;
-    }
+        if (sport && matchSport.toLowerCase() !== sport.toLowerCase()) {
+          return;
+        }
 
-    validMatchIds.add(matchId);
-  });
+        if (season && !matchType.toLowerCase().includes(season.toLowerCase())) {
+          return;
+        }
 
-  const athleteEfficiencies = new Map<string, number[]>();
-  metricsSnapshot.docs.forEach((doc: any) => {
-    const data = doc.data();
-    const athleteId = data.athlete_id;
-    const matchId = data.match_id;
-    const efficiency = data.calculated_player_efficiency || 0;
+        validMatchIds.add(matchId);
+      });
 
-    // Filter by match ID list if season or sport filters are active
-    if ((sport || season) && !validMatchIds.has(matchId)) {
-      return;
-    }
+      const athleteEfficiencies = new Map<string, number[]>();
+      metricsSnapshot.docs.forEach((doc: any) => {
+        const data = doc.data();
+        const athleteId = data.athlete_id;
+        const matchId = data.match_id;
+        const efficiency = data.calculated_player_efficiency || 0;
 
-    // Double-check sport category on metrics if sport filter is active
-    if (sport && data.sport_category && data.sport_category.toLowerCase() !== sport.toLowerCase()) {
-      return;
-    }
+        // Filter by match ID list if season or sport filters are active
+        if ((sport || season) && !validMatchIds.has(matchId)) {
+          return;
+        }
 
-    if (!athleteEfficiencies.has(athleteId)) {
-      athleteEfficiencies.set(athleteId, []);
-    }
-    athleteEfficiencies.get(athleteId)!.push(efficiency);
-  });
+        // Double-check sport category on metrics if sport filter is active
+        if (sport && data.sport_category && data.sport_category.toLowerCase() !== sport.toLowerCase()) {
+          return;
+        }
 
-  const profilesMap = new Map<string, string>();
-  profilesSnapshot.docs.forEach((doc: any) => {
-    const data = doc.data();
-    profilesMap.set(doc.id, data.province || '');
-  });
+        if (!athleteEfficiencies.has(athleteId)) {
+          athleteEfficiencies.set(athleteId, []);
+        }
+        athleteEfficiencies.get(athleteId)!.push(efficiency);
+      });
 
-  const usersMap = new Map<string, any>();
-  usersSnapshot.docs.forEach((doc: any) => {
-    const data = doc.data();
-    usersMap.set(doc.id, {
-      first_name: data.first_name || '',
-      last_name: data.last_name || '',
-    });
-  });
+      const profilesMap = new Map<string, string>();
+      profilesSnapshot.docs.forEach((doc: any) => {
+        const data = doc.data();
+        profilesMap.set(doc.id, data.province || '');
+      });
 
-  // 5. Compute average PER and build leaderboard rankings
-  const rankings: Omit<LeaderboardRankingResult, 'rank'>[] = [];
+      const usersMap = new Map<string, any>();
+      usersSnapshot.docs.forEach((doc: any) => {
+        const data = doc.data();
+        usersMap.set(doc.id, {
+          first_name: data.first_name || '',
+          last_name: data.last_name || '',
+        });
+      });
 
-  for (const [athleteId, efficiencies] of athleteEfficiencies.entries()) {
-    const user = usersMap.get(athleteId) || usersMap.get(athleteId.replace(/^ath_/, ''));
-    if (!user) continue;
+      // 5. Compute average PER and build leaderboard rankings
+      const rankings: Omit<LeaderboardRankingResult, 'rank'>[] = [];
 
-    const province = profilesMap.get(athleteId) || '';
+      for (const [athleteId, efficiencies] of athleteEfficiencies.entries()) {
+        const user = usersMap.get(athleteId) || usersMap.get(athleteId.replace(/^ath_/, ''));
+        if (!user) continue;
 
-    // Filter by region/province (case-insensitive)
-    if (region && province.toLowerCase() !== region.toLowerCase()) {
-      continue;
-    }
+        const province = profilesMap.get(athleteId) || '';
 
-    const averagePER =
-      efficiencies.length > 0
-        ? parseFloat((efficiencies.reduce((sum, val) => sum + val, 0) / efficiencies.length).toFixed(2))
-        : 0;
+        // Filter by region/province (case-insensitive)
+        if (region && province.toLowerCase() !== region.toLowerCase()) {
+          continue;
+        }
 
-    rankings.push({
-      athlete_id: athleteId,
-      first_name: user.first_name,
-      last_name: user.last_name,
-      province: province,
-      calculated_player_efficiency: averagePER,
-    });
-  }
+        const averagePER =
+          efficiencies.length > 0
+            ? parseFloat((efficiencies.reduce((sum, val) => sum + val, 0) / efficiencies.length).toFixed(2))
+            : 0;
 
-  // Sort descending by calculated_player_efficiency and limit to top 10
-  const sortedRankings = rankings
-    .sort((a, b) => b.calculated_player_efficiency - a.calculated_player_efficiency)
-    .slice(0, 10);
+        rankings.push({
+          athlete_id: athleteId,
+          first_name: user.first_name,
+          last_name: user.last_name,
+          province: province,
+          calculated_player_efficiency: averagePER,
+        });
+      }
 
-  return sortedRankings.map((item, index) => ({
-    rank: index + 1,
-    ...item,
-  }));
+      // Sort descending by calculated_player_efficiency and limit to top 10
+      const sortedRankings = rankings
+        .sort((a, b) => b.calculated_player_efficiency - a.calculated_player_efficiency)
+        .slice(0, 10);
+
+      return sortedRankings.map((item, index) => ({
+        rank: index + 1,
+        ...item,
+      }));
+    },
+    120, // 2 minutes cache TTL
+    ['leaderboard', 'matches']
+  );
 }
 
 /**

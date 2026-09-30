@@ -19,18 +19,28 @@ export class ServiceError extends Error {
   }
 }
 
-// ─── In-Memory Cache for Team Directory and Coach Enrichment ─────────────────
+// ─── In-Memory Cache for Team Directory, Coach Enrichment, and Roster ────────
 interface CachedItem<T> {
   data: T;
   cachedAt: number;
 }
 const teamDirectoryCache = new Map<string, CachedItem<TeamSummary[]>>();
 const coachSummaryCache = new Map<string, CachedItem<{ coach_id: string; full_name: string; years_of_experience: number; current_institution: string; quote: string | null }>>();
+const rosterAthleteCache = new Map<string, CachedItem<RosterAthlete>>();
+const coachTeamsCache = new Map<string, CachedItem<TeamSummary[]>>();
+const coachManagedAthletesCache = new Map<string, CachedItem<any[]>>();
+
 const TEAM_CACHE_TTL_MS = 60 * 1000; // 60 seconds
+const ATHLETE_CACHE_TTL_MS = 120 * 1000; // 120 seconds
+const COACH_TEAMS_TTL_MS = 60 * 1000; // 60 seconds
+const COACH_ATHLETES_TTL_MS = 60 * 1000; // 60 seconds
 
 export function invalidateTeamCache() {
   teamDirectoryCache.clear();
   coachSummaryCache.clear();
+  rosterAthleteCache.clear();
+  coachTeamsCache.clear();
+  coachManagedAthletesCache.clear();
 }
 
 // ─── Helper: Enrich coach from Coach_Profiles + Users ───────────────────────
@@ -130,6 +140,15 @@ async function enrichRoster(rosterList: (string | TeamRosterMember)[]): Promise<
     const cleanId = athleteId.trim().replace(/^ath_/, '');
     const canonicalAthleteId = athleteId.startsWith('ath_') ? athleteId.trim() : `ath_${cleanId}`;
 
+    const cachedAth = rosterAthleteCache.get(canonicalAthleteId) || rosterAthleteCache.get(cleanId);
+    if (cachedAth && Date.now() - cachedAth.cachedAt < ATHLETE_CACHE_TTL_MS) {
+      return {
+        ...cachedAth.data,
+        ...(positionOverride ? { position: positionOverride } : {}),
+        ...(jerseyOverride !== undefined ? { jersey_number: jerseyOverride } : {}),
+      };
+    }
+
     const [prof1, prof2, u1, u2] = await Promise.all([
       db.collection('Athlete_Profiles').doc(canonicalAthleteId).get().catch(() => null),
       db.collection('Athlete_Profiles').doc(cleanId).get().catch(() => null),
@@ -155,7 +174,7 @@ async function enrichRoster(rosterList: (string | TeamRosterMember)[]): Promise<
         ? eligDocs.psa_verified === true
         : Array.isArray(eligDocs) && eligDocs.length > 0;
 
-    return {
+    const athResult: RosterAthlete = {
       athlete_id: canonicalAthleteId,
       user_id: profileData.user_id || cleanId,
       first_name: firstName || 'Athlete',
@@ -167,7 +186,12 @@ async function enrichRoster(rosterList: (string | TeamRosterMember)[]): Promise<
       avatar_url: profileData.avatar_url || undefined,
       eligibility_documents: eligDocs || [],
       is_eligibility_verified: isVerified,
-    } as RosterAthlete;
+    };
+
+    rosterAthleteCache.set(canonicalAthleteId, { data: athResult, cachedAt: Date.now() });
+    rosterAthleteCache.set(cleanId, { data: athResult, cachedAt: Date.now() });
+
+    return athResult;
   });
 
   const results = await Promise.all(rosterPromises);
@@ -235,6 +259,11 @@ export async function createTeam(coachId: string, payload: CreateTeamDto): Promi
  * Retrieve all teams managed by a specific coach (GET /api/v1/teams?coachId=).
  */
 export async function getCoachTeams(coachId: string): Promise<TeamSummary[]> {
+  const cached = coachTeamsCache.get(coachId);
+  if (cached && Date.now() - cached.cachedAt < COACH_TEAMS_TTL_MS) {
+    return cached.data;
+  }
+
   const possibleCoachIds = [coachId, `coach_${coachId}`, coachId.replace('coach_', '')];
 
   const snapshot = await db
@@ -264,6 +293,7 @@ export async function getCoachTeams(coachId: string): Promise<TeamSummary[]> {
     });
   }
 
+  coachTeamsCache.set(coachId, { data: teams, cachedAt: Date.now() });
   return teams;
 }
 
@@ -357,6 +387,11 @@ export async function browseTeamDirectory(
  * Retrieve all athletes managed by a coach (both those assigned to a team and unassigned).
  */
 export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
+  const cached = coachManagedAthletesCache.get(coachId);
+  if (cached && Date.now() - cached.cachedAt < COACH_ATHLETES_TTL_MS) {
+    return cached.data;
+  }
+
   const cleanId = coachId.replace(/^coach_/, '');
   const possibleCoachIds = Array.from(new Set([coachId, `coach_${cleanId}`, cleanId]));
 
@@ -509,6 +544,7 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
   });
 
   const managedAthletes = await Promise.all(profileFetchPromises);
+  coachManagedAthletesCache.set(coachId, { data: managedAthletes, cachedAt: Date.now() });
   return managedAthletes;
 }
 

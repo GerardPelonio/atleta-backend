@@ -86,81 +86,90 @@ export async function seedDefaultSportsIfEmpty(): Promise<void> {
  * Accessible by any authenticated user.
  */
 export async function getAllSportsService(onlyActive: boolean = false): Promise<SportsConfiguration[]> {
-  await seedDefaultSportsIfEmpty();
+  const allSports = await serverCache.getOrSet(
+    'sports_configurations_catalog_all',
+    async () => {
+      await seedDefaultSportsIfEmpty();
 
-  const snapshot = await firestoreDb.collection('Sports_Configurations').get();
-  let rawSports: any[] = snapshot.docs.map((doc) => ({
-    sport_id: doc.id,
-    ...(doc.data() as object),
-  }));
-
-  try {
-    const lowerSnap = await firestoreDb.collection('sports_configurations').get();
-    if (!lowerSnap.empty) {
-      const lowerList = lowerSnap.docs.map((doc) => ({
+      const snapshot = await firestoreDb.collection('Sports_Configurations').get();
+      let rawSports: any[] = snapshot.docs.map((doc) => ({
         sport_id: doc.id,
         ...(doc.data() as object),
       }));
-      rawSports = [...rawSports, ...lowerList];
-    }
-  } catch {}
 
-  try {
-    const singularSnap = await firestoreDb.collection('sports_configuration').get();
-    if (!singularSnap.empty) {
-      const singularList = singularSnap.docs.map((doc) => ({
-        sport_id: doc.id,
-        ...(doc.data() as object),
-      }));
-      rawSports = [...rawSports, ...singularList];
-    }
-  } catch {}
+      try {
+        const lowerSnap = await firestoreDb.collection('sports_configurations').get();
+        if (!lowerSnap.empty) {
+          const lowerList = lowerSnap.docs.map((doc) => ({
+            sport_id: doc.id,
+            ...(doc.data() as object),
+          }));
+          rawSports = [...rawSports, ...lowerList];
+        }
+      } catch {}
 
-  if (rawSports.length === 0 && dbV2) {
-    try {
-      const v2Snap = await dbV2.collection('Sports_Configurations').get();
-      if (!v2Snap.empty) {
-        rawSports = v2Snap.docs.map((doc) => ({
-          sport_id: doc.id,
-          ...(doc.data() as object),
-        }));
+      try {
+        const singularSnap = await firestoreDb.collection('sports_configuration').get();
+        if (!singularSnap.empty) {
+          const singularList = singularSnap.docs.map((doc) => ({
+            sport_id: doc.id,
+            ...(doc.data() as object),
+          }));
+          rawSports = [...rawSports, ...singularList];
+        }
+      } catch {}
+
+      if (rawSports.length === 0 && dbV2) {
+        try {
+          const v2Snap = await dbV2.collection('Sports_Configurations').get();
+          if (!v2Snap.empty) {
+            rawSports = v2Snap.docs.map((doc) => ({
+              sport_id: doc.id,
+              ...(doc.data() as object),
+            }));
+          }
+        } catch {}
       }
-    } catch {}
-  }
 
-  const seenNames = new Set<string>();
-  const normalizedSports: SportsConfiguration[] = [];
+      const seenNames = new Set<string>();
+      const normalizedSports: SportsConfiguration[] = [];
 
-  for (const item of rawSports) {
-    const rawName = String(item.sport_name || item.name || '').trim();
-    if (!rawName) continue;
-    const normKey = rawName.toLowerCase();
-    if (seenNames.has(normKey)) continue;
-    seenNames.add(normKey);
+      for (const item of rawSports) {
+        const rawName = String(item.sport_name || item.name || '').trim();
+        if (!rawName) continue;
+        const normKey = rawName.toLowerCase();
+        if (seenNames.has(normKey)) continue;
+        seenNames.add(normKey);
 
-    const sportObj: SportsConfiguration = {
-      sport_id: item.sport_id || item.id || `sport_${normKey.replace(/[^a-z0-9]/g, '_')}`,
-      sport_name: rawName,
-      short_identifier: item.short_identifier || rawName.slice(0, 5).toUpperCase(),
-      category: item.category || 'Team',
-      is_active: item.is_active !== false,
-      configurable_stats: item.configurable_stats || item.metric_keys || [],
-      created_at: item.created_at || new Date().toISOString(),
-      updated_at: item.updated_at || new Date().toISOString(),
-      ...(item.is_timed_sport !== undefined ? { is_timed_sport: item.is_timed_sport } : {}),
-      ...(item.measurement_type ? { measurement_type: item.measurement_type } : {}),
-      ...(item.positions ? { positions: item.positions } : {}),
-      ...(item.stat_schema ? { stat_schema: item.stat_schema } : {}),
-    };
+        const sportObj: SportsConfiguration = {
+          sport_id: item.sport_id || item.id || `sport_${normKey.replace(/[^a-z0-9]/g, '_')}`,
+          sport_name: rawName,
+          short_identifier: item.short_identifier || rawName.slice(0, 5).toUpperCase(),
+          category: item.category || 'Team',
+          is_active: item.is_active !== false,
+          configurable_stats: item.configurable_stats || item.metric_keys || [],
+          created_at: item.created_at || new Date().toISOString(),
+          updated_at: item.updated_at || new Date().toISOString(),
+          ...(item.is_timed_sport !== undefined ? { is_timed_sport: item.is_timed_sport } : {}),
+          ...(item.measurement_type ? { measurement_type: item.measurement_type } : {}),
+          ...(item.positions ? { positions: item.positions } : {}),
+          ...(item.stat_schema ? { stat_schema: item.stat_schema } : {}),
+        };
 
-    normalizedSports.push(sportObj);
-  }
+        normalizedSports.push(sportObj);
+      }
+
+      return normalizedSports;
+    },
+    600, // 10 minutes cache TTL
+    ['sports', 'catalog']
+  );
 
   if (onlyActive) {
-    return normalizedSports.filter((s) => s.is_active !== false);
+    return allSports.filter((s) => s.is_active !== false);
   }
 
-  return normalizedSports;
+  return allSports;
 }
 
 /**
@@ -287,6 +296,11 @@ export async function createSportService(
     }
   } catch {}
 
+  // Invalidate in-memory sports catalog cache
+  try {
+    serverCache.invalidateTags(['sports', 'catalog']);
+  } catch {}
+
   // Log administrative audit entry
   logAdminAudit({
     user_id: adminUserId,
@@ -383,6 +397,11 @@ export async function updateSportService(
       await v2Batch.commit().catch(() => {});
     } catch {}
   }
+
+  // Invalidate in-memory sports catalog cache
+  try {
+    serverCache.invalidateTags(['sports', 'catalog']);
+  } catch {}
 
   // Log administrative audit entry
   logAdminAudit({

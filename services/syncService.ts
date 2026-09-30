@@ -19,6 +19,7 @@ import { getPublicCoachProfile, submitRecruitmentInquiry, respondToRecruitmentIn
 import { getAllSportsService } from './sportService';
 import { getCoachManagedAthletes } from './teamService';
 import { eventBus, EVENTS } from '../utils/eventBus';
+import { serverCache } from '../utils/cache';
 
 export class ServiceError extends Error {
   statusCode: number;
@@ -494,104 +495,118 @@ export async function processAthleteOfflineBatchService(
  * Pre-fetch complete offline snapshot package for Coach.
  */
 export async function getCoachOfflineSnapshotService(coachId: string): Promise<CoachOfflineSnapshot> {
-  const profile = (await getPublicCoachProfile(coachId)) || {
-    coach_id: coachId,
-    full_name: 'Coach',
-    current_institution: 'Collegiate Program',
-  };
+  return serverCache.getOrSet(
+    `coach_snapshot_${coachId}`,
+    async () => {
+      const profile = (await getPublicCoachProfile(coachId)) || {
+        coach_id: coachId,
+        full_name: 'Coach',
+        current_institution: 'Collegiate Program',
+      };
 
-  // Fetch teams managed by coach
-  const teamsSnap = await db.collection('Teams').where('coach_id', '==', coachId).get();
-  const teams: any[] = [];
-  const rosters: Record<string, any[]> = {};
+      // Fetch teams managed by coach
+      const teamsSnap = await db.collection('Teams').where('coach_id', '==', coachId).get();
+      const teams: any[] = [];
+      const rosters: Record<string, any[]> = {};
 
-  for (const doc of teamsSnap.docs) {
-    const t = doc.data();
-    teams.push(t);
-    const rosterIds: string[] = t.roster_list || t.roster_athletes || [];
-    if (rosterIds.length > 0) {
-      const athleteDocs = await db.collection('Athlete_Profiles').where('athlete_id', 'in', rosterIds.slice(0, 10)).get().catch(() => null);
-      rosters[t.team_id] = athleteDocs ? athleteDocs.docs.map(d => d.data()) : [];
-    } else {
-      rosters[t.team_id] = [];
-    }
-  }
+      for (const doc of teamsSnap.docs) {
+        const t = doc.data();
+        teams.push(t);
+        const rosterIds: string[] = t.roster_list || t.roster_athletes || [];
+        if (rosterIds.length > 0) {
+          const athleteDocs = await db.collection('Athlete_Profiles').where('athlete_id', 'in', rosterIds.slice(0, 10)).get().catch(() => null);
+          rosters[t.team_id] = athleteDocs ? athleteDocs.docs.map(d => d.data()) : [];
+        } else {
+          rosters[t.team_id] = [];
+        }
+      }
 
-  // Fetch dynamic sports configurations
-  const sports = await getAllSportsService().catch(() => []);
+      // Fetch dynamic sports configurations
+      const sports = await getAllSportsService().catch(() => []);
 
-  // Fetch upcoming / recent matches
-  const matchMap = new Map<string, any>();
-  const matchSnap = await db.collection('Match_Logs').where('logged_by_coach_id', '==', coachId).get().catch(() => null);
-  if (matchSnap) {
-    matchSnap.docs.forEach(d => matchMap.set(d.id, d.data()));
-  }
-  const allMatchesSnap = await db.collection('Match_Logs').limit(30).get().catch(() => null);
-  if (allMatchesSnap) {
-    allMatchesSnap.docs.forEach(d => matchMap.set(d.id, d.data()));
-  }
-  const scheduledMatches = Array.from(matchMap.values());
+      // Fetch upcoming / recent matches
+      const matchMap = new Map<string, any>();
+      const matchSnap = await db.collection('Match_Logs').where('logged_by_coach_id', '==', coachId).get().catch(() => null);
+      if (matchSnap) {
+        matchSnap.docs.forEach(d => matchMap.set(d.id, d.data()));
+      }
+      const allMatchesSnap = await db.collection('Match_Logs').limit(30).get().catch(() => null);
+      if (allMatchesSnap) {
+        allMatchesSnap.docs.forEach(d => matchMap.set(d.id, d.data()));
+      }
+      const scheduledMatches = Array.from(matchMap.values());
 
-  // Fetch recent sRPE workload logs
-  const wlSnap = await db.collection('Workload_Analysis').where('logged_by_coach_id', '==', coachId).limit(30).get().catch(() => null);
-  const recentWorkload = wlSnap ? wlSnap.docs.map(d => d.data()) : [];
+      // Fetch recent sRPE workload logs
+      const wlSnap = await db.collection('Workload_Analysis').where('logged_by_coach_id', '==', coachId).limit(30).get().catch(() => null);
+      const recentWorkload = wlSnap ? wlSnap.docs.map(d => d.data()) : [];
 
-  // Fetch all handled athletes (both on teams and unassigned)
-  const handledAthletes = await getCoachManagedAthletes(coachId).catch(() => []);
+      // Fetch all handled athletes (both on teams and unassigned)
+      const handledAthletes = await getCoachManagedAthletes(coachId).catch(() => []);
 
-  const snapshotData = {
-    coach_profile: profile,
-    teams,
-    rosters,
-    handled_athletes: handledAthletes,
-    sports_configurations: sports,
-    scheduled_matches: scheduledMatches,
-    recent_workload_logs: recentWorkload,
-  };
+      const snapshotData = {
+        coach_profile: profile,
+        teams,
+        rosters,
+        handled_athletes: handledAthletes,
+        sports_configurations: sports,
+        scheduled_matches: scheduledMatches,
+        recent_workload_logs: recentWorkload,
+      };
 
-  const etag = generateETag(snapshotData);
-  const cacheVersion = `v_${Date.now()}_${etag.replace(/[^\w]/g, '').substring(0, 8)}`;
+      const etag = generateETag(snapshotData);
+      const cacheVersion = `v_${Date.now()}_${etag.replace(/[^\w]/g, '').substring(0, 8)}`;
 
-  return {
-    snapshot_timestamp: new Date().toISOString(),
-    cache_version: cacheVersion,
-    etag,
-    ...snapshotData,
-  };
+      return {
+        snapshot_timestamp: new Date().toISOString(),
+        cache_version: cacheVersion,
+        etag,
+        ...snapshotData,
+      };
+    },
+    60, // 60s cache TTL
+    ['snapshot', `coach_${coachId}`, 'matches', 'teams']
+  );
 }
 
 /**
  * Pre-fetch complete offline snapshot package for Athlete.
  */
 export async function getAthleteOfflineSnapshotService(athleteId: string): Promise<AthleteOfflineSnapshot> {
-  const athleteDoc = await db.collection('Athlete_Profiles').doc(athleteId).get();
-  const profileData = athleteDoc.exists ? athleteDoc.data() : { athlete_id: athleteId, full_name: 'Athlete' };
+  return serverCache.getOrSet(
+    `athlete_snapshot_${athleteId}`,
+    async () => {
+      const athleteDoc = await db.collection('Athlete_Profiles').doc(athleteId).get();
+      const profileData = athleteDoc.exists ? athleteDoc.data() : { athlete_id: athleteId, full_name: 'Athlete' };
 
-  const [careerStats, groupedMatches, homeSummary, sports] = await Promise.all([
-    getAthleteExpandedCareerStats(athleteId).catch(() => null),
-    getAthleteDateGroupedMatches(athleteId).catch(() => null),
-    getAthleteHomeSummary(athleteId).catch(() => null),
-    getAllSportsService().catch(() => []),
-  ]);
+      const [careerStats, groupedMatches, homeSummary, sports] = await Promise.all([
+        getAthleteExpandedCareerStats(athleteId).catch(() => null),
+        getAthleteDateGroupedMatches(athleteId).catch(() => null),
+        getAthleteHomeSummary(athleteId).catch(() => null),
+        getAllSportsService().catch(() => []),
+      ]);
 
-  const snapshotData = {
-    athlete_profile: profileData,
-    career_stats: careerStats,
-    grouped_matches: groupedMatches,
-    workload_summary: homeSummary?.workload_summary || null,
-    team_summary: homeSummary?.current_team_summary || null,
-    registered_sports: sports,
-  };
+      const snapshotData = {
+        athlete_profile: profileData,
+        career_stats: careerStats,
+        grouped_matches: groupedMatches,
+        workload_summary: homeSummary?.workload_summary || null,
+        team_summary: homeSummary?.current_team_summary || null,
+        registered_sports: sports,
+      };
 
-  const etag = generateETag(snapshotData);
-  const cacheVersion = `v_${Date.now()}_${etag.replace(/[^\w]/g, '').substring(0, 8)}`;
+      const etag = generateETag(snapshotData);
+      const cacheVersion = `v_${Date.now()}_${etag.replace(/[^\w]/g, '').substring(0, 8)}`;
 
-  return {
-    snapshot_timestamp: new Date().toISOString(),
-    cache_version: cacheVersion,
-    etag,
-    ...snapshotData,
-  };
+      return {
+        snapshot_timestamp: new Date().toISOString(),
+        cache_version: cacheVersion,
+        etag,
+        ...snapshotData,
+      };
+    },
+    60, // 60s cache TTL
+    ['snapshot', `athlete_${athleteId}`]
+  );
 }
 
 /**

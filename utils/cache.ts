@@ -1,5 +1,5 @@
 /**
- * High-Performance In-Memory Cache with TTL and Tagged Invalidation
+ * High-Performance In-Memory Cache with TTL, Tagged Invalidation, and In-Flight Request Deduplication
  */
 
 interface CacheEntry<T> {
@@ -10,6 +10,7 @@ interface CacheEntry<T> {
 
 class FastCache {
   private store = new Map<string, CacheEntry<any>>();
+  private inFlight = new Map<string, Promise<any>>();
 
   get<T>(key: string): T | null {
     const entry = this.store.get(key);
@@ -29,8 +30,41 @@ class FastCache {
     });
   }
 
+  async getOrSet<T>(
+    key: string,
+    fetchFn: () => Promise<T>,
+    ttlSeconds = 30,
+    tags: string[] = []
+  ): Promise<T> {
+    const cached = this.get<T>(key);
+    if (cached !== null && cached !== undefined) {
+      return cached;
+    }
+
+    const running = this.inFlight.get(key);
+    if (running) {
+      return running as Promise<T>;
+    }
+
+    const promise = (async () => {
+      try {
+        const result = await fetchFn();
+        if (result !== undefined && result !== null) {
+          this.set(key, result, ttlSeconds, tags);
+        }
+        return result;
+      } finally {
+        this.inFlight.delete(key);
+      }
+    })();
+
+    this.inFlight.set(key, promise);
+    return promise;
+  }
+
   delete(key: string): void {
     this.store.delete(key);
+    this.inFlight.delete(key);
   }
 
   invalidateTags(tags: string[]): void {
@@ -38,13 +72,16 @@ class FastCache {
     for (const [key, entry] of this.store.entries()) {
       if (entry.tags.some((t) => tagSet.has(t))) {
         this.store.delete(key);
+        this.inFlight.delete(key);
       }
     }
   }
 
   clear(): void {
     this.store.clear();
+    this.inFlight.clear();
   }
 }
 
 export const serverCache = new FastCache();
+

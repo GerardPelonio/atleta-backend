@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { AuthRequest } from './authMiddleware';
 import { logAdminAudit } from '../services/adminService';
 import { db } from '../utils/firebaseAdmin';
+import { serverCache } from '../utils/cache';
 
 export interface AdminAuthRequest extends AuthRequest {
   adminUser?: {
@@ -99,22 +100,32 @@ export async function requireSystemAdmin(
       return;
     }
 
-    const adminProfilesSnap = await db.collection('Admin_Profiles').where('user_id', '==', decoded.uid).limit(1).get();
-    if (!adminProfilesSnap.empty) {
-      const profile = adminProfilesSnap.docs[0].data();
-      if (profile.is_active === false) {
-        await logAdminAudit({
-          user_id: decoded.uid,
-          email: decoded.email,
-          action: `${req.method} ${endpoint}`,
-          status: 'FAILED',
-          endpoint,
-          ip_address: clientIp,
-          details: { error: 'Admin profile is deactivated' },
-        }).catch(() => {});
-        res.status(403).json({ error: 'Access denied. Admin profile is deactivated.' });
-        return;
-      }
+    const isActive = await serverCache.getOrSet(
+      `admin_active_${decoded.uid}`,
+      async () => {
+        const adminProfilesSnap = await db.collection('Admin_Profiles').where('user_id', '==', decoded.uid).limit(1).get();
+        if (!adminProfilesSnap.empty) {
+          const profile = adminProfilesSnap.docs[0].data();
+          return profile.is_active !== false;
+        }
+        return true;
+      },
+      60,
+      [`admin_${decoded.uid}`]
+    );
+
+    if (!isActive) {
+      await logAdminAudit({
+        user_id: decoded.uid,
+        email: decoded.email,
+        action: `${req.method} ${endpoint}`,
+        status: 'FAILED',
+        endpoint,
+        ip_address: clientIp,
+        details: { error: 'Admin profile is deactivated' },
+      }).catch(() => {});
+      res.status(403).json({ error: 'Access denied. Admin profile is deactivated.' });
+      return;
     }
 
     req.user = {

@@ -1,6 +1,7 @@
 import { db } from '../utils/firebaseAdmin';
 import { Notification, NotificationType } from '../models/notificationModel';
 import { eventBus, EVENTS } from '../utils/eventBus';
+import { serverCache } from '../utils/cache';
 
 /**
  * Event-driven Push Alert engine.
@@ -68,11 +69,19 @@ export async function createNotification(params: {
   }
 
   await db.collection('Notifications').doc(notificationId).set(notificationData);
+
+  // Invalidate notification caches for recipient
+  try {
+    const rawUid = targetRecipientId.replace(/^ath_/, '').replace(/^coach_/, '');
+    serverCache.invalidateTags([`notifs_${rawUid}`, `notifs_${targetRecipientId}`]);
+  } catch {}
+
   return notificationData as Notification;
 }
 
 /**
- * Fetch all notifications for a specific recipient user (athlete).
+ * Fetch all notifications for a specific recipient user (athlete/coach).
+ * Limited to latest 50 to conserve Firestore read quotas.
  */
 export async function getAthleteNotifications(recipientUserId: string): Promise<Notification[]> {
   const rawUid = recipientUserId.replace(/^ath_/, '').replace(/^coach_/, '');
@@ -80,22 +89,30 @@ export async function getAthleteNotifications(recipientUserId: string): Promise<
     new Set([recipientUserId, rawUid, `ath_${rawUid}`, `coach_${rawUid}`]),
   );
 
-  const snapshot = await db
-    .collection('Notifications')
-    .where('recipient_id', 'in', possibleRecipientIds)
-    .get();
+  return serverCache.getOrSet(
+    `notifs_list_${rawUid}`,
+    async () => {
+      const snapshot = await db
+        .collection('Notifications')
+        .where('recipient_id', 'in', possibleRecipientIds)
+        .limit(50)
+        .get();
 
-  if (snapshot.empty) {
-    return []; // No notifications yet — return empty, not mocks
-  }
+      if (snapshot.empty) {
+        return [];
+      }
 
-  const notifications: Notification[] = [];
-  snapshot.forEach((doc) => {
-    notifications.push(doc.data() as Notification);
-  });
+      const notifications: Notification[] = [];
+      snapshot.forEach((doc) => {
+        notifications.push(doc.data() as Notification);
+      });
 
-  // Sort descending by created_at
-  return notifications.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      // Sort descending by created_at
+      return notifications.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    },
+    30, // 30s cache TTL to stop spamming Firestore on frequent polls
+    [`notifs_${rawUid}`, `notifs_${recipientUserId}`]
+  );
 }
 
 /**
@@ -111,6 +128,9 @@ export async function markNotificationAsRead(notificationId: string, recipientUs
     const possibleRecipientIds = [recipientUserId, rawUid, `ath_${rawUid}`, `coach_${rawUid}`];
     if (possibleRecipientIds.includes(data.recipient_id)) {
       await notifRef.update({ is_read: true });
+      try {
+        serverCache.invalidateTags([`notifs_${rawUid}`, `notifs_${recipientUserId}`]);
+      } catch {}
       return true;
     }
   }
@@ -118,7 +138,7 @@ export async function markNotificationAsRead(notificationId: string, recipientUs
 }
 
 /**
- * Mark all notifications as read for a specific recipient user (athlete).
+ * Mark all notifications as read for a specific recipient user.
  */
 export async function markAllNotificationsAsRead(recipientUserId: string): Promise<number> {
   const rawUid = recipientUserId.replace(/^ath_/, '').replace(/^coach_/, '');
@@ -130,6 +150,7 @@ export async function markAllNotificationsAsRead(recipientUserId: string): Promi
     .collection('Notifications')
     .where('recipient_id', 'in', possibleRecipientIds)
     .where('is_read', '==', false)
+    .limit(100)
     .get();
 
   if (snapshot.empty) return 0;
@@ -142,5 +163,10 @@ export async function markAllNotificationsAsRead(recipientUserId: string): Promi
   });
 
   await batch.commit();
+
+  try {
+    serverCache.invalidateTags([`notifs_${rawUid}`, `notifs_${recipientUserId}`]);
+  } catch {}
+
   return count;
 }
