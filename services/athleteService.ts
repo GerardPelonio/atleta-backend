@@ -364,10 +364,12 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
 
   // 3. Check if user exists in Firestore Users / Athlete_Profiles collection or Auth
   let userExists = false;
+  let userData: Record<string, any> = {};
   try {
     const userDoc = await db.collection('Users').doc(rawUid).get();
     if (userDoc.exists) {
       userExists = true;
+      userData = userDoc.data() || {};
     } else {
       const profileCheck = await db.collection('Athlete_Profiles').doc(canonicalAthleteId).get();
       if (profileCheck.exists) {
@@ -396,7 +398,7 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
   }
   const profileData = profileDoc.exists ? profileDoc.data()! : {};
 
-  const sportCategory = profileData.sport_type || 'Basketball';
+  const sportCategory = profileData.sport_type || userData.sport_type || 'Basketball';
 
   const rawStats = profileData.stats || {};
   const rawAverages = profileData.averages || {};
