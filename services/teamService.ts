@@ -1,4 +1,4 @@
-import { db } from '../utils/firebaseAdmin';
+import { db, dbV2 } from '../utils/firebaseAdmin';
 import {
   Team,
   TeamRosterMember,
@@ -266,17 +266,22 @@ export async function getCoachTeams(coachId: string): Promise<TeamSummary[]> {
 
   const possibleCoachIds = [coachId, `coach_${coachId}`, coachId.replace('coach_', '')];
 
-  const snapshot = await db
-    .collection('Teams')
-    .where('coach_id', 'in', possibleCoachIds)
-    .get();
+  const [snapshotV1, snapshotV2] = await Promise.all([
+    db.collection('Teams').where('coach_id', 'in', possibleCoachIds).get().catch(() => ({ docs: [] })),
+    dbV2.collection('Teams').where('coach_id', 'in', possibleCoachIds).get().catch(() => ({ docs: [] })),
+  ]);
+
+  const docsMap = new Map<string, any>();
+  snapshotV2.docs.forEach((d: any) => docsMap.set(d.id, d));
+  snapshotV1.docs.forEach((d: any) => docsMap.set(d.id, d));
 
   const teams: TeamSummary[] = [];
 
-  for (const doc of snapshot.docs) {
+  for (const doc of docsMap.values()) {
     const data = doc.data() as Team;
     const coach = await enrichCoach(data.coach_id);
     const enrichedRoster = await enrichRoster(data.roster_list || []);
+    const coachName = data.coach_name || coach.full_name || 'Coach';
 
     teams.push({
       team_id: data.team_id,
@@ -286,7 +291,7 @@ export async function getCoachTeams(coachId: string): Promise<TeamSummary[]> {
       region: data.region || undefined,
       season_record: data.season_record || { wins: 0, losses: 0 },
       athlete_count: enrichedRoster.length,
-      coach_name: coach.full_name,
+      coach_name: coachName,
       coach_id: data.coach_id,
       established_year: data.established_year,
       roster_list: enrichedRoster,
@@ -317,12 +322,20 @@ export async function browseTeamDirectory(
     return cached.data;
   }
 
-  const snapshot = await db.collection('Teams').get();
+  const [snapshotV1, snapshotV2] = await Promise.all([
+    db.collection('Teams').get().catch(() => ({ docs: [] })),
+    dbV2.collection('Teams').get().catch(() => ({ docs: [] })),
+  ]);
+
+  const docsMap = new Map<string, any>();
+  snapshotV2.docs.forEach((d: any) => docsMap.set(d.id, d));
+  snapshotV1.docs.forEach((d: any) => docsMap.set(d.id, d));
+
   const teams: TeamSummary[] = [];
 
   const normSportQuery = (sport || '').toLowerCase().replace(/&/g, 'and').replace(/\s+/g, '').trim();
 
-  for (const doc of snapshot.docs) {
+  for (const doc of docsMap.values()) {
     const data = doc.data() as Team;
 
     // Filter by excluded team ID
@@ -350,16 +363,22 @@ export async function browseTeamDirectory(
       }
     }
 
-    // Search query filter
+    const coach = await enrichCoach(data.coach_id);
+    const enrichedRoster = await enrichRoster(data.roster_list || []);
+    const coachName = data.coach_name || coach.full_name || 'Coach';
+
+    // Search query filter: check team_name, sport_type, coach_name, description
     if (search && search.trim().length > 0) {
       const searchLower = search.trim().toLowerCase();
-      if (!data.team_name.toLowerCase().includes(searchLower) && !(data.sport_type || '').toLowerCase().includes(searchLower)) {
+      const matches =
+        data.team_name.toLowerCase().includes(searchLower) ||
+        (data.sport_type || '').toLowerCase().includes(searchLower) ||
+        coachName.toLowerCase().includes(searchLower) ||
+        (data.description || '').toLowerCase().includes(searchLower);
+      if (!matches) {
         continue;
       }
     }
-
-    const coach = await enrichCoach(data.coach_id);
-    const enrichedRoster = await enrichRoster(data.roster_list || []);
 
     teams.push({
       team_id: data.team_id,
@@ -369,7 +388,7 @@ export async function browseTeamDirectory(
       region: data.region || undefined,
       season_record: data.season_record || { wins: 0, losses: 0 },
       athlete_count: enrichedRoster.length,
-      coach_name: coach.full_name,
+      coach_name: coachName,
       coach_id: data.coach_id || '',
       established_year: data.established_year,
       roster_list: enrichedRoster,
@@ -553,7 +572,10 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
  * GET /api/v1/teams/:teamId
  */
 export async function getTeamDetails(teamId: string): Promise<TeamDetailResponse | null> {
-  const teamDoc = await db.collection('Teams').doc(teamId).get();
+  let teamDoc = await db.collection('Teams').doc(teamId).get();
+  if (!teamDoc.exists) {
+    teamDoc = await dbV2.collection('Teams').doc(teamId).get();
+  }
 
   if (!teamDoc.exists) {
     return null;
@@ -561,6 +583,9 @@ export async function getTeamDetails(teamId: string): Promise<TeamDetailResponse
 
   const data = teamDoc.data() as Team;
   const coach = await enrichCoach(data.coach_id);
+  if (data.coach_name && (!coach.full_name || coach.full_name === 'No Coach Assigned')) {
+    coach.full_name = data.coach_name;
+  }
   const roster = await enrichRoster(data.roster_list || []);
 
   return {

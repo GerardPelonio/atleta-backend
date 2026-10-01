@@ -31,6 +31,7 @@ export interface Team {
   established_year?: number;      // Optional
   season_record: SeasonRecord;    // Map / Object (e.g. { wins: 0, losses: 0 })
   coach_id: string;               // Foreign Key -> Coach.coach_id, Required
+  coach_name?: string;            // Optional coach full name
   roster_list: (string | TeamRosterMember)[]; // Roster array
   timestamp: string;              // ISO datetime
 }
