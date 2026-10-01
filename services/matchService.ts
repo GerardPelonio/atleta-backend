@@ -985,7 +985,6 @@ export async function processScoresheetOCR(matchId: string, file?: Express.Multe
 
     // Format all OCR extracted players into rich player_stats with complete metrics
     const halfCount = Math.ceil(rawPlayerSummary.length / 2);
-    const batch = db.batch();
 
     const formattedPlayerStats = rawPlayerSummary.map((item: any, idx: number) => {
       let resolvedTeam = item.team_name || item.team ? String(item.team_name || item.team).toUpperCase() : '';
@@ -1041,27 +1040,10 @@ export async function processScoresheetOCR(matchId: string, file?: Express.Multe
         true_shooting_pct: (computed as any).trueShootingPct || 0,
       };
 
-      // Always write a Performance_Metrics record for this match & player so boxscore queries find it
-      const metricId = `metric_${matchId}_${athleteId}`;
-      const metric: PerformanceMetric = {
-        metric_id: metricId,
-        athlete_id: athleteId,
-        match_id: matchId,
-        sport_category: matchData.sport_type || 'Basketball',
-        sport_stats: computed.enrichedStats,
-        calculated_player_efficiency: computed.efficiency,
-        timestamp: now,
-        team_name: resolvedTeam,
-        player_name: pName,
-        jersey_number: jerseyNum,
-        position: item.position || 'G',
-      };
-      batch.set(db.collection('Performance_Metrics').doc(metricId), metric, { merge: true });
-
       return playerStatObj;
     });
 
-    // Save scoresheet_url, player_stats, scoresheet_data, and parsed_tables directly onto Match_Logs
+    // Save scoresheet_url, scoresheet_data, and parsed_tables directly onto Match_Logs (without polluting Performance_Metrics)
     const updatePayload: any = {
       scoresheet_url: scoresheetUrl,
       player_stats: formattedPlayerStats,
@@ -1106,12 +1088,6 @@ export async function processScoresheetOCR(matchId: string, file?: Express.Multe
         }
       }
     } catch (_) {}
-
-    // Commit all Performance_Metrics
-    if (formattedPlayerStats.length > 0) {
-      await batch.commit();
-      console.log(`✅ [OCR METRICS] Successfully persisted ${formattedPlayerStats.length} player stats to Match_Logs & Performance_Metrics.`);
-    }
 
     return {
       match_id: matchId,
