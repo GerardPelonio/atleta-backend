@@ -398,23 +398,53 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
 
   const sportCategory = profileData.sport_type || 'Basketball';
 
-  const stats = profileData.stats || {
-    ppg: 0,
-    rpg: 0,
-    apg: 0,
-    bpg: 0,
-    fg_pct: 0,
-    three_pct: 0,
-    ft_pct: 0,
-    efficiency_rating: 0,
+  const rawStats = profileData.stats || {};
+  const rawAverages = profileData.averages || {};
+  const rawShooting = profileData.shooting_efficiency || profileData.shooting_accuracy_percentages || {};
+
+  let fgPct = Number(
+    rawShooting.fg_pct ??
+    rawStats.fg_pct ??
+    rawStats.fg_percentage ??
+    rawStats.field_goal_percentage ??
+    rawAverages.fg_percentage ??
+    rawAverages.fg_pct ??
+    rawAverages.field_goal_percentage ??
+    0
+  );
+
+  let ftPct = Number(
+    rawShooting.ft_pct ??
+    rawStats.ft_pct ??
+    rawStats.ft_percentage ??
+    rawStats.free_throw_percentage ??
+    rawAverages.ft_percentage ??
+    rawAverages.ft_pct ??
+    rawAverages.free_throw_percentage ??
+    0
+  );
+
+  let threePct = Number(
+    rawShooting.three_pct ??
+    rawStats.three_pct ??
+    rawStats.three_pt_percentage ??
+    rawAverages.three_pt_percentage ??
+    rawAverages.three_pct ??
+    0
+  );
+
+  const stats = {
+    ppg: Number(rawStats.ppg ?? rawAverages.ppg ?? rawStats.points_per_game ?? 0),
+    rpg: Number(rawStats.rpg ?? rawAverages.rpg ?? rawStats.rebounds_per_game ?? 0),
+    apg: Number(rawStats.apg ?? rawAverages.apg ?? rawStats.assists_per_game ?? 0),
+    bpg: Number(rawStats.bpg ?? rawAverages.bpg ?? 0),
+    fg_pct: fgPct,
+    three_pct: threePct,
+    ft_pct: ftPct,
+    efficiency_rating: Number(rawStats.efficiency_rating ?? rawAverages.per_score ?? 0),
   };
 
-  const fgPct = stats.fg_pct || 0;
-  const threePct = stats.three_pct || 0;
-  const ftPct = stats.ft_pct || 0;
-  const efgPct = (fgPct + 0.5 * threePct) > 0 ? Math.round((fgPct + 0.5 * threePct) * 10) / 10 : 0;
-
-  const fiveGameTrend = profileData.five_game_trend || [];
+  const fiveGameTrend = profileData.five_game_trend || profileData.scoring_trends_last_10 || [];
 
   // Fetch actual team summary if athlete is assigned to a team
   let currentTeamSummary = profileData.team_summary || null;
@@ -481,8 +511,13 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
     // Continue if workload query encounters error
   }
 
-  // Fetch recent performance metrics to derive real match scoring history & last 5 games scores
+  // Fetch recent performance metrics and match logs to derive real match scoring history & last 5 games scores
   let realScoringTrend: number[] = [];
+  let totalMatchFgm = 0;
+  let totalMatchFga = 0;
+  let totalMatchFtm = 0;
+  let totalMatchFta = 0;
+
   try {
     const metricsSnapshot = await db
       .collection('Performance_Metrics')
@@ -498,19 +533,71 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
             new Date(a.timestamp || a.created_at || 0).getTime()
         );
 
-      realScoringTrend = sortedMetrics.map((m: any) => {
+      sortedMetrics.forEach((m: any) => {
         const s = m.sport_stats || {};
-        if (s.points !== undefined) return Number(s.points);
-        if (s.finish_time_ms) return parseFloat((Number(s.finish_time_ms) / 1000).toFixed(2));
-        if (s.time) return parseFloat(String(s.time)) || 0;
-        return Number(m.calculated_player_efficiency || 0);
+        const pts = Number(s.points !== undefined ? s.points : (m.calculated_player_efficiency || 0));
+        if (pts > 0) realScoringTrend.push(pts);
+
+        totalMatchFgm += Number(s.fg_made || 0);
+        totalMatchFga += Number(s.fg_attempted || 0);
+        totalMatchFtm += Number(s.ft_made || 0);
+        totalMatchFta += Number(s.ft_attempted || 0);
       });
     }
+
+    // Also inspect Match_Logs for any matches with this athlete
+    const matchesSnapshot = await db.collection('Match_Logs').get();
+    const sortedMatches = matchesSnapshot.docs
+      .map((d) => d.data())
+      .sort(
+        (a, b) =>
+          new Date(b.timestamp || b.match_date || b.created_at || 0).getTime() -
+          new Date(a.timestamp || a.match_date || a.created_at || 0).getTime()
+      );
+
+    sortedMatches.forEach((m: any) => {
+      const pStats = (m.player_stats || []).find(
+        (p: any) => p.athlete_id === athleteId || p.athlete_id === rawUid || p.athlete_id === canonicalAthleteId
+      );
+      if (pStats) {
+        const pts = Number(pStats.pts ?? pStats.points ?? pStats.stats?.points ?? 0);
+        if (pts > 0 && !realScoringTrend.includes(pts)) {
+          realScoringTrend.push(pts);
+        }
+        const s = pStats.stats || {};
+        totalMatchFgm += Number(s.fg_made || 0);
+        totalMatchFga += Number(s.fg_attempted || 0);
+        totalMatchFtm += Number(s.ft_made || 0);
+        totalMatchFta += Number(s.ft_attempted || 0);
+      }
+    });
   } catch (err) {
     // Gracefully fallback if metrics query encounters index issue
   }
 
-  const derivedScores = realScoringTrend.length > 0 ? realScoringTrend.slice(0, 5).reverse() : fiveGameTrend;
+  // If match logs have shot attempts, calculate shooting efficiency directly from matches
+  if (totalMatchFga > 0) {
+    fgPct = parseFloat(((totalMatchFgm / totalMatchFga) * 100).toFixed(1));
+    stats.fg_pct = fgPct;
+  }
+  if (totalMatchFta > 0) {
+    ftPct = parseFloat(((totalMatchFtm / totalMatchFta) * 100).toFixed(1));
+    stats.ft_pct = ftPct;
+  }
+
+  const efgPct = (fgPct + 0.5 * threePct) > 0 ? parseFloat((fgPct + 0.5 * threePct).toFixed(1)) : fgPct;
+
+  // Filter positive scores to avoid placeholder zeros from initial dummy metrics
+  const positiveScores = realScoringTrend.filter((s) => s > 0);
+  const validProfileScores = Array.isArray(fiveGameTrend) ? fiveGameTrend.filter((s: any) => Number(s) > 0) : [];
+  
+  const derivedScores = positiveScores.length > 0
+    ? positiveScores.slice(0, 5).reverse()
+    : validProfileScores.length > 0
+    ? validProfileScores.slice(-5)
+    : realScoringTrend.length > 0
+    ? realScoringTrend.slice(0, 5).reverse()
+    : [];
 
   // Calculate default or derived radar competencies if not explicitly defined
   const rawRadar = profileData.analytics?.radar_competencies;
@@ -531,7 +618,7 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
       apg: stats.apg,
       bpg: stats.bpg,
       efficiency_rating: stats.efficiency_rating,
-      scoring_trend: realScoringTrend.length > 0 ? realScoringTrend.slice(0, 10) : (profileData.analytics?.scoring_trend || []),
+      scoring_trend: derivedScores.length > 0 ? derivedScores : (profileData.analytics?.scoring_trend || []),
       radar_competencies: radarCompetencies,
     },
     shooting_efficiency: {
@@ -546,7 +633,7 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
     workload_summary: workloadSummary,
   } as any;
 
-  // Cache response for 300 seconds
+  // Cache response for 60 seconds
   homeCache.set(athleteId, { data: summary, cachedAt: Date.now() });
 
   return summary;
@@ -648,25 +735,42 @@ export async function getAthleteExpandedCareerStats(athleteId: string): Promise<
     ? parseFloat((perList.reduce((a, b) => a + b, 0) / perList.length).toFixed(2))
     : Number(profileData.stats?.efficiency_rating || 0);
 
-  const fgPct = totalFga > 0 ? parseFloat(((totalFgm / totalFga) * 100).toFixed(2)) : Number(profileData.stats?.fg_pct || 0);
-  const threePct = Number(profileData.stats?.three_pct || 0);
-  const ftPct = totalFta > 0 ? parseFloat(((totalFtm / totalFta) * 100).toFixed(2)) : Number(profileData.stats?.ft_pct || 0);
-  const efgPct = parseFloat(((fgPct + 0.5 * threePct)).toFixed(2));
-  const tsDenom = 2 * (totalFga + 0.44 * totalFta);
-  const tsPct = tsDenom > 0 ? parseFloat(((totalPts / tsDenom) * 100).toFixed(2)) : 0;
+  const rawStats = profileData.stats || {};
+  const rawAverages = profileData.averages || {};
+  const rawShooting = profileData.shooting_efficiency || profileData.shooting_accuracy_percentages || {};
 
-  const ppg = totalGames > 0 ? parseFloat((totalPts / totalGames).toFixed(1)) : Number(profileData.stats?.ppg || 0);
-  const rpg = totalGames > 0 ? parseFloat((totalReb / totalGames).toFixed(1)) : Number(profileData.stats?.rpg || 0);
-  const apg = totalGames > 0 ? parseFloat((totalAst / totalGames).toFixed(1)) : Number(profileData.stats?.apg || 0);
+  const fallbackFg = Number(rawShooting.fg_pct ?? rawStats.fg_pct ?? rawStats.fg_percentage ?? rawAverages.fg_percentage ?? 0);
+  const fallbackFt = Number(rawShooting.ft_pct ?? rawStats.ft_pct ?? rawStats.ft_percentage ?? rawAverages.ft_percentage ?? 0);
+  const fallback3p = Number(rawShooting.three_pct ?? rawStats.three_pct ?? rawStats.three_pt_percentage ?? rawAverages.three_pt_percentage ?? 0);
+
+  const fgPct = totalFga > 0 ? parseFloat(((totalFgm / totalFga) * 100).toFixed(1)) : fallbackFg;
+  const threePct = fallback3p;
+  const ftPct = totalFta > 0 ? parseFloat(((totalFtm / totalFta) * 100).toFixed(1)) : fallbackFt;
+  const efgPct = parseFloat(((fgPct + 0.5 * threePct)).toFixed(1));
+  const tsDenom = 2 * (totalFga + 0.44 * totalFta);
+  const tsPct = tsDenom > 0 ? parseFloat(((totalPts / tsDenom) * 100).toFixed(1)) : 0;
+
+  const ppg = totalGames > 0 ? parseFloat((totalPts / totalGames).toFixed(1)) : Number(profileData.stats?.ppg || profileData.averages?.ppg || 0);
+  const rpg = totalGames > 0 ? parseFloat((totalReb / totalGames).toFixed(1)) : Number(profileData.stats?.rpg || profileData.averages?.rpg || 0);
+  const apg = totalGames > 0 ? parseFloat((totalAst / totalGames).toFixed(1)) : Number(profileData.stats?.apg || profileData.averages?.apg || 0);
   const spg = totalGames > 0 ? parseFloat((totalStl / totalGames).toFixed(1)) : 0;
   const bpg = totalGames > 0 ? parseFloat((totalBlk / totalGames).toFixed(1)) : Number(profileData.stats?.bpg || 0);
   const topg = totalGames > 0 ? parseFloat((totalTo / totalGames).toFixed(1)) : 0;
   const fpg = totalGames > 0 ? parseFloat((totalFouls / totalGames).toFixed(1)) : 0;
 
+  const positiveScores = metrics.map((m: any) => Number(m.sport_stats?.points ?? m.calculated_player_efficiency ?? 0)).filter((s) => s > 0);
+  const fallbackLast5 = profileData.stats?.last_5_games_scores || profileData.five_game_trend || profileData.scoring_trends_last_10 || [];
+  const validFallbackScores = Array.isArray(fallbackLast5) ? fallbackLast5.filter((s: any) => Number(s) > 0) : [];
+  const last5 = positiveScores.length > 0
+    ? positiveScores.slice(0, 5).reverse()
+    : validFallbackScores.length > 0
+    ? validFallbackScores.slice(-5)
+    : [];
+
   return {
     athlete_id: athleteId,
     sport_category: sportCategory,
-    games_played: totalGames,
+    games_played: Math.max(totalGames, Number(profileData.stats?.games_played || profileData.averages?.games_played || 0)),
     calculated_player_efficiency: avgPer,
     career_per: avgPer,
     shooting_accuracy_percentages: {
@@ -707,8 +811,8 @@ export async function getAthleteExpandedCareerStats(athleteId: string): Promise<
       efficiency: maxEff,
     },
     historical_per_trend: perList,
-    last_5_games_scores: metrics.length > 0 ? metrics.slice(0, 5).map((m: any) => Number(m.sport_stats?.points ?? m.calculated_player_efficiency ?? 0)).reverse() : (profileData.stats?.last_5_games_scores || profileData.five_game_trend || []),
-    recent_scores: metrics.length > 0 ? metrics.slice(0, 5).map((m: any) => Number(m.sport_stats?.points ?? m.calculated_player_efficiency ?? 0)).reverse() : [],
+    last_5_games_scores: last5,
+    recent_scores: last5,
     workload_analytics: profileData.workload_analytics || profileData.workload || (await getAthleteWorkloadSummary(athleteId).catch(() => undefined)),
     workload: profileData.workload_analytics || profileData.workload || (await getAthleteWorkloadSummary(athleteId).catch(() => undefined)),
     workload_target: profileData.workload_target || undefined,
