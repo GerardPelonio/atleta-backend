@@ -116,10 +116,7 @@ export const auth: Auth = getAuth(mainApp);
 // -------------------------------------------------------------
 // 4. Export Firestore db (connected to atleta-v1 Main Firebase)
 // -------------------------------------------------------------
-const targetFirestoreProject = process.env.FIRESTORE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || 'atleta-v1';
-export const db: Firestore = (targetFirestoreProject === 'atleta-v2' && firestoreApp)
-  ? getFirestore(firestoreApp)
-  : getFirestore(mainApp);
+export const db: Firestore = getFirestore(firestoreApp);
 
 // Specific named instances
 export const dbV1: Firestore = getFirestore(mainApp);

@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { OAuth2Client } from 'google-auth-library';
-import { auth, db } from '../utils/firebaseAdmin';
+import { auth, db, dbV1 } from '../utils/firebaseAdmin';
 import { clientAuth } from '../utils/firebaseClient';
 import {
   ROLE_COLLECTION_MAP,
@@ -64,8 +64,11 @@ export async function registerUserService(
   const cleanEmail = email.trim().toLowerCase();
 
   // 1. Check if email already exists in Firestore Users collection
-  const existingUserSnap = await db.collection('Users').where('email', '==', cleanEmail).limit(1).get();
-  if (!existingUserSnap.empty) {
+  const existingUserSnap = await db.collection('Users').where('email', '==', cleanEmail).limit(1).get().catch(() => null);
+  const existingUserSnapV1 = (!existingUserSnap || existingUserSnap.empty)
+    ? await dbV1.collection('Users').where('email', '==', cleanEmail).limit(1).get().catch(() => null)
+    : null;
+  if ((existingUserSnap && !existingUserSnap.empty) || (existingUserSnapV1 && !existingUserSnapV1.empty)) {
     const err: any = new Error('Email already in use. Please log in using your existing credentials.');
     err.code = 'auth/email-already-in-use';
     err.status = 400;
@@ -360,12 +363,18 @@ export async function registerCoachService(data: Record<string, unknown>, file?:
 export async function loginUserService(email: string, password: string) {
   const cleanEmail = (email || '').trim().toLowerCase();
 
-  const userQuery = await db.collection('Users').where('email', '==', cleanEmail).limit(1).get();
-  let userDoc = userQuery.empty ? null : userQuery.docs[0];
+  // Try primary db (v2) first, then fall back to v1 for Users
+  const getUserDoc = async (emailStr: string) => {
+    let q = await db.collection('Users').where('email', '==', emailStr).limit(1).get().catch(() => null);
+    if (q && !q.empty) return q.docs[0];
+    q = await dbV1.collection('Users').where('email', '==', emailStr).limit(1).get().catch(() => null);
+    if (q && !q.empty) return q.docs[0];
+    return null;
+  };
 
+  let userDoc = await getUserDoc(cleanEmail);
   if (!userDoc) {
-    const rawQuery = await db.collection('Users').where('email', '==', email.trim()).limit(1).get();
-    userDoc = rawQuery.empty ? null : rawQuery.docs[0];
+    userDoc = await getUserDoc(email.trim());
   }
 
   let uid = '';
@@ -408,8 +417,11 @@ export async function loginUserService(email: string, password: string) {
   }
 
   if (!userDoc) {
-    const docRef = await db.collection('Users').doc(uid).get();
-    if (!docRef.exists) {
+    let docRef = await db.collection('Users').doc(uid).get().catch(() => null);
+    if (!docRef || !docRef.exists) {
+      docRef = await dbV1.collection('Users').doc(uid).get().catch(() => null);
+    }
+    if (!docRef || !docRef.exists) {
       throw { code: 'USER_NOT_FOUND', message: 'User profile not found in Firestore.' };
     }
     userDoc = docRef as any;
