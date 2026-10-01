@@ -545,32 +545,35 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
       });
     }
 
-    // Also inspect Match_Logs for any matches with this athlete
-    const matchesSnapshot = await db.collection('Match_Logs').get();
-    const sortedMatches = matchesSnapshot.docs
-      .map((d) => d.data())
-      .sort(
-        (a, b) =>
-          new Date(b.timestamp || b.match_date || b.created_at || 0).getTime() -
-          new Date(a.timestamp || a.match_date || a.created_at || 0).getTime()
-      );
+    // If Performance_Metrics were empty, inspect Match_Logs using indexed array-contains query
+    if (realScoringTrend.length === 0) {
+      const matchQuery = await db
+        .collection('Match_Logs')
+        .where('roster_athletes', 'array-contains-any', [athleteId, rawUid, canonicalAthleteId])
+        .limit(10)
+        .get()
+        .catch(() => null);
 
-    sortedMatches.forEach((m: any) => {
-      const pStats = (m.player_stats || []).find(
-        (p: any) => p.athlete_id === athleteId || p.athlete_id === rawUid || p.athlete_id === canonicalAthleteId
-      );
-      if (pStats) {
-        const pts = Number(pStats.pts ?? pStats.points ?? pStats.stats?.points ?? 0);
-        if (pts > 0 && !realScoringTrend.includes(pts)) {
-          realScoringTrend.push(pts);
-        }
-        const s = pStats.stats || {};
-        totalMatchFgm += Number(s.fg_made || 0);
-        totalMatchFga += Number(s.fg_attempted || 0);
-        totalMatchFtm += Number(s.ft_made || 0);
-        totalMatchFta += Number(s.ft_attempted || 0);
+      if (matchQuery && !matchQuery.empty) {
+        matchQuery.docs.forEach((d) => {
+          const m = d.data();
+          const pStats = (m.player_stats || []).find(
+            (p: any) => p.athlete_id === athleteId || p.athlete_id === rawUid || p.athlete_id === canonicalAthleteId
+          );
+          if (pStats) {
+            const pts = Number(pStats.pts ?? pStats.points ?? pStats.stats?.points ?? 0);
+            if (pts > 0 && !realScoringTrend.includes(pts)) {
+              realScoringTrend.push(pts);
+            }
+            const s = pStats.stats || {};
+            totalMatchFgm += Number(s.fg_made || 0);
+            totalMatchFga += Number(s.fg_attempted || 0);
+            totalMatchFtm += Number(s.ft_made || 0);
+            totalMatchFta += Number(s.ft_attempted || 0);
+          }
+        });
       }
-    });
+    }
   } catch (err) {
     // Gracefully fallback if metrics query encounters index issue
   }
