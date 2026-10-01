@@ -10,7 +10,7 @@ import { logAdminAudit } from './adminService';
 import { generateStandardId } from '../utils/idGenerator';
 import { serverCache } from '../utils/cache';
 
-const firestoreDb = dbV1 || db;
+const primaryDb = db || dbV1;
 
 export const DEFAULT_SPORTS_CONFIGURATIONS: SportsConfiguration[] = [
   {
@@ -69,14 +69,18 @@ export const DEFAULT_SPORTS_CONFIGURATIONS: SportsConfiguration[] = [
  * Ensures default sports exist in Firestore Sports_Configurations collection.
  */
 export async function seedDefaultSportsIfEmpty(): Promise<void> {
-  const snapshot = await firestoreDb.collection('Sports_Configurations').limit(1).get();
-  if (snapshot.empty) {
-    const batch = firestoreDb.batch();
-    for (const sport of DEFAULT_SPORTS_CONFIGURATIONS) {
-      batch.set(firestoreDb.collection('Sports_Configurations').doc(sport.sport_id), sport, { merge: true });
-      batch.set(firestoreDb.collection('sports_configurations').doc(sport.sport_id), sport, { merge: true });
+  try {
+    const snapshot = await primaryDb.collection('Sports_Configurations').limit(1).get();
+    if (snapshot.empty) {
+      const batch = primaryDb.batch();
+      for (const sport of DEFAULT_SPORTS_CONFIGURATIONS) {
+        batch.set(primaryDb.collection('Sports_Configurations').doc(sport.sport_id), sport, { merge: true });
+        batch.set(primaryDb.collection('sports_configurations').doc(sport.sport_id), sport, { merge: true });
+      }
+      await batch.commit();
     }
-    await batch.commit();
+  } catch (err: any) {
+    console.warn('⚠️ seedDefaultSportsIfEmpty warning:', err?.message || err);
   }
 }
 
@@ -89,16 +93,24 @@ export async function getAllSportsService(onlyActive: boolean = false): Promise<
   const allSports = await serverCache.getOrSet(
     'sports_configurations_catalog_all',
     async () => {
-      await seedDefaultSportsIfEmpty();
+      await seedDefaultSportsIfEmpty().catch(() => {});
 
-      const snapshot = await firestoreDb.collection('Sports_Configurations').get();
-      let rawSports: any[] = snapshot.docs.map((doc) => ({
-        sport_id: doc.id,
-        ...(doc.data() as object),
-      }));
+      let rawSports: any[] = [];
 
       try {
-        const lowerSnap = await firestoreDb.collection('sports_configurations').get();
+        const snapshot = await primaryDb.collection('Sports_Configurations').get();
+        if (!snapshot.empty) {
+          rawSports = snapshot.docs.map((doc) => ({
+            sport_id: doc.id,
+            ...(doc.data() as object),
+          }));
+        }
+      } catch (err: any) {
+        console.warn('⚠️ Primary Sports_Configurations fetch warning:', err?.message || err);
+      }
+
+      try {
+        const lowerSnap = await primaryDb.collection('sports_configurations').get();
         if (!lowerSnap.empty) {
           const lowerList = lowerSnap.docs.map((doc) => ({
             sport_id: doc.id,
@@ -109,7 +121,7 @@ export async function getAllSportsService(onlyActive: boolean = false): Promise<
       } catch {}
 
       try {
-        const singularSnap = await firestoreDb.collection('sports_configuration').get();
+        const singularSnap = await primaryDb.collection('sports_configuration').get();
         if (!singularSnap.empty) {
           const singularList = singularSnap.docs.map((doc) => ({
             sport_id: doc.id,
@@ -119,16 +131,23 @@ export async function getAllSportsService(onlyActive: boolean = false): Promise<
         }
       } catch {}
 
-      if (rawSports.length === 0 && dbV2) {
+      // Fallback/Supplement from dbV1 if available and distinct
+      if (dbV1 && dbV1 !== primaryDb) {
         try {
-          const v2Snap = await dbV2.collection('Sports_Configurations').get();
-          if (!v2Snap.empty) {
-            rawSports = v2Snap.docs.map((doc) => ({
+          const v1Snap = await dbV1.collection('Sports_Configurations').get();
+          if (!v1Snap.empty) {
+            const v1List = v1Snap.docs.map((doc) => ({
               sport_id: doc.id,
               ...(doc.data() as object),
             }));
+            rawSports = [...rawSports, ...v1List];
           }
         } catch {}
+      }
+
+      // If still empty, supply default configurations
+      if (rawSports.length === 0) {
+        rawSports = [...DEFAULT_SPORTS_CONFIGURATIONS];
       }
 
       const seenNames = new Set<string>();
@@ -176,14 +195,14 @@ export async function getAllSportsService(onlyActive: boolean = false): Promise<
  * Retrieve single sport configuration by sport_id.
  */
 export async function getSportByIdService(sportId: string): Promise<SportsConfiguration> {
-  let doc = await firestoreDb.collection('Sports_Configurations').doc(sportId).get();
-  if (!doc.exists) {
-    doc = await firestoreDb.collection('sports_configurations').doc(sportId).get();
+  let doc = await primaryDb.collection('Sports_Configurations').doc(sportId).get().catch(() => null);
+  if (!doc || !doc.exists) {
+    doc = await primaryDb.collection('sports_configurations').doc(sportId).get().catch(() => null);
   }
-  if (!doc.exists && dbV2) {
-    doc = await dbV2.collection('Sports_Configurations').doc(sportId).get();
+  if ((!doc || !doc.exists) && dbV1 && dbV1 !== primaryDb) {
+    doc = await dbV1.collection('Sports_Configurations').doc(sportId).get().catch(() => null);
   }
-  if (!doc.exists) {
+  if (!doc || !doc.exists) {
     throw new ServiceError(`Sport configuration with ID '${sportId}' was not found.`, 404);
   }
   return doc.data() as SportsConfiguration;
@@ -222,12 +241,14 @@ export async function createSportService(
 ): Promise<{ message: string; sport: SportsConfiguration }> {
   const key = idempotencyKey.trim();
 
-  // 1. Check idempotency cache in Firestore (atleta-v1)
-  const idempotencyDoc = await firestoreDb.collection('Idempotency_Keys').doc(key).get();
-  if (idempotencyDoc.exists) {
-    console.log(`ℹ️ [IDEMPOTENCY REPLAY] Returning cached result for key '${key}'`);
-    return idempotencyDoc.data()!.response;
-  }
+  // 1. Check idempotency cache in Firestore
+  try {
+    const idempotencyDoc = await primaryDb.collection('Idempotency_Keys').doc(key).get().catch(() => null);
+    if (idempotencyDoc && idempotencyDoc.exists) {
+      console.log(`ℹ️ [IDEMPOTENCY REPLAY] Returning cached result for key '${key}'`);
+      return idempotencyDoc.data()!.response;
+    }
+  } catch {}
 
   // 2. Fetch existing sports to check uniqueness
   const existingSports = await getAllSportsService();
@@ -267,17 +288,17 @@ export async function createSportService(
     updated_at: now,
   };
 
-  // Atomic batch write to atleta-v1 (writes to both Sports_Configurations and sports_configurations)
-  const batch = firestoreDb.batch();
-  batch.set(firestoreDb.collection('Sports_Configurations').doc(sportId), newSport);
-  batch.set(firestoreDb.collection('sports_configurations').doc(sportId), newSport);
+  // Atomic batch write to primaryDb (writes to both Sports_Configurations and sports_configurations)
+  const batch = primaryDb.batch();
+  batch.set(primaryDb.collection('Sports_Configurations').doc(sportId), newSport);
+  batch.set(primaryDb.collection('sports_configurations').doc(sportId), newSport);
 
   const responsePayload = {
     message: 'Sport configuration registered successfully.',
     sport: newSport,
   };
 
-  const idempotencyRef = firestoreDb.collection('Idempotency_Keys').doc(key);
+  const idempotencyRef = primaryDb.collection('Idempotency_Keys').doc(key);
   batch.set(idempotencyRef, {
     key,
     response: responsePayload,
@@ -286,15 +307,15 @@ export async function createSportService(
 
   await batch.commit();
 
-  // Dual-write to dbV2 if distinct for disaster recovery / backup sync
-  try {
-    if (dbV2 && dbV2 !== firestoreDb) {
-      const v2Batch = dbV2.batch();
-      v2Batch.set(dbV2.collection('Sports_Configurations').doc(sportId), newSport);
-      v2Batch.set(dbV2.collection('sports_configurations').doc(sportId), newSport);
-      await v2Batch.commit().catch(() => {});
-    }
-  } catch {}
+  // Dual-write to dbV1 if distinct
+  if (dbV1 && dbV1 !== primaryDb) {
+    try {
+      const v1Batch = dbV1.batch();
+      v1Batch.set(dbV1.collection('Sports_Configurations').doc(sportId), newSport);
+      v1Batch.set(dbV1.collection('sports_configurations').doc(sportId), newSport);
+      await v1Batch.commit().catch(() => {});
+    } catch {}
+  }
 
   // Invalidate in-memory sports catalog cache
   try {
@@ -334,14 +355,14 @@ export async function updateSportService(
   adminUserId: string = 'SYS_ADMIN',
   clientIp: string = '127.0.0.1'
 ): Promise<{ message: string; sport: SportsConfiguration }> {
-  let sportDoc = await firestoreDb.collection('Sports_Configurations').doc(sportId).get();
-  if (!sportDoc.exists) {
-    sportDoc = await firestoreDb.collection('sports_configurations').doc(sportId).get();
+  let sportDoc = await primaryDb.collection('Sports_Configurations').doc(sportId).get().catch(() => null);
+  if (!sportDoc || !sportDoc.exists) {
+    sportDoc = await primaryDb.collection('sports_configurations').doc(sportId).get().catch(() => null);
   }
-  if (!sportDoc.exists && dbV2) {
-    sportDoc = await dbV2.collection('Sports_Configurations').doc(sportId).get();
+  if ((!sportDoc || !sportDoc.exists) && dbV1 && dbV1 !== primaryDb) {
+    sportDoc = await dbV1.collection('Sports_Configurations').doc(sportId).get().catch(() => null);
   }
-  if (!sportDoc.exists) {
+  if (!sportDoc || !sportDoc.exists) {
     throw new ServiceError(`Sport configuration with ID '${sportId}' was not found.`, 404);
   }
 
@@ -384,17 +405,17 @@ export async function updateSportService(
     updated_at: now,
   };
 
-  const updateBatch = firestoreDb.batch();
-  updateBatch.set(firestoreDb.collection('Sports_Configurations').doc(sportId), updatedSport, { merge: true });
-  updateBatch.set(firestoreDb.collection('sports_configurations').doc(sportId), updatedSport, { merge: true });
+  const updateBatch = primaryDb.batch();
+  updateBatch.set(primaryDb.collection('Sports_Configurations').doc(sportId), updatedSport, { merge: true });
+  updateBatch.set(primaryDb.collection('sports_configurations').doc(sportId), updatedSport, { merge: true });
   await updateBatch.commit();
 
-  if (dbV2 && dbV2 !== firestoreDb) {
+  if (dbV1 && dbV1 !== primaryDb) {
     try {
-      const v2Batch = dbV2.batch();
-      v2Batch.set(dbV2.collection('Sports_Configurations').doc(sportId), updatedSport, { merge: true });
-      v2Batch.set(dbV2.collection('sports_configurations').doc(sportId), updatedSport, { merge: true });
-      await v2Batch.commit().catch(() => {});
+      const v1Batch = dbV1.batch();
+      v1Batch.set(dbV1.collection('Sports_Configurations').doc(sportId), updatedSport, { merge: true });
+      v1Batch.set(dbV1.collection('sports_configurations').doc(sportId), updatedSport, { merge: true });
+      await v1Batch.commit().catch(() => {});
     } catch {}
   }
 
@@ -438,14 +459,14 @@ export async function deleteSportService(
   adminUserId: string = 'SYS_ADMIN',
   clientIp: string = '127.0.0.1'
 ): Promise<{ message: string; sport_id: string }> {
-  let sportDoc = await firestoreDb.collection('Sports_Configurations').doc(sportId).get();
-  if (!sportDoc.exists) {
-    sportDoc = await firestoreDb.collection('sports_configurations').doc(sportId).get();
+  let sportDoc = await primaryDb.collection('Sports_Configurations').doc(sportId).get().catch(() => null);
+  if (!sportDoc || !sportDoc.exists) {
+    sportDoc = await primaryDb.collection('sports_configurations').doc(sportId).get().catch(() => null);
   }
-  if (!sportDoc.exists && dbV2) {
-    sportDoc = await dbV2.collection('Sports_Configurations').doc(sportId).get();
+  if ((!sportDoc || !sportDoc.exists) && dbV1 && dbV1 !== primaryDb) {
+    sportDoc = await dbV1.collection('Sports_Configurations').doc(sportId).get().catch(() => null);
   }
-  if (!sportDoc.exists) {
+  if (!sportDoc || !sportDoc.exists) {
     throw new ServiceError(`Sport configuration with ID '${sportId}' was not found.`, 404);
   }
 
@@ -464,21 +485,21 @@ export async function deleteSportService(
     );
   }
 
-  // Delete from atleta-v1 Firestore (both canonical and lowercase collections)
-  const delBatch = firestoreDb.batch();
-  delBatch.delete(firestoreDb.collection('Sports_Configurations').doc(sportId));
-  delBatch.delete(firestoreDb.collection('sports_configurations').doc(sportId));
+  // Delete from primaryDb Firestore (both canonical and lowercase collections)
+  const delBatch = primaryDb.batch();
+  delBatch.delete(primaryDb.collection('Sports_Configurations').doc(sportId));
+  delBatch.delete(primaryDb.collection('sports_configurations').doc(sportId));
   await delBatch.commit().catch(async () => {
-    await firestoreDb.collection('Sports_Configurations').doc(sportId).delete().catch(() => {});
-    await firestoreDb.collection('sports_configurations').doc(sportId).delete().catch(() => {});
+    await primaryDb.collection('Sports_Configurations').doc(sportId).delete().catch(() => {});
+    await primaryDb.collection('sports_configurations').doc(sportId).delete().catch(() => {});
   });
 
-  if (dbV2 && dbV2 !== firestoreDb) {
+  if (dbV1 && dbV1 !== primaryDb) {
     try {
-      const v2DelBatch = dbV2.batch();
-      v2DelBatch.delete(dbV2.collection('Sports_Configurations').doc(sportId));
-      v2DelBatch.delete(dbV2.collection('sports_configurations').doc(sportId));
-      await v2DelBatch.commit().catch(() => {});
+      const v1DelBatch = dbV1.batch();
+      v1DelBatch.delete(dbV1.collection('Sports_Configurations').doc(sportId));
+      v1DelBatch.delete(dbV1.collection('sports_configurations').doc(sportId));
+      await v1DelBatch.commit().catch(() => {});
     } catch {}
   }
 
