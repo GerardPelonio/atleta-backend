@@ -1,7 +1,6 @@
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import type { DocumentSnapshot } from 'firebase-admin/firestore';
 import { OAuth2Client } from 'google-auth-library';
 import { auth, db, dbV1 } from '../utils/firebaseAdmin';
 import { clientAuth } from '../utils/firebaseClient';
@@ -45,38 +44,6 @@ function hashAdminSecurityKey(key: string): string {
   return crypto.createHash('sha256').update(key).digest('hex');
 }
 
-async function findUserByEmail(email: string): Promise<DocumentSnapshot | null> {
-  let lookupError: unknown;
-
-  for (const firestore of [db, dbV1]) {
-    try {
-      const snapshot = await firestore.collection('Users').where('email', '==', email).limit(1).get();
-      if (!snapshot.empty) return snapshot.docs[0];
-    } catch (error) {
-      lookupError ??= error;
-    }
-  }
-
-  if (lookupError) throw lookupError;
-  return null;
-}
-
-async function findUserById(uid: string): Promise<DocumentSnapshot | null> {
-  let lookupError: unknown;
-
-  for (const firestore of [db, dbV1]) {
-    try {
-      const snapshot = await firestore.collection('Users').doc(uid).get();
-      if (snapshot.exists) return snapshot;
-    } catch (error) {
-      lookupError ??= error;
-    }
-  }
-
-  if (lookupError) throw lookupError;
-  return null;
-}
-
 /**
  * Register a new user in Firebase Auth and provision master identity and subtype profile in an atomic batch.
  */
@@ -97,7 +64,11 @@ export async function registerUserService(
   const cleanEmail = email.trim().toLowerCase();
 
   // 1. Check if email already exists in Firestore Users collection
-  if (await findUserByEmail(cleanEmail)) {
+  const existingUserSnap = await db.collection('Users').where('email', '==', cleanEmail).limit(1).get().catch(() => null);
+  const existingUserSnapV1 = (!existingUserSnap || existingUserSnap.empty)
+    ? await dbV1.collection('Users').where('email', '==', cleanEmail).limit(1).get().catch(() => null)
+    : null;
+  if ((existingUserSnap && !existingUserSnap.empty) || (existingUserSnapV1 && !existingUserSnapV1.empty)) {
     const err: any = new Error('Email already in use. Please log in using your existing credentials.');
     err.code = 'auth/email-already-in-use';
     err.status = 400;
@@ -391,9 +362,19 @@ export async function registerCoachService(data: Record<string, unknown>, file?:
  */
 export async function loginUserService(email: string, password: string) {
   const cleanEmail = (email || '').trim().toLowerCase();
-  let userDoc = await findUserByEmail(cleanEmail);
+
+  // Try primary db (v2) first, then fall back to v1 for Users
+  const getUserDoc = async (emailStr: string) => {
+    let q = await db.collection('Users').where('email', '==', emailStr).limit(1).get().catch(() => null);
+    if (q && !q.empty) return q.docs[0];
+    q = await dbV1.collection('Users').where('email', '==', emailStr).limit(1).get().catch(() => null);
+    if (q && !q.empty) return q.docs[0];
+    return null;
+  };
+
+  let userDoc = await getUserDoc(cleanEmail);
   if (!userDoc) {
-    userDoc = await findUserByEmail(email.trim());
+    userDoc = await getUserDoc(email.trim());
   }
 
   let uid = '';
@@ -413,9 +394,6 @@ export async function loginUserService(email: string, password: string) {
   } catch (err: any) {
     if (userDoc) {
       const userData = userDoc.data();
-      if (!userData) {
-        throw { code: 'USER_NOT_FOUND', message: 'User profile not found in Firestore.' };
-      }
       const storedPass = String(userData.password || '');
       const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
       const isMatch = storedPass && (
@@ -439,17 +417,18 @@ export async function loginUserService(email: string, password: string) {
   }
 
   if (!userDoc) {
-    userDoc = await findUserById(uid);
-    if (!userDoc) {
+    let docRef = await db.collection('Users').doc(uid).get().catch(() => null);
+    if (!docRef || !docRef.exists) {
+      docRef = await dbV1.collection('Users').doc(uid).get().catch(() => null);
+    }
+    if (!docRef || !docRef.exists) {
       throw { code: 'USER_NOT_FOUND', message: 'User profile not found in Firestore.' };
     }
+    userDoc = docRef as any;
   }
 
   const canonicalUid = userDoc!.id;
-  const userData = userDoc.data();
-  if (!userData) {
-    throw { code: 'USER_NOT_FOUND', message: 'User profile not found in Firestore.' };
-  }
+  const userData = (userDoc as any).data()!;
   const role = userData.role as UserRole;
   const token = generateToken(canonicalUid, userData.email, role);
 
@@ -1269,3 +1248,5 @@ export async function updateUserSettingsService(uid: string, payload: Record<str
   await batch.commit();
   return updated;
 }
+
+
