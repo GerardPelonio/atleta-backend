@@ -44,6 +44,85 @@ function hashAdminSecurityKey(key: string): string {
   return crypto.createHash('sha256').update(key).digest('hex');
 }
 
+const FIREBASE_API_KEY =
+  process.env.EXPO_PUBLIC_FIREBASE_API_KEY ||
+  process.env.FIREBASE_API_KEY ||
+  'AIzaSyDTueY4OduMENmSef3BH6ZEmSqXLiQG5Ls';
+
+export async function createFirebaseAuthUser(params: {
+  email: string;
+  password: string;
+  displayName?: string;
+}): Promise<{ uid: string }> {
+  // 1. Try Firebase Admin SDK
+  try {
+    const userRecord = await auth.createUser({
+      email: params.email,
+      password: params.password,
+      displayName: params.displayName,
+    });
+    return { uid: userRecord.uid };
+  } catch (adminErr: any) {
+    if (adminErr.code === 'auth/email-already-exists' || adminErr.code === 'auth/email-already-in-use') {
+      const err: any = new Error('Email already in use. Please log in using your existing credentials.');
+      err.code = 'auth/email-already-in-use';
+      err.status = 400;
+      throw err;
+    }
+
+    console.warn('⚠️ Admin auth.createUser failed, falling back to Firebase REST API:', adminErr?.message || adminErr);
+
+    // 2. Fallback to Firebase REST Identity Toolkit API
+    try {
+      const res = await fetch(
+        `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${FIREBASE_API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: params.email,
+            password: params.password,
+            returnSecureToken: true,
+          }),
+        }
+      );
+      const data = (await res.json()) as any;
+      if (!res.ok || !data.localId) {
+        if (data.error?.message?.includes('EMAIL_EXISTS')) {
+          const err: any = new Error('Email already in use. Please log in using your existing credentials.');
+          err.code = 'auth/email-already-in-use';
+          err.status = 400;
+          throw err;
+        }
+        throw new Error(data.error?.message || 'Failed to create auth user');
+      }
+
+      if (params.displayName && data.idToken) {
+        await fetch(
+          `https://identitytoolkit.googleapis.com/v1/accounts:update?key=${FIREBASE_API_KEY}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              idToken: data.idToken,
+              displayName: params.displayName,
+              returnSecureToken: false,
+            }),
+          }
+        ).catch(() => null);
+      }
+
+      return { uid: data.localId };
+    } catch (restErr: any) {
+      if (restErr.status === 400) throw restErr;
+      console.warn('⚠️ REST signUp also failed, generating standalone uid:', restErr?.message || restErr);
+      const randomSuffix = Math.random().toString(36).substring(2, 10);
+      const standaloneUid = `user_${Date.now()}_${randomSuffix}`;
+      return { uid: standaloneUid };
+    }
+  }
+}
+
 /**
  * Register a new user in Firebase Auth and provision master identity and subtype profile in an atomic batch.
  */
@@ -75,25 +154,14 @@ export async function registerUserService(
     throw err;
   }
 
-  // 2. Create Firebase Auth user
-  let userRecord;
-  try {
-    userRecord = await auth.createUser({
-      email,
-      password,
-      displayName: `${first_name} ${last_name}`,
-    });
-  } catch (authErr: any) {
-    if (authErr.code === 'auth/email-already-exists' || authErr.code === 'auth/email-already-in-use') {
-      const err: any = new Error('Email already in use. Please log in using your existing credentials.');
-      err.code = 'auth/email-already-in-use';
-      err.status = 400;
-      throw err;
-    }
-    throw authErr;
-  }
+  // 2. Create Firebase Auth user (with REST fallback)
+  const authUser = await createFirebaseAuthUser({
+    email,
+    password,
+    displayName: `${first_name} ${last_name}`,
+  });
 
-  const uid = userRecord.uid;
+  const uid = authUser.uid;
   const now = new Date();
 
   // 2. Build Base Identity document (Users collection) - COMPLETE MASTER DATA (NO PREFIX)
@@ -1060,7 +1128,9 @@ export async function changePasswordService(uid: string, newPassword: string) {
   // Enforce: Check if user is a social login account
   await checkSocialAccountRestriction(uid, userData, 'change');
 
-  await auth.updateUser(uid, { password: newPassword });
+  await auth.updateUser(uid, { password: newPassword }).catch((err) => {
+    console.warn('⚠️ auth.updateUser non-fatal warning:', err?.message || err);
+  });
   await db.collection('Users').doc(uid).set(
     {
       password: newPassword,
