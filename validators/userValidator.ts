@@ -218,12 +218,13 @@ export function validatePasswordResetConfirm(data: { token?: string; new_passwor
 /**
  * Validates change password request body.
  */
-export function validateChangePassword(data: { password?: string }): ValidationError[] {
+export function validateChangePassword(data: { password?: string; new_password?: string; newPassword?: string }): ValidationError[] {
   const errors: ValidationError[] = [];
+  const pwd = data.password || data.new_password || data.newPassword;
 
-  if (!data.password || data.password.length === 0) {
+  if (!pwd || pwd.trim().length === 0) {
     errors.push({ field: 'password', message: 'Password is required.' });
-  } else if (data.password.length < 6) {
+  } else if (pwd.length < 6) {
     errors.push({ field: 'password', message: 'Password must be at least 6 characters.' });
   }
 

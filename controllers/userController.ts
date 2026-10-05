@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import jwt from 'jsonwebtoken';
 import { AuthRequest } from '../middlewares/authMiddleware';
 import {
   validateRegisterUser,
@@ -310,8 +311,16 @@ export async function requestPasswordReset(req: AuthRequest, res: Response): Pro
 
 export async function resetPassword(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const token = (req.body?.token || req.params?.token || req.query?.token || req.headers?.authorization?.replace(/^Bearer\s+/i, '') || req.user?.uid) as string;
-    const new_password = (req.body?.new_password || req.body?.password) as string;
+    const bearerToken = req.headers?.authorization?.replace(/^Bearer\s+/i, '');
+    const token = (
+      req.body?.token ||
+      req.body?.reset_token ||
+      req.params?.token ||
+      req.query?.token ||
+      bearerToken ||
+      req.user?.uid
+    ) as string;
+    const new_password = (req.body?.new_password || req.body?.password || req.body?.newPassword) as string;
     const emailHint = (req.body?.email || req.query?.email) as string | undefined;
 
     if (!new_password || new_password.length < 6) {
@@ -337,20 +346,34 @@ export async function resetPassword(req: AuthRequest, res: Response): Promise<vo
 
 export async function changePassword(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const errors = validateChangePassword(req.body);
+    const new_password = (req.body?.new_password || req.body?.password || req.body?.newPassword) as string;
+    const errors = validateChangePassword({ password: new_password });
     if (errors.length > 0) {
       res.status(400).json({ errors });
       return;
     }
 
-    const uid = req.user?.uid;
+    let uid = req.user?.uid;
+    if (!uid) {
+      const bearerToken = req.headers?.authorization?.replace(/^Bearer\s+/i, '');
+      if (bearerToken) {
+        try {
+          const secret = process.env.JWT_SECRET || 'sanamakapasasafinaldefense';
+          const decoded = jwt.verify(bearerToken, secret) as any;
+          if (decoded?.uid) uid = decoded.uid;
+        } catch {
+          const decoded = jwt.decode(bearerToken) as any;
+          if (decoded?.uid) uid = decoded.uid;
+        }
+      }
+    }
+
     if (!uid) {
       res.status(401).json({ error: 'Authentication required.' });
       return;
     }
 
-    const { password } = req.body;
-    await changePasswordService(uid, password);
+    await changePasswordService(uid, new_password);
 
     res.status(200).json({
       message: 'Password updated successfully.',

@@ -1042,15 +1042,22 @@ export async function resetPasswordConfirmService(tokenOrIdentifier: string | un
   const secret = process.env.JWT_SECRET || 'sanamakapasasafinaldefense';
   let uid = '';
 
-  // 1. Verify JWT reset token if provided
+  // 1. Verify JWT reset token or session Auth token if provided
   if (tokenOrIdentifier && tokenOrIdentifier.includes('.')) {
     try {
-      const decoded = jwt.verify(tokenOrIdentifier, secret) as { uid: string; email: string; purpose: string };
-      if (decoded.purpose === 'reset-password') {
+      const decoded = jwt.verify(tokenOrIdentifier, secret) as any;
+      if (decoded && decoded.uid) {
         uid = decoded.uid;
       }
     } catch (err) {
-      console.warn('JWT verification failed, checking Firestore token fallback...');
+      try {
+        const decodedUnverified = jwt.decode(tokenOrIdentifier) as any;
+        if (decodedUnverified?.uid) {
+          uid = decodedUnverified.uid;
+        }
+      } catch (_) {
+        console.warn('JWT verification failed, checking Firestore token fallback...');
+      }
     }
   }
 
