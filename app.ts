@@ -55,11 +55,14 @@ app.get(['/', '/api', '/api/v1'], (req: Request, res: Response) => {
 });
 
 
+import { db } from './utils/firebaseAdmin';
+
 app.get(['/health', '/api/health', '/api/v1/health'], (req: Request, res: Response) => {
   res.status(200).json({
     success: true,
     uptime: process.uptime(),
     status: 'healthy',
+    project_id: (db as any).projectId || 'atleta-v1',
     timestamp: new Date().toISOString(),
   });
 });
