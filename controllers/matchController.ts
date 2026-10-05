@@ -144,6 +144,45 @@ function extractFile(req: any): Express.Multer.File | undefined {
       }
     }
   }
+
+  // Support JSON payload with base64 string or csv text
+  const base64Str = req.body?.base64 || req.body?.image || req.body?.file || req.body?.data || req.body?.scoresheet;
+  if (typeof base64Str === 'string' && base64Str.trim().length > 0) {
+    let cleanBase64 = base64Str.trim();
+    let mimeType = req.body?.mimetype || req.body?.mime_type || 'image/jpeg';
+    if (cleanBase64.startsWith('data:')) {
+      const match = cleanBase64.match(/^data:([^;]+);base64,(.+)$/);
+      if (match) {
+        mimeType = match[1];
+        cleanBase64 = match[2];
+      }
+    }
+    try {
+      const buffer = Buffer.from(cleanBase64, 'base64');
+      return {
+        fieldname: 'file',
+        originalname: req.body?.filename || req.body?.file_name || 'scoresheet.jpg',
+        encoding: '7bit',
+        mimetype: mimeType,
+        buffer,
+        size: buffer.length,
+      } as Express.Multer.File;
+    } catch {}
+  }
+
+  // Support CSV string in body
+  if (typeof req.body?.csv === 'string' && req.body.csv.trim().length > 0) {
+    const buffer = Buffer.from(req.body.csv, 'utf-8');
+    return {
+      fieldname: 'file',
+      originalname: req.body?.filename || 'scoresheet.csv',
+      encoding: '7bit',
+      mimetype: 'text/csv',
+      buffer,
+      size: buffer.length,
+    } as Express.Multer.File;
+  }
+
   return undefined;
 }
 

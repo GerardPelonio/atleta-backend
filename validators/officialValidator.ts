@@ -65,5 +65,29 @@ export function validateUpdateOfficialSettings(data: Record<string, unknown>): V
     }
   }
 
+  if (data.audit_notifications !== undefined) {
+    if (typeof data.audit_notifications !== 'boolean') {
+      errors.push({ field: 'audit_notifications', message: 'audit_notifications must be a boolean.' });
+    }
+  }
+
+  if (data.auto_refresh !== undefined) {
+    if (typeof data.auto_refresh !== 'boolean') {
+      errors.push({ field: 'auto_refresh', message: 'auto_refresh must be a boolean.' });
+    }
+  }
+
+  if (data.autoRefreshMatchQueue !== undefined) {
+    if (typeof data.autoRefreshMatchQueue !== 'boolean') {
+      errors.push({ field: 'autoRefreshMatchQueue', message: 'autoRefreshMatchQueue must be a boolean.' });
+    }
+  }
+
+  if (data.autoRefresh !== undefined) {
+    if (typeof data.autoRefresh !== 'boolean') {
+      errors.push({ field: 'autoRefresh', message: 'autoRefresh must be a boolean.' });
+    }
+  }
+
   return errors;
 }

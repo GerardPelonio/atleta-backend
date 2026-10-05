@@ -20,6 +20,14 @@ export interface CoachPublicProfile {
   avatar_url?: string | null;
   team_id?: string | null;
   teams_managed?: string[];
+  certifications?: any[];
+  credentials?: any[];
+  uploaded_documents?: any[];
+  metric_logs?: number;
+  system_statistics?: {
+    total_athletes: number;
+    metric_logs: number;
+  };
 }
 
 // ─── Scouting Registry / Inquiry Entity ─────────────────────────────────────

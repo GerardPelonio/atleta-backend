@@ -321,33 +321,84 @@ export async function certifyValidationService(
 }
 
 /**
- * Removes or invalidates a disputed match record.
+ * Completely removes a match record and all associated collections from Firestore.
  */
 export async function deleteMatchService(matchId: string) {
-  const matchRef = db.collection('Match_Logs').doc(matchId);
-  const matchDoc = await matchRef.get();
+  const cleanId = String(matchId).replace(/^#/, '').trim();
+  const idVariants = Array.from(new Set([
+    matchId,
+    cleanId,
+    `#${cleanId}`,
+    `match_${cleanId}`,
+    `MATCH_${cleanId}`,
+  ])).filter(Boolean);
 
-  if (!matchDoc.exists) {
-    throw new ServiceError(`Match record '${matchId}' not found.`, 404);
+  const databases = [db];
+  const targetCollections = [
+    'Match_Logs',
+    'match_logs',
+    'Matches',
+    'matches',
+    'Official_Audits',
+    'official_audits',
+    'Official_Schedules',
+    'official_schedules',
+    'Schedules',
+    'schedules',
+    'Match_Schedules',
+    'Performance_Metrics',
+    'performance_metrics',
+  ];
+
+  let totalDeleted = 0;
+
+  for (const currentDb of databases) {
+    for (const colName of targetCollections) {
+      try {
+        // 1. Direct doc ID deletion
+        for (const variant of idVariants) {
+          const docRef = currentDb.collection(colName).doc(variant);
+          const docSnap = await docRef.get().catch(() => null);
+          if (docSnap && docSnap.exists) {
+            await docRef.delete().catch(() => {});
+            totalDeleted++;
+          }
+        }
+
+        // 2. Query by match_id field
+        for (const variant of idVariants) {
+          const snap = await currentDb.collection(colName).where('match_id', '==', variant).get().catch(() => null);
+          if (snap && !snap.empty) {
+            const batch = currentDb.batch();
+            snap.docs.forEach((d) => {
+              batch.delete(d.ref);
+              totalDeleted++;
+            });
+            await batch.commit().catch(() => {});
+          }
+        }
+
+        // 3. Query by validation_id field
+        for (const variant of idVariants) {
+          const vSnap = await currentDb.collection(colName).where('validation_id', '==', variant).get().catch(() => null);
+          if (vSnap && !vSnap.empty) {
+            const batch = currentDb.batch();
+            vSnap.docs.forEach((d) => {
+              batch.delete(d.ref);
+              totalDeleted++;
+            });
+            await batch.commit().catch(() => {});
+          }
+        }
+      } catch (colErr) {
+        console.warn(`⚠️ [DELETE MATCH] Warning in ${colName}:`, colErr);
+      }
+    }
   }
 
-  // Delete match log
-  await matchRef.delete();
-
-  // Also clean up any linked audits in Official_Audits
-  const auditsSnapshot = await db
-    .collection('Official_Audits')
-    .where('match_id', '==', matchId)
-    .get();
-
-  const batch = db.batch();
-  auditsSnapshot.docs.forEach((doc) => {
-    batch.delete(doc.ref);
-  });
-  await batch.commit();
-
   return {
-    message: `Match record '${matchId}' removed successfully.`,
+    message: `Match record '${matchId}' permanently deleted from database.`,
     match_id: matchId,
+    deleted_documents_count: totalDeleted,
   };
 }

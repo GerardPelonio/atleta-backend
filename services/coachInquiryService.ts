@@ -93,10 +93,15 @@ export async function getPublicCoachProfile(coachId: string): Promise<CoachPubli
   let nationalLeague = coachData.national_sports_league || null;
   let quote = coachData.quote || null;
   let experience = Number(coachData.years_of_experience || coachData.years_experience || 0);
+  let credentials = coachData.credentials || coachData.certifications || [];
+  let uploadedDocuments = coachData.uploaded_documents || [];
+  let professionalDocuments = coachData.professional_documents || [];
+  let sportType = coachData.sport_type || '';
+  let avatarUrl = coachData.avatar_url || coachData.profile_image || null;
 
   const lookupIds = [coachData.user_id, rawUid, canonicalCoachId, coachId].filter(Boolean) as string[];
   for (const uid of lookupIds) {
-    if (fullName && firstName && email && institution && regionalAffiliation && nationalLeague) break;
+    if (fullName && firstName && email && institution && regionalAffiliation && nationalLeague && avatarUrl && sportType) break;
     const userDoc = await db.collection('Users').doc(uid).get();
     if (userDoc.exists) {
       const u = userDoc.data()!;
@@ -110,6 +115,17 @@ export async function getPublicCoachProfile(coachId: string): Promise<CoachPubli
       nationalLeague = nationalLeague || u.national_sports_league || null;
       quote = quote || u.quote || null;
       experience = experience || Number(u.years_of_experience || u.years_experience || 0);
+      avatarUrl = avatarUrl || u.avatar_url || u.profile_image || null;
+      sportType = sportType || u.sport_type || '';
+      if (!credentials.length && (u.credentials || u.certifications)) {
+        credentials = u.credentials || u.certifications || [];
+      }
+      if (!uploadedDocuments.length && u.uploaded_documents) {
+        uploadedDocuments = u.uploaded_documents || [];
+      }
+      if (!professionalDocuments.length && u.professional_documents) {
+        professionalDocuments = u.professional_documents || [];
+      }
     }
   }
 
@@ -121,8 +137,42 @@ export async function getPublicCoachProfile(coachId: string): Promise<CoachPubli
     }
   }
 
+  // Dynamically compute live statistics directly from Firestore
+  let totalAthletes = Array.isArray(coachData.athletes_managed) ? coachData.athletes_managed.length : Array.isArray(coachData.athlete_managed) ? coachData.athlete_managed.length : 0;
+  let totalMatches = Number(coachData.total_matches_logged || coachData.matches_logged || coachData.metric_logs || 0);
+
+  try {
+    const teamsSnap = await db.collection('Teams')
+      .where('coach_id', 'in', [canonicalCoachId, rawUid, coachId])
+      .get();
+    if (!teamsSnap.empty) {
+      const athleteIds = new Set<string>();
+      teamsSnap.forEach((tDoc) => {
+        const tData = tDoc.data();
+        if (Array.isArray(tData.roster_list)) {
+          tData.roster_list.forEach((r: any) => {
+            const id = r.athlete_id || r.user_id;
+            if (id) athleteIds.add(id);
+          });
+        }
+      });
+      if (athleteIds.size > 0) {
+        totalAthletes = Math.max(totalAthletes, athleteIds.size);
+      }
+    }
+  } catch {}
+
+  try {
+    const matchesSnap = await db.collection('Matches')
+      .where('coach_id', 'in', [canonicalCoachId, rawUid, coachId])
+      .get();
+    if (!matchesSnap.empty) {
+      totalMatches = Math.max(totalMatches, matchesSnap.size);
+    }
+  } catch {}
+
   const profile: CoachPublicProfile = {
-    coach_id: coachData.coach_id || coachId,
+    coach_id: coachData.coach_id || canonicalCoachId || coachId,
     user_id: coachData.user_id || rawUid,
     first_name: firstName,
     last_name: lastName,
@@ -136,15 +186,31 @@ export async function getPublicCoachProfile(coachId: string): Promise<CoachPubli
     quote: quote,
     specialties: coachData.specialties || coachData.core_specialties || [],
     success_rate: coachData.success_rate || null,
-    professional_documents: coachData.professional_documents || [],
-    sport_type: coachData.sport_type || 'Basketball',
-    avatar_url: coachData.avatar_url || null,
+    professional_documents: professionalDocuments,
+    sport_type: sportType || 'Basketball',
+    avatar_url: avatarUrl,
     team_id: coachData.team_id || null,
     teams_managed: coachData.teams_managed || [],
+    certifications: credentials,
+    credentials: credentials,
+    uploaded_documents: uploadedDocuments,
+    metric_logs: totalMatches,
+    system_statistics: {
+      total_athletes: totalAthletes,
+      metric_logs: totalMatches,
+    },
   };
 
-  coachProfileCache.set(coachId, { data: profile, expiry: Date.now() + CACHE_TTL_MS });
+  coachProfileCache.set(coachId, { data: profile, expiry: Date.now() + 15000 }); // 15s microcache
   return profile;
+}
+
+export function invalidateCoachProfileCache(coachId: string) {
+  const rawUid = coachId.replace(/^coach_/, '');
+  const canonicalCoachId = coachId.startsWith('coach_') ? coachId : `coach_${coachId}`;
+  coachProfileCache.delete(coachId);
+  coachProfileCache.delete(rawUid);
+  coachProfileCache.delete(canonicalCoachId);
 }
 
 /**

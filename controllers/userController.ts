@@ -14,6 +14,7 @@ import {
   loginUserService,
   getUserProfileService,
   updateUserProfileService,
+  uploadUserAvatarService,
   getUserSettingsService,
   updateUserSettingsService,
   requestPasswordResetService,
@@ -208,6 +209,42 @@ export async function updateUserProfileHandler(req: AuthRequest, res: Response):
       return;
     }
     console.error('updateUserProfileHandler error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function uploadAvatarHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const uid = req.user?.uid || (req.body?.user_id as string) || (req.params?.userId as string);
+    if (!uid) {
+      res.status(401).json({ error: 'Authentication required.' });
+      return;
+    }
+
+    const file = (req as any).file || (Array.isArray((req as any).files) ? (req as any).files[0] : undefined);
+    const dataUrl = req.body?.avatar_url || req.body?.profile_image || req.body?.avatar || req.body?.image;
+
+    const target = file || dataUrl;
+    if (!target) {
+      res.status(400).json({ error: 'Image file or avatar_url is required.' });
+      return;
+    }
+
+    const updated = await uploadUserAvatarService(uid, target);
+    const finalAvatar = (updated as any).avatar_url || (updated as any).user?.avatar_url || (updated as any).profile?.avatar_url || (typeof target === 'string' ? target : '');
+    res.status(200).json({
+      message: 'Avatar uploaded successfully.',
+      avatar_url: finalAvatar,
+      profile_image: finalAvatar,
+      user: updated.user,
+      profile: updated.profile,
+    });
+  } catch (error: any) {
+    if (error.code === 'USER_NOT_FOUND') {
+      res.status(404).json({ error: error.message });
+      return;
+    }
+    console.error('uploadAvatarHandler error:', error);
     res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
   }
 }

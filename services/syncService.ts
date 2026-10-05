@@ -267,16 +267,20 @@ export async function processCoachOfflineBatchService(
 
         case 'REQUEST_AUDIT': {
           const p = tx.payload;
-          const validationId = `val_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+          const auditId = `val_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
           const auditReq = {
-            validation_id: validationId,
+            audit_id: auditId,
+            validation_id: auditId,
             match_id: p.match_id,
             requested_by_coach_id: coachId,
+            requested_by: coachId,
             verification_status: 'Pending',
+            status: 'Pending',
             created_at: now,
+            requested_at: now,
             synced_offline: true,
           };
-          await db.collection('Official_Validations').doc(validationId).set(auditReq, { merge: true });
+          await db.collection('Official_Audits').doc(auditId).set(auditReq, { merge: true });
           serverResult = auditReq;
           break;
         }

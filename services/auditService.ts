@@ -69,10 +69,8 @@ export async function submitAuditRequest(
 
   const batch = db.batch();
   const auditRef = db.collection('Official_Audits').doc(auditId);
-  const validationRef = db.collection('Official_Validations').doc(auditId);
 
   batch.set(auditRef, auditData);
-  batch.set(validationRef, auditData);
   batch.update(matchRef, {
     audit_status: 'Pending',
     verification_status: 'Pending',

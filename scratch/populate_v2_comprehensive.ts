@@ -547,8 +547,7 @@ async function populateV2() {
   console.log('Writing Sports Configurations...');
   const sports = [
     {
-      sport_id: 'sport_basketball_default',
-      canonical_id: 'sport_basketball',
+      sport_id: 'sport_basketball',
       sport_name: 'Basketball',
       short_identifier: 'BASKETBALL',
       category: 'Team',
@@ -568,8 +567,7 @@ async function populateV2() {
       updated_at: now,
     },
     {
-      sport_id: 'sport_swimming_default',
-      canonical_id: 'sport_swimming',
+      sport_id: 'sport_swimming',
       sport_name: 'Swimming',
       short_identifier: 'SWIMMING',
       category: 'Individual',
@@ -585,8 +583,7 @@ async function populateV2() {
       updated_at: now,
     },
     {
-      sport_id: 'sport_track_field_default',
-      canonical_id: 'sport_track_field',
+      sport_id: 'sport_track_field',
       sport_name: 'Track & Field',
       short_identifier: 'TF',
       category: 'Individual',
@@ -601,8 +598,7 @@ async function populateV2() {
       updated_at: now,
     },
     {
-      sport_id: 'sport_volleyball_default',
-      canonical_id: 'sport_volleyball',
+      sport_id: 'sport_volleyball',
       sport_name: 'Volleyball',
       short_identifier: 'VOLLEYBALL',
       category: 'Team',
@@ -620,8 +616,7 @@ async function populateV2() {
       updated_at: now,
     },
     {
-      sport_id: 'sport_pickleball_default',
-      canonical_id: 'sport_pickleball',
+      sport_id: 'sport_pickleball',
       sport_name: 'Pickleball',
       short_identifier: 'PICKLEBALL',
       category: 'Individual',
@@ -641,10 +636,10 @@ async function populateV2() {
   const batch6 = db.batch();
   for (const s of sports) {
     batch6.set(db.collection('Sports_Configurations').doc(s.sport_id), s, { merge: true });
-    batch6.set(db.collection('Sports_Configurations').doc(s.canonical_id), { ...s, sport_id: s.canonical_id }, { merge: true });
+    batch6.set(db.collection('sports_configurations').doc(s.sport_id), s, { merge: true });
   }
   await batch6.commit();
-  console.log('✅ Sports_Configurations collection populated.');
+  console.log('✅ Sports_Configurations collection populated without _default.');
 
   // 7. TEAMS
   console.log('Writing Teams...');

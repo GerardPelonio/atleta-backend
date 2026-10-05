@@ -9,6 +9,7 @@ import {
   socialLogin,
   getMe,
   updateUserProfileHandler,
+  uploadAvatarHandler,
   getUserSettingsHandler,
   updateUserSettingsHandler,
   requestPasswordReset,
@@ -43,13 +44,17 @@ router.post('/google-login', socialLogin as any);
 router.post('/facebook-login', socialLogin as any);
 router.post('/social-login', socialLogin as any);
 
-// User Profile & Settings
+// User Profile, Avatar & Settings
 router.get('/profile', authenticate, getMe);
 router.get('/me', authenticate, getMe);
 router.patch('/profile', authenticate, updateUserProfileHandler);
 router.put('/profile', authenticate, updateUserProfileHandler);
 router.patch('/me', authenticate, updateUserProfileHandler);
 router.put('/me', authenticate, updateUserProfileHandler);
+router.post('/avatar', authenticate, upload.any(), uploadAvatarHandler);
+router.post('/profile/avatar', authenticate, upload.any(), uploadAvatarHandler);
+router.patch('/avatar', authenticate, upload.any(), uploadAvatarHandler);
+router.put('/avatar', authenticate, upload.any(), uploadAvatarHandler);
 
 router.get('/settings', authenticate, getUserSettingsHandler);
 router.get('/me/settings', authenticate, getUserSettingsHandler);

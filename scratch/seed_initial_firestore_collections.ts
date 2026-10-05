@@ -306,8 +306,8 @@ async function seedCollections() {
   console.log(' ✅ Seeded: Tournament_Registry');
 
   // 18. Sports_Configurations
-  await db.collection('Sports_Configurations').doc('sport_basketball_default').set({
-    sport_id: 'sport_basketball_default',
+  await db.collection('Sports_Configurations').doc('sport_basketball').set({
+    sport_id: 'sport_basketball',
     sport_name: 'Basketball',
     short_identifier: 'BBALL',
     is_active: true,
@@ -315,8 +315,8 @@ async function seedCollections() {
     updated_at: now,
   });
 
-  await db.collection('Sports_Configurations').doc('sport_swimming_default').set({
-    sport_id: 'sport_swimming_default',
+  await db.collection('Sports_Configurations').doc('sport_swimming').set({
+    sport_id: 'sport_swimming',
     sport_name: 'Swimming',
     short_identifier: 'SWIM',
     is_active: true,
@@ -324,8 +324,8 @@ async function seedCollections() {
     updated_at: now,
   });
 
-  await db.collection('Sports_Configurations').doc('sport_track_field_default').set({
-    sport_id: 'sport_track_field_default',
+  await db.collection('Sports_Configurations').doc('sport_track_field').set({
+    sport_id: 'sport_track_field',
     sport_name: 'Track & Field',
     short_identifier: 'TF',
     is_active: true,

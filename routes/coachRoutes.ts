@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { authenticate, requireCoach } from '../middlewares/authMiddleware';
 import { authRateLimiter } from '../middlewares/rateLimitMiddleware';
-import { registerCoach, loginUser } from '../controllers/userController';
+import { registerCoach, loginUser, uploadAvatarHandler } from '../controllers/userController';
 import {
   getCoachProfileHandler,
   getCoachSettingsHandler,
@@ -41,11 +41,15 @@ router.patch('/settings', authenticate, updateCoachSettingsHandler);
 router.put('/me/settings', authenticate, updateCoachSettingsHandler);
 router.put('/settings', authenticate, updateCoachSettingsHandler);
 
-// Coach Profile Update
+// Coach Profile Update & Avatar Upload
 router.patch('/me/profile', authenticate, updateCoachProfileHandler);
 router.patch('/profile', authenticate, updateCoachProfileHandler);
 router.put('/me/profile', authenticate, updateCoachProfileHandler);
 router.put('/profile', authenticate, updateCoachProfileHandler);
+router.post('/me/avatar', authenticate, upload.any(), uploadAvatarHandler);
+router.post('/profile/avatar', authenticate, upload.any(), uploadAvatarHandler);
+router.post('/avatar', authenticate, upload.any(), uploadAvatarHandler);
+router.patch('/avatar', authenticate, upload.any(), uploadAvatarHandler);
 
 // Coach Password Change
 router.patch('/me/password', authenticate, changeCoachPasswordHandler);

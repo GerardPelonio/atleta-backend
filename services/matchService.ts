@@ -471,7 +471,7 @@ export async function submitMatchSession(
   return responsePayload;
 }
 
-function extractJsonFromAiText(content: string): any {
+export function extractJsonFromAiText(content: string): any {
   let clean = content.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
 
   // Extract outer-most object if surrounded by markdown or commentary
@@ -557,21 +557,18 @@ function extractJsonFromAiText(content: string): any {
 }
 
 const OCR_MODEL_WATERFALL = [
-  'gemini-2.5-flash',
-  'gemini-1.5-flash',
-  'gemini-flash-latest',
-  'gemini-2.5-pro',
-  'gemini-1.5-pro',
-  'gemini-pro-latest',
+  'gemini-flash-lite-latest',
   'gemini-3.5-flash-lite',
   'gemini-3.5-flash',
+  'gemini-flash-latest',
+  'gemini-pro-latest',
 ];
 
 const DEFAULT_OCR_KEY = Buffer.from('QVEuQWI4Uk42S0c2TERYSVVJMERoc2xRNHlTTm9VdzRqZDlkSzVmaXBDeTlFaFZENmQ0b3c=', 'base64').toString('utf-8');
 
 /**
  * Universal normalization helper for any athlete stat row extracted by AI Vision OCR.
- * Resolves all synonyms, abbreviations, tally marks, and calculated totals.
+ * Resolves all synonyms, abbreviations, tally marks, and calculated totals across all sports.
  */
 export function normalizeExtractedPlayer(item: any, idx: number, matchId?: string, defaultTeam?: string) {
   const jerseyNum = Number(
@@ -584,12 +581,12 @@ export function normalizeExtractedPlayer(item: any, idx: number, matchId?: strin
     item.player_name ?? item.name ?? item.athlete_name ?? item.player ?? item.full_name ?? `Player #${jerseyNum}`
   ).trim();
 
-  // Field Goals (2-Point / General FG)
+  // Basketball: Field Goals (2-Point / General FG)
   const fgMade = Number(item.fg_made ?? item.fgm ?? item.two_made ?? item.two_pm ?? item['2pm'] ?? item['2p'] ?? item.fg ?? item['2fgm'] ?? 0);
   const rawFgAtt = Number(item.fg_attempted ?? item.fga ?? item.two_attempted ?? item.two_pa ?? item['2pa'] ?? item['2fga'] ?? 0);
   const fgAttempted = rawFgAtt > 0 ? rawFgAtt : fgMade;
 
-  // 3-Pointers
+  // Basketball: 3-Pointers
   const threeMade = Number(
     item.three_made ?? item.three_pt_made ?? item.three_pointers_made ?? item.three_pm ??
     item['3pm'] ?? item['3pt'] ?? item['3p'] ?? item.threepm ?? item['3fgm'] ?? 0
@@ -599,18 +596,12 @@ export function normalizeExtractedPlayer(item: any, idx: number, matchId?: strin
   );
   const threeAttempted = rawThreeAtt > 0 ? rawThreeAtt : threeMade;
 
-  // Free Throws
+  // Basketball: Free Throws
   const ftMade = Number(item.ft_made ?? item.ftm ?? item.free_throws_made ?? item.ft ?? 0);
   const rawFtAtt = Number(item.ft_attempted ?? item.fta ?? item.free_throws_attempted ?? 0);
   const ftAttempted = rawFtAtt > 0 ? rawFtAtt : ftMade;
 
-  // Points derivation: If not specified or 0, compute from components: (2PM * 2) + (3PM * 3) + FTM
-  let points = Number(item.points ?? item.pts ?? item.total_points ?? item.score ?? item.p ?? 0);
-  if (points === 0 && (fgMade > 0 || threeMade > 0 || ftMade > 0)) {
-    points = (fgMade * 2) + (threeMade * 3) + ftMade;
-  }
-
-  // Rebounds derivation
+  // Basketball: Rebounds
   const oReb = Number(item.offensive_rebounds ?? item.oreb ?? item.orb ?? item.off_reb ?? 0);
   const dReb = Number(item.defensive_rebounds ?? item.dreb ?? item.drb ?? item.def_reb ?? 0);
   let rebounds = Number(item.rebounds ?? item.reb ?? item.total_rebounds ?? item.rebs ?? item.trb ?? (oReb + dReb));
@@ -618,33 +609,104 @@ export function normalizeExtractedPlayer(item: any, idx: number, matchId?: strin
     rebounds = oReb + dReb;
   }
 
-  // Playmaking & Defense
-  const assists = Number(item.assists ?? item.ast ?? item.ast_count ?? item.a ?? 0);
-  const steals = Number(item.steals ?? item.stl ?? item.stls ?? item.s ?? 0);
-  const blocks = Number(item.blocks ?? item.blk ?? item.blks ?? item.b ?? 0);
-  const turnovers = Number(item.turnovers ?? item.to ?? item.tov ?? item.turnover ?? item.t_o ?? 0);
-  const fouls = Number(item.fouls ?? item.pf ?? item.personal_fouls ?? item.f ?? item.foul ?? 0);
-  const minutes = Number(item.minutes ?? item.min ?? item.minutes_played ?? item.mins ?? item.mp ?? 0);
-
   // Volleyball Stats
-  const kills = Number(item.kills ?? item.spike_kills ?? item.attack_kills ?? item.k ?? 0);
-  const blockPoints = Number(item.block_points ?? item.blocks ?? item.blk ?? 0);
-  const digs = Number(item.digs ?? item.dig ?? item.d ?? 0);
-  const serviceAces = Number(item.service_aces ?? item.aces ?? item.ace ?? item.sa ?? 0);
-  const attackErrors = Number(item.attack_errors ?? item.att_err ?? item.ae ?? 0);
-  const serviceErrors = Number(item.service_errors ?? item.serv_err ?? item.se ?? 0);
+  const kills = Number(item.kills ?? item.kill ?? item.spike_kills ?? item.attack_kills ?? item.k ?? 0);
+  const attackErrors = Number(item.attack_errors ?? item.att_err ?? item.ae ?? item.e ?? item.errors ?? 0);
+  const rawAttAttempts = Number(item.attack_attempts ?? item.total_attacks ?? item.ta ?? item.att ?? item.attempts ?? 0);
+  const attackAttempts = rawAttAttempts > 0 ? rawAttAttempts : (kills + attackErrors);
+  const assistsVolleyball = Number(item.assists ?? item.ast ?? item.sets ?? item.a ?? item.ast_count ?? 0);
+  const serviceAces = Number(item.service_aces ?? item.aces ?? item.ace ?? item.sa ?? item.service_ace ?? 0);
+  const serviceErrors = Number(item.service_errors ?? item.serv_err ?? item.se ?? item.ser_err ?? item.s_err ?? 0);
+  const receptionErrors = Number(item.reception_errors ?? item.rec_err ?? item.re ?? 0);
+  const digs = Number(item.digs ?? item.dig ?? item.d ?? item.dig_count ?? 0);
+  const blockSolo = Number(item.block_solos ?? item.block_solo ?? item.bs ?? item.solo_blocks ?? 0);
+  const blockAssist = Number(item.block_assists ?? item.block_assist ?? item.ba ?? item.assisted_blocks ?? 0);
+  let blockPoints = Number(item.block_points ?? item.blocks ?? item.blk ?? item.total_blocks ?? item.tb ?? (blockSolo + blockAssist));
+  if (blockPoints === 0 && (blockSolo > 0 || blockAssist > 0)) {
+    blockPoints = blockSolo + blockAssist;
+  }
+  const setsPlayed = Number(item.sets_played ?? item.sp ?? item.gp ?? item.sets ?? 0);
+  const hittingPct = attackAttempts > 0 ? Number((((kills - attackErrors) / attackAttempts) * 100).toFixed(1)) : 0;
+
+  // Soccer / Football Stats
+  const goals = Number(item.goals ?? item.goal ?? item.g ?? 0);
+  const soccerAssists = Number(item.assists ?? item.ast ?? item.a ?? 0);
+  const shots = Number(item.shots ?? item.sh ?? item.total_shots ?? 0);
+  const shotsOnTarget = Number(item.shots_on_target ?? item.sog ?? item.sot ?? item.shots_on_goal ?? 0);
+  const foulsCommitted = Number(item.fouls_committed ?? item.fouls ?? item.fc ?? item.f ?? 0);
+  const foulsSuffered = Number(item.fouls_suffered ?? item.fs ?? 0);
+  const yellowCards = Number(item.yellow_cards ?? item.yc ?? item.yellow ?? 0);
+  const redCards = Number(item.red_cards ?? item.rc ?? item.red ?? 0);
+  const saves = Number(item.saves ?? item.save ?? item.sv ?? item.gk_saves ?? 0);
+  const tackles = Number(item.tackles ?? item.tkl ?? item.tc ?? 0);
+  const offsides = Number(item.offsides ?? item.off ?? 0);
 
   // Badminton / Racket Stats
-  const smashWinners = Number(item.smash_winners ?? item.smashes ?? 0);
-  const netKills = Number(item.net_kills ?? item.net_shots ?? 0);
-  const unforcedErrors = Number(item.unforced_errors ?? item.errors ?? 0);
-  const serviceFaults = Number(item.service_faults ?? item.faults ?? 0);
+  const smashWinners = Number(item.smash_winners ?? item.smashes ?? item.smash ?? 0);
+  const netKills = Number(item.net_kills ?? item.net_shots ?? item.drops ?? 0);
+  const unforcedErrors = Number(item.unforced_errors ?? item.errors ?? item.ue ?? 0);
+  const serviceFaults = Number(item.service_faults ?? item.faults ?? item.fa ?? 0);
+  const gamesWon = Number(item.games_won ?? item.sets_won ?? item.games ?? 0);
 
-  // Timed / Individual Stats
-  const finishTime = item.finish_time ?? item.time ?? item.best_time ?? item.mark ?? '';
-  const splitTime = item.split_time ?? item.split ?? item.split_1 ?? '';
-  const pace = item.pace ?? item.avg_pace ?? '';
-  const distanceM = Number(item.distance_m ?? item.distance ?? item.top_distance ?? 0);
+  // Timed / Individual Stats (Swimming / Track & Field)
+  const eventName = String(item.event ?? item.event_name ?? item.discipline ?? item.race ?? item.stroke ?? '').trim();
+  const finishTime = String(item.finish_time ?? item.time ?? item.final_time ?? item.mark ?? item.result ?? item.best_time ?? '').trim();
+  const splitTime = String(item.split_time ?? item.split ?? item.split_1 ?? item.split_times ?? '').trim();
+  const split2 = String(item.split_2 ?? item.split_second ?? '').trim();
+  const seedTime = String(item.seed_time ?? item.seed ?? item.entry_time ?? '').trim();
+  const pace = String(item.pace ?? item.avg_pace ?? '').trim();
+  const distanceM = Number(item.distance_m ?? item.distance ?? item.top_distance ?? item.dist ?? 0);
+  const strokeCount = Number(item.stroke_count ?? item.strokes ?? 0);
+  const heat = Number(item.heat ?? item.flight ?? 1);
+  const lane = Number(item.lane ?? item.order ?? 1);
+  const rank = Number(item.rank ?? item.place ?? item.pos ?? item.pl ?? (idx + 1));
+
+  // Baseball / Softball Stats
+  const atBats = Number(item.at_bats ?? item.ab ?? 0);
+  const runs = Number(item.runs ?? item.r ?? 0);
+  const hits = Number(item.hits ?? item.h ?? 0);
+  const rbi = Number(item.rbi ?? item.rbis ?? 0);
+  const homeRuns = Number(item.home_runs ?? item.hr ?? 0);
+  const walks = Number(item.walks ?? item.bb ?? 0);
+  const strikeouts = Number(item.strikeouts ?? item.so ?? item.k ?? 0);
+  const inningsPitched = Number(item.innings_pitched ?? item.ip ?? 0);
+  const earnedRuns = Number(item.earned_runs ?? item.er ?? 0);
+
+  // Common Playmaking & Defense
+  const assists = Number(item.assists ?? item.ast ?? item.ast_count ?? item.a ?? soccerAssists ?? assistsVolleyball ?? 0);
+  const steals = Number(item.steals ?? item.stl ?? item.stls ?? item.s ?? tackles ?? 0);
+  const blocks = Number(item.blocks ?? item.blk ?? item.blks ?? item.b ?? blockPoints ?? 0);
+  const rawErrors = (attackErrors + serviceErrors + receptionErrors) > 0
+    ? (attackErrors + serviceErrors + receptionErrors)
+    : (unforcedErrors + serviceFaults);
+  const turnovers = Number(item.turnovers ?? item.to ?? item.tov ?? item.turnover ?? item.t_o ?? rawErrors);
+  const fouls = Number(item.fouls ?? item.pf ?? item.personal_fouls ?? item.f ?? item.foul ?? foulsCommitted ?? 0);
+  const minutes = Number(item.minutes ?? item.min ?? item.minutes_played ?? item.mins ?? item.mp ?? 0);
+
+  // Multi-Sport Universal Points Derivation
+  let points = Number(item.points ?? item.pts ?? item.total_points ?? item.score ?? item.p ?? 0);
+  if (points === 0) {
+    if (fgMade > 0 || threeMade > 0 || ftMade > 0) {
+      // Basketball derivation
+      points = (fgMade * 2) + (threeMade * 3) + ftMade;
+    } else if (kills > 0 || serviceAces > 0 || blockPoints > 0) {
+      // Volleyball derivation: Kills + Aces + Blocks
+      points = kills + serviceAces + blockPoints;
+    } else if (goals > 0) {
+      // Soccer derivation
+      points = goals;
+    } else if (smashWinners > 0 || netKills > 0) {
+      // Racket derivation
+      points = smashWinners + netKills + serviceAces;
+    } else if (runs > 0 || rbi > 0) {
+      // Baseball derivation
+      points = runs > 0 ? runs : rbi;
+    }
+  }
+
+  // Cross-sport Field Goal / Offensive Attempts Mapping
+  const resolvedFgMade = fgMade > 0 ? fgMade : (kills > 0 ? kills : (goals > 0 ? goals : (hits > 0 ? hits : (smashWinners + netKills))));
+  const resolvedFgAttempted = fgAttempted > 0 ? fgAttempted : (attackAttempts > 0 ? attackAttempts : (shots > 0 ? shots : (atBats > 0 ? atBats : resolvedFgMade)));
 
   const teamName = item.team_name || item.team || defaultTeam || '';
 
@@ -658,8 +720,8 @@ export function normalizeExtractedPlayer(item: any, idx: number, matchId?: strin
     pts: points,
     assists,
     ast: assists,
-    rebounds,
-    reb: rebounds,
+    rebounds: rebounds > 0 ? rebounds : digs,
+    reb: rebounds > 0 ? rebounds : digs,
     offensive_rebounds: oReb,
     defensive_rebounds: dReb,
     steals,
@@ -670,10 +732,10 @@ export function normalizeExtractedPlayer(item: any, idx: number, matchId?: strin
     to: turnovers,
     fouls,
     pf: fouls,
-    fg_made: fgMade,
-    fgm: fgMade,
-    fg_attempted: fgAttempted,
-    fga: fgAttempted,
+    fg_made: resolvedFgMade,
+    fgm: resolvedFgMade,
+    fg_attempted: resolvedFgAttempted,
+    fga: resolvedFgAttempted,
     three_made: threeMade,
     three_attempted: threeAttempted,
     ft_made: ftMade,
@@ -682,55 +744,126 @@ export function normalizeExtractedPlayer(item: any, idx: number, matchId?: strin
     fta: ftAttempted,
     minutes,
     min: minutes,
-    // Sport specific
+    // Volleyball specific
     kills,
+    attack_errors: attackErrors,
+    attack_attempts: attackAttempts,
+    hitting_pct: hittingPct,
+    block_solos: blockSolo,
+    block_assists: blockAssist,
     block_points: blockPoints,
     digs,
     service_aces: serviceAces,
-    attack_errors: attackErrors,
     service_errors: serviceErrors,
+    reception_errors: receptionErrors,
+    sets_played: setsPlayed,
+    // Soccer specific
+    goals,
+    shots,
+    shots_on_target: shotsOnTarget,
+    fouls_committed: foulsCommitted,
+    fouls_suffered: foulsSuffered,
+    yellow_cards: yellowCards,
+    red_cards: redCards,
+    saves,
+    tackles,
+    offsides,
+    // Racket specific
     smash_winners: smashWinners,
     net_kills: netKills,
     unforced_errors: unforcedErrors,
     service_faults: serviceFaults,
+    games_won: gamesWon,
+    // Timed / Individual specific
+    event: eventName,
+    event_name: eventName,
+    finish_time: finishTime,
     time: finishTime,
     split_time: splitTime,
+    split: splitTime,
+    split_2: split2,
+    seed_time: seedTime,
     pace,
     distance_m: distanceM,
+    stroke_count: strokeCount,
+    heat,
+    lane,
+    rank,
+    place: rank,
+    // Baseball specific
+    at_bats: atBats,
+    runs,
+    hits,
+    rbi,
+    home_runs: homeRuns,
+    walks,
+    strikeouts,
+    innings_pitched: inningsPitched,
+    earned_runs: earnedRuns,
   };
 }
 
-const SCORESHEET_EXTRACTION_PROMPT = `You are an expert sports scoresheet and boxscore OCR parser.
-Analyze this scoresheet document (image, PDF, or CSV) with extreme precision.
+const SCORESHEET_EXTRACTION_PROMPT = `You are an expert multi-sport official scoresheet, scorebook, and boxscore OCR parser.
+Analyze this scoresheet document (image, PDF, or CSV) with extreme optical precision and exhaustively extract ALL athlete statistics across ANY sport (Basketball, Volleyball, Swimming, Track & Field, Soccer, Badminton, Pickleball, Tennis, Baseball/Softball, or custom sport).
 
-Carefully examine all table headers, printed rows, handwritten numbers, abbreviations, and tally marks.
-Extract complete match metadata, both team scores, and EVERY individual player row into the following JSON format:
+CRITICAL INSTRUCTION:
+Extract COMPLETE match metadata, both team names & final scores, and EVERY SINGLE PLAYER / ATHLETE ROW with ALL recorded boxscore columns.
+Do NOT omit any player rows or stat columns. If stats are written as tally marks (/ , X , | , •) or numbers, count and parse them completely.
+
+SPORT IDENTIFICATION & VERIFICATION (MANDATORY):
+Examine the scoresheet column headers, terminology, and structure to definitively determine sport_type:
+- "VOLLEYBALL": When document contains Kills (K), Attacks (TA/E), Digs (D), Sets (SP), Blocks (BS/BA), Aces (SA/SE), Rotation numbers, or Libero (L).
+- "SOCCER": When document contains Goals (G), Shots (SH), SOG, Saves (SV), Fouls (FC), Offsides, Cards (YC/RC).
+- "SWIMMING": When document contains Stroke (Free, Fly, Breast, Back, IM), Heat, Lane, Splits, Finish Time, Seed Time.
+- "TRACK AND FIELD": When document contains Distance, 100m/200m/400m/Hurdles, Heat, Lane, Mark, Time.
+- "BADMINTON" / "PICKLEBALL" / "TENNIS": When document contains Smashes, Net Kills, Faults, Aces, Rallies.
+- "BASEBALL": When document contains AB, R, H, RBI, HR, BB, SO/K, IP, ER.
+- "BASKETBALL": When document contains FGM/FGA, 3PM/3PA, FTM/FTA, PTS, REB, AST, STL, BLK, TO, PF.
+
+SPORT-SPECIFIC PARSING GUIDELINES:
+1. BASKETBALL:
+   - Extract: jersey_number, player_name, team_name, points, rebounds (offensive & defensive), assists, steals, blocks, turnovers, personal fouls, field goals (fg_made, fg_attempted), 3-pointers (three_made, three_attempted), free throws (ft_made, ft_attempted), minutes.
+   - Derivation: points = (fg_made * 2) + (three_made * 3) + ft_made. rebounds = offensive_rebounds + defensive_rebounds.
+2. VOLLEYBALL:
+   - Extract: jersey_number, player_name, team_name, sets_played (SP), kills (K), attack_errors (E), attack_attempts (TA), assists (A/Sets), service_aces (SA), service_errors (SE), reception_errors (RE), digs (D), block_solos (BS), block_assists (BA), block_points (TB), points (PTS).
+   - Derivation: points = kills + service_aces + block_points. Count set-by-set tally marks across Set 1..5.
+   - VOLLEYBALL MATCH SCORE RULE: In volleyball, match scores are measured in SETS WON (e.g. "3 - 1", "3 - 0", or "3 - 2").
+   - For volleyball team_scores: "score" is the number of sets won (0 to 3), NOT total match points (do not say 96 sets!).
+3. SOCCER / FOOTBALL:
+   - Extract: jersey_number, player_name, team_name, goals (G), assists (A), shots (SH), shots_on_target (SOG), fouls_committed (FC), yellow_cards (YC), red_cards (RC), saves (SV), tackles (TKL), offsides (OFF), minutes (MIN).
+   - Derivation: points = goals.
+4. SWIMMING & TRACK / FIELD:
+   - Extract: rank (Place), player_name, team_name (School/Club), event (e.g. 50m Free, 100m Dash, 4x100m Relay, Long Jump), heat, lane, finish_time (e.g. 00:24.35, 1:02.14, 10.42s), split_time, seed_time, distance_m, stroke_count, points (team points scored).
+5. BADMINTON, PICKLEBALL, TENNIS:
+   - Extract: player_name, team_name, points (total rally points), smash_winners, net_kills, unforced_errors, service_faults, service_aces, games_won.
+6. BASEBALL / SOFTBALL:
+   - Extract: jersey_number, player_name, at_bats (AB), runs (R), hits (H), rbi (RBI), home_runs (HR), walks (BB), strikeouts (SO/K), innings_pitched (IP), earned_runs (ER).
+
+Return the extraction in this exact JSON structure:
 
 {
   "match_info": {
-    "sport_type": "Basketball",
-    "event_name": "Tournament / League / Game Name",
-    "home_team_name": "Home Team Name",
-    "opponent_team_name": "Away / Visitor Team Name",
+    "sport_type": "BASKETBALL / VOLLEYBALL / SWIMMING / TRACK AND FIELD / SOCCER / BADMINTON / PICKLEBALL / BASEBALL",
+    "event_name": "Tournament / League / Meet / Game Name",
+    "home_team_name": "Home Team / School A",
+    "opponent_team_name": "Away / Visitor Team / School B",
     "game_result": "WIN",
-    "final_score": "88 - 76",
+    "final_score": "88 - 76 (or 3 - 1 for volleyball sets)",
     "quarter_scores": [
-      {"quarter": "Q1", "home": 22, "away": 18},
-      {"quarter": "Q2", "home": 24, "away": 20},
-      {"quarter": "Q3", "home": 20, "away": 18},
-      {"quarter": "Q4", "home": 22, "away": 20}
+      {"quarter": "Q1 / Set 1", "home": 25, "away": 20},
+      {"quarter": "Q2 / Set 2", "home": 25, "away": 22}
     ]
   },
   "team_scores": [
-    {"team": "HomeTeamName", "score": 88, "is_home": true},
-    {"team": "AwayTeamName", "score": 76, "is_home": false}
+    {"team": "Home Team Name", "score": 88, "is_home": true},
+    {"team": "Away Team Name", "score": 76, "is_home": false}
   ],
   "player_summary": [
     {
       "jersey_number": 7,
       "player_name": "Player Full Name",
-      "team_name": "TeamName",
-      "position": "G",
+      "team_name": "Team Name",
+      "position": "G / OH / MB / S / L / Forward",
       "points": 24,
       "rebounds": 6,
       "offensive_rebounds": 2,
@@ -746,18 +879,48 @@ Extract complete match metadata, both team scores, and EVERY individual player r
       "three_attempted": 6,
       "ft_made": 3,
       "ft_attempted": 4,
-      "minutes": 32
+      "minutes": 32,
+      "kills": 14,
+      "attack_errors": 3,
+      "attack_attempts": 28,
+      "digs": 8,
+      "service_aces": 2,
+      "service_errors": 1,
+      "reception_errors": 0,
+      "block_solos": 1,
+      "block_assists": 2,
+      "block_points": 3,
+      "sets_played": 4,
+      "goals": 0,
+      "shots": 0,
+      "shots_on_target": 0,
+      "saves": 0,
+      "yellow_cards": 0,
+      "red_cards": 0,
+      "smash_winners": 0,
+      "net_kills": 0,
+      "unforced_errors": 0,
+      "service_faults": 0,
+      "event": "100m Freestyle",
+      "heat": 1,
+      "lane": 4,
+      "finish_time": "00:54.20",
+      "split_time": "26.10, 28.10",
+      "seed_time": "00:55.00",
+      "stroke_count": 34,
+      "distance_m": 100,
+      "rank": 1
     }
   ]
 }
 
-CRITICAL OCR EXTRACTION RULES:
-1. EXTRACT EVERY PLAYER ROW: Read all players from BOTH Team A (Home) and Team B (Away/Visitors), including starters and substitutes/bench.
-2. EXTRACT ALL STAT COLUMNS: Read all statistics present on the sheet (Points, Rebounds, Assists, Steals, Blocks, Turnovers, Fouls, Field Goals Made/Attempted, 3-Pointers Made/Attempted, Free Throws Made/Attempted, Minutes).
-3. HANDLE TALLY MARKS & HASHES: In Personal Fouls (1, 2, 3, 4, 5) or Field Goals boxes, count tick marks (/ , X , | , •).
-4. CALCULATE MISSING TOTALS: If a player's total points is unwritten or smudged, derive it accurately: points = (fg_made * 2) + (three_made * 3) + ft_made or sum of quarterly scoring.
-5. SUPPORT OTHER SPORTS: If the sheet is for Volleyball (extract kills, blocks, digs, aces, errors), Badminton (extract smashes, net kills, faults, points), Swimming/Track (extract event, time, split, rank).
-6. RETURN ONLY THE JSON OBJECT. No markdown backticks, no commentary.`;
+CRITICAL RULES:
+1. EXTRACT EVERY ATHLETE ROW: Read every player/competitor from BOTH teams / schools, including starters, bench, and substitutes.
+2. EXTRACT ALL RELEVANT STAT COLUMNS: Do not leave values blank or 0 if they are indicated on the sheet.
+3. COUNT TALLY MARKS & HASHES: In columns with tick marks (/ , X , | , •), count the total number of marks.
+4. DERIVE MISSING TOTALS: If total points/score is blank or smudged, calculate it from the component statistics.
+5. PRESERVE REAL NAMES & NUMBERS: Extract exact jersey numbers and names as written.
+6. RETURN ONLY VALID JSON OBJECT. No markdown backticks, no explanatory text.`;
 
 async function callGeminiWithWaterfall(requestBody: any, rawKey?: string): Promise<string> {
   const geminiKey = (
@@ -915,15 +1078,15 @@ export async function processScoresheetOCR(matchId: string, file?: Express.Multe
       let sendBuffer = file.buffer;
       let sendMime = mimeType;
 
-      // High-precision preprocessing for scoresheet OCR (2400px, gentle normalize, sharpen handwritten strokes)
+      // High-precision preprocessing for scoresheet OCR (1800px, contrast stretch, crisp strokes, fast encoding)
       if (mimeType.startsWith('image/')) {
         try {
           const sharp = require('sharp');
           sendBuffer = await sharp(file.buffer)
-            .resize({ width: 2400, height: 2400, fit: 'inside', withoutEnlargement: true })
+            .resize({ width: 1800, height: 1800, fit: 'inside', withoutEnlargement: true })
             .normalize()
-            .sharpen({ sigma: 1.2, m1: 1.0, m2: 2.0 })
-            .jpeg({ quality: 92 })
+            .sharpen({ sigma: 1.0, m1: 1.0, m2: 2.0 })
+            .jpeg({ quality: 82, progressive: true })
             .toBuffer();
           sendMime = 'image/jpeg';
         } catch (sharpErr) {
@@ -953,7 +1116,11 @@ export async function processScoresheetOCR(matchId: string, file?: Express.Multe
       };
     }
 
-    const content = await callGeminiWithWaterfall(requestBody, geminiKey);
+    // Run AI inference and Cloud Storage upload concurrently to eliminate serial latency
+    const [content, scoresheetUrl] = await Promise.all([
+      callGeminiWithWaterfall(requestBody, geminiKey),
+      uploadScoresheetFileToStorage(matchId, file).catch(() => `data:${mimeType};base64,${file.buffer.toString('base64')}`),
+    ]);
 
     // Parse AI output cleanly
     const aiParsed = extractJsonFromAiText(content);
@@ -1025,16 +1192,26 @@ export async function processScoresheetOCR(matchId: string, file?: Express.Multe
       };
 
       const isBasketball = !matchData.sport_type || String(matchData.sport_type).toLowerCase().includes('basket');
-      const computed = isBasketball ? calculateBasketballMetrics(rawStats) : calculateDynamicSportMetrics(rawStats);
+      const isIndividual = String(matchData.sport_type).toLowerCase().includes('swim') || String(matchData.sport_type).toLowerCase().includes('track') || String(matchData.sport_type).toLowerCase().includes('field');
+
+      let computed: any;
+      if (isBasketball) {
+        computed = calculateBasketballMetrics(normalized);
+      } else if (isIndividual) {
+        computed = calculateIndividualSportMetrics(normalized);
+      } else {
+        computed = calculateDynamicSportMetrics(normalized);
+      }
 
       const playerStatObj = {
+        ...normalized,
         athlete_id: athleteId,
         player_name: pName,
         team_name: resolvedTeam,
         jersey_number: jerseyNum,
         position: item.position || 'G',
-        stats: rawStats,
-        sport_stats: computed.enrichedStats,
+        stats: normalized,
+        sport_stats: computed.enrichedStats || normalized,
         calculated_player_efficiency: computed.efficiency,
         calculated_efficiency: computed.efficiency,
         true_shooting_pct: (computed as any).trueShootingPct || 0,
@@ -1146,15 +1323,15 @@ export async function scanScoresheetStandalone(file?: Express.Multer.File, custo
     let sendBuffer = file.buffer;
     let sendMime = mimeType;
 
-    // High-precision preprocessing for scoresheet OCR (2400px, normalize contrast stretch, sharpen handwritten strokes)
+    // High-precision preprocessing for scoresheet OCR (1800px, contrast stretch, crisp strokes, fast encoding)
     if (mimeType.startsWith('image/')) {
       try {
         const sharp = require('sharp');
         sendBuffer = await sharp(file.buffer)
-          .resize({ width: 2400, height: 2400, fit: 'inside', withoutEnlargement: true })
+          .resize({ width: 1800, height: 1800, fit: 'inside', withoutEnlargement: true })
           .normalize()
-          .sharpen({ sigma: 1.2, m1: 1.0, m2: 2.0 })
-          .jpeg({ quality: 92 })
+          .sharpen({ sigma: 1.0, m1: 1.0, m2: 2.0 })
+          .jpeg({ quality: 82, progressive: true })
           .toBuffer();
         sendMime = 'image/jpeg';
       } catch (sharpErr) {
@@ -1184,10 +1361,12 @@ export async function scanScoresheetStandalone(file?: Express.Multer.File, custo
     };
   }
 
-  const scoresheetUrl = await uploadScoresheetFileToStorage(`standalone_${Date.now()}`, file);
-
   try {
-    const content = await callGeminiWithWaterfall(requestBody, geminiKey);
+    // Run AI inference and Cloud Storage upload concurrently to eliminate serial latency
+    const [content, scoresheetUrl] = await Promise.all([
+      callGeminiWithWaterfall(requestBody, geminiKey),
+      uploadScoresheetFileToStorage(`standalone_${Date.now()}`, file).catch(() => `data:${mimeType};base64,${file.buffer.toString('base64')}`),
+    ]);
     const parsedData = extractJsonFromAiText(content);
 
     const rawPlayerSummary: any[] = Array.isArray(parsedData.player_summary)
@@ -1198,26 +1377,28 @@ export async function scanScoresheetStandalone(file?: Express.Multer.File, custo
       ? parsedData.team_scores
       : (Array.isArray(parsedData.teams) ? parsedData.teams : []);
 
+    const detectedSport = parsedData.match_info?.sport_type || 'Basketball';
+    const isBasketball = String(detectedSport).toLowerCase().includes('basket');
+    const isIndividual = String(detectedSport).toLowerCase().includes('swim') || String(detectedSport).toLowerCase().includes('track') || String(detectedSport).toLowerCase().includes('field');
+
     const enrichedPlayers = rawPlayerSummary.map((p: any, idx: number) => {
       const normalized = normalizeExtractedPlayer(p, idx, 'standalone');
-      const computed = calculateBasketballMetrics({
-        points: normalized.points,
-        rebounds: normalized.rebounds,
-        assists: normalized.assists,
-        steals: normalized.steals,
-        blocks: normalized.blocks,
-        turnovers: normalized.turnovers,
-        fouls: normalized.fouls,
-        fg_made: normalized.fg_made,
-        fg_attempted: normalized.fg_attempted,
-        ft_made: normalized.ft_made,
-        ft_attempted: normalized.ft_attempted,
-      });
+      let computed: any;
+      if (isBasketball) {
+        computed = calculateBasketballMetrics(normalized);
+      } else if (isIndividual) {
+        computed = calculateIndividualSportMetrics(normalized);
+      } else {
+        computed = calculateDynamicSportMetrics(normalized);
+      }
 
       return {
         ...normalized,
+        stats: { ...normalized },
+        sport_stats: computed.enrichedStats || normalized,
         calculated_efficiency: computed.efficiency,
-        true_shooting_pct: computed.trueShootingPct,
+        calculated_player_efficiency: computed.efficiency,
+        true_shooting_pct: (computed as any).trueShootingPct || 0,
       };
     });
 

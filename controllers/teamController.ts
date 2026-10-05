@@ -56,6 +56,7 @@ export async function createTeamHandler(req: AuthRequest, res: Response): Promis
     res.status(201).json({
       message: 'Team instance created successfully.',
       team,
+      team_id: team.team_id,
     });
   } catch (error: any) {
     if (error instanceof ServiceError) {

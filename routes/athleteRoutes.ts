@@ -11,6 +11,7 @@ import {
   getAthleteAllStatsHandler,
   getAthleteMatchHistoryHandler,
 } from '../controllers/athleteController';
+import { uploadAvatarHandler } from '../controllers/userController';
 import { getAthleteTeamHandler } from '../controllers/teamController';
 import { postSrpeLog, getAthleteWorkloadHandler, setWorkloadTargetHandler } from '../controllers/workloadController';
 import { syncAthleteOfflineBatchHandler, getAthleteOfflineSnapshotHandler } from '../controllers/syncController';
@@ -45,6 +46,9 @@ router.get('/profile', authenticate, getAthlete);
 router.get('/me', authenticate, getAthlete);
 router.patch('/profile', authenticate, updateAthlete);
 router.patch('/me', authenticate, updateAthlete);
+router.post('/avatar', authenticate, upload.any(), uploadAvatarHandler);
+router.post('/profile/avatar', authenticate, upload.any(), uploadAvatarHandler);
+router.patch('/avatar', authenticate, upload.any(), uploadAvatarHandler);
 router.post('/documents', authenticate, upload.any(), uploadDocument);
 
 // Parameterized Routes (Backward-compatible and for Coach/Scouting queries)

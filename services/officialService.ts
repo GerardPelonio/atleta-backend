@@ -3,7 +3,7 @@ import { db, auth } from '../utils/firebaseAdmin';
 import { clientAuth } from '../utils/firebaseClient';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { OfficialProfile, OfficialSettings, RegisterOfficialDto, UpdateOfficialSettingsDto, User } from '../models/userModel';
-import { generateToken } from './userService';
+import { generateToken, createFirebaseAuthUser } from './userService';
 import { generateElevatedAdminToken } from './adminService';
 
 export class ServiceError extends Error {
@@ -57,14 +57,14 @@ export async function registerOfficialService(data: RegisterOfficialDto) {
     console.warn('Tournament_Registry auto-provisioning note (non-blocking):', regError);
   }
 
-  // 2. Create Firebase Auth user
-  const userRecord = await auth.createUser({
+  // 2. Create Firebase Auth user (with REST fallback)
+  const authUser = await createFirebaseAuthUser({
     email,
     password,
     displayName: full_legal_name,
   });
 
-  const uid = userRecord.uid;
+  const uid = authUser.uid;
   const now = new Date();
   const nowStr = now.toISOString();
 
@@ -109,7 +109,7 @@ export async function registerOfficialService(data: RegisterOfficialDto) {
     updated_at: now,
   };
 
-  // 5. Build Settings document (Official_Settings)
+  // 5. Build Settings map (Embedded in Profile & Users)
   const settingsData: OfficialSettings = {
     setting_id: settingId,
     official_id: officialId,
@@ -119,16 +119,15 @@ export async function registerOfficialService(data: RegisterOfficialDto) {
     updated_at: nowStr,
   };
 
+  userData.settings = settingsData;
+  profileData.settings = settingsData;
+
   // 6. Execute atomic batch write
   const batch = db.batch();
   
   batch.set(db.collection('Users').doc(uid), userData);
-
   batch.set(db.collection('Official_Profiles').doc(officialId), profileData);
   batch.set(db.collection('Official_Profiles').doc(uid), profileData);
-
-  batch.set(db.collection('Official_Settings').doc(officialId), settingsData);
-  batch.set(db.collection('Official_Settings').doc(uid), settingsData);
 
   await batch.commit();
 
@@ -244,40 +243,56 @@ export async function getOfficialSettings(officialId: string): Promise<OfficialS
   const rawUid = officialId.replace(/^off_/, '');
   const canonicalOfficialId = officialId.startsWith('off_') ? officialId : `off_${officialId}`;
 
-  let doc = await db.collection('Official_Settings').doc(canonicalOfficialId).get();
-  if (!doc.exists) {
-    doc = await db.collection('Official_Settings').doc(rawUid).get();
-  }
-  if (!doc.exists) {
-    doc = await db.collection('Official_Settings').doc(officialId).get();
-  }
+  const profileDoc = await db.collection('Official_Profiles').doc(canonicalOfficialId).get();
+  const rawProfileDoc = !profileDoc.exists ? await db.collection('Official_Profiles').doc(rawUid).get() : profileDoc;
+  const userDoc = await db.collection('Users').doc(rawUid).get();
+
+  const data = (rawProfileDoc.exists ? rawProfileDoc.data()?.settings : null) ||
+               (userDoc.exists ? userDoc.data()?.settings : null);
 
   const nowStr = new Date().toISOString();
 
-  if (doc.exists) {
-    const data = doc.data()!;
+  if (data) {
+    const autoRefreshVal = data.auto_refresh !== undefined
+      ? data.auto_refresh
+      : (data.autoRefreshMatchQueue !== undefined
+        ? data.autoRefreshMatchQueue
+        : (data.autoRefresh !== undefined ? data.autoRefresh : false));
+
     return {
       setting_id: data.setting_id || crypto.randomUUID(),
       official_id: canonicalOfficialId,
       split_screen_defaults: data.split_screen_defaults !== undefined ? data.split_screen_defaults : true,
-      discrepancy_presets: data.discrepancy_presets !== undefined ? data.discrepancy_presets : true,
+      discrepancy_presets: data.discrepancy_presets !== undefined ? data.discrepancy_presets : false,
       match_reminders: data.match_reminders !== undefined ? data.match_reminders : true,
+      audit_notifications: data.audit_notifications !== undefined ? data.audit_notifications : true,
+      auto_refresh: autoRefreshVal,
+      autoRefreshMatchQueue: autoRefreshVal,
+      autoRefresh: autoRefreshVal,
       updated_at: data.updated_at || nowStr,
     };
   }
 
-  // Fallback / default initializer if settings don't exist
+  // Fallback / default initializer embedded in profile & user
   const defaultSettings: OfficialSettings = {
     setting_id: crypto.randomUUID(),
     official_id: canonicalOfficialId,
     split_screen_defaults: true,
-    discrepancy_presets: true,
+    discrepancy_presets: false,
     match_reminders: true,
+    audit_notifications: true,
+    auto_refresh: false,
+    autoRefreshMatchQueue: false,
+    autoRefresh: false,
     updated_at: nowStr,
   };
 
-  await db.collection('Official_Settings').doc(canonicalOfficialId).set(defaultSettings, { merge: true });
-  await db.collection('Official_Settings').doc(rawUid).set(defaultSettings, { merge: true });
+  await Promise.all([
+    db.collection('Official_Profiles').doc(canonicalOfficialId).set({ settings: defaultSettings }, { merge: true }),
+    db.collection('Official_Profiles').doc(rawUid).set({ settings: defaultSettings }, { merge: true }),
+    db.collection('Users').doc(rawUid).set({ settings: defaultSettings }, { merge: true }),
+  ]);
+
   return defaultSettings;
 }
 
@@ -290,17 +305,33 @@ export async function updateOfficialSettings(
 
   const currentSettings = await getOfficialSettings(officialId);
 
+  const updatedAutoRefresh = payload.auto_refresh !== undefined
+    ? payload.auto_refresh
+    : (payload.autoRefreshMatchQueue !== undefined
+      ? payload.autoRefreshMatchQueue
+      : (payload.autoRefresh !== undefined
+        ? payload.autoRefresh
+        : currentSettings.auto_refresh));
+
   const updatedSettings: OfficialSettings = {
     setting_id: currentSettings.setting_id,
     official_id: canonicalOfficialId,
     split_screen_defaults: payload.split_screen_defaults !== undefined ? payload.split_screen_defaults : currentSettings.split_screen_defaults,
     discrepancy_presets: payload.discrepancy_presets !== undefined ? payload.discrepancy_presets : currentSettings.discrepancy_presets,
     match_reminders: payload.match_reminders !== undefined ? payload.match_reminders : currentSettings.match_reminders,
+    audit_notifications: payload.audit_notifications !== undefined ? payload.audit_notifications : currentSettings.audit_notifications,
+    auto_refresh: updatedAutoRefresh,
+    autoRefreshMatchQueue: updatedAutoRefresh,
+    autoRefresh: updatedAutoRefresh,
     updated_at: new Date().toISOString(),
   };
 
-  await db.collection('Official_Settings').doc(canonicalOfficialId).set(updatedSettings, { merge: true });
-  await db.collection('Official_Settings').doc(rawUid).set(updatedSettings, { merge: true });
+  await Promise.all([
+    db.collection('Official_Profiles').doc(canonicalOfficialId).set({ settings: updatedSettings }, { merge: true }),
+    db.collection('Official_Profiles').doc(rawUid).set({ settings: updatedSettings }, { merge: true }),
+    db.collection('Users').doc(rawUid).set({ settings: updatedSettings }, { merge: true }),
+  ]);
+
   return updatedSettings;
 }
 
@@ -320,16 +351,21 @@ export async function getOfficialProfile(uid: string) {
   const userData = userDoc.exists ? userDoc.data()! : {};
   const profileData = profileDoc.exists ? profileDoc.data()! : {};
 
+  const avatarUrl = profileData.avatar_url || userData.avatar_url || profileData.profile_image || userData.profile_image || null;
+
   return {
     official_id: officialId,
     user_id: rawUid,
     full_legal_name: userData.full_legal_name || userData.full_name || `${userData.first_name || ''} ${userData.last_name || ''}`.trim(),
+    full_name: userData.full_legal_name || userData.full_name || `${userData.first_name || ''} ${userData.last_name || ''}`.trim(),
     email: userData.email,
     role: userData.role || 'Official',
     organization_name: profileData.organization_name || userData.organization_name || userData.organization || 'General Tournament Association',
     official_license_number: profileData.official_license_number || userData.official_license_number || 'OFF-LIC-2026',
     assigned_tournaments: profileData.assigned_tournaments || userData.assigned_tournaments || [],
     certification_status: profileData.certification_status || userData.certification_status || 'Certified',
+    avatar_url: avatarUrl,
+    profile_image: avatarUrl,
     is_active: userData.is_active !== undefined ? userData.is_active : true,
     created_at: userData.created_at || new Date().toISOString(),
   };
@@ -339,11 +375,16 @@ export async function updateOfficialProfile(
   uid: string,
   payload: {
     full_legal_name?: string;
+    full_name?: string;
     first_name?: string;
     last_name?: string;
     organization_name?: string;
+    organization?: string;
     official_license_number?: string;
     assigned_tournaments?: string[];
+    avatar_url?: string;
+    profile_image?: string;
+    [key: string]: any;
   }
 ) {
   const rawUid = uid.replace(/^off_/, '');
@@ -353,10 +394,11 @@ export async function updateOfficialProfile(
   const userUpdates: any = { updated_at: now };
   const profileUpdates: any = { updated_at: now };
 
-  if (payload.full_legal_name !== undefined) {
-    userUpdates.full_legal_name = payload.full_legal_name;
-    userUpdates.full_name = payload.full_legal_name;
-    const parts = payload.full_legal_name.split(' ');
+  if (payload.full_legal_name !== undefined || payload.full_name !== undefined) {
+    const val = (payload.full_legal_name || payload.full_name || '').trim();
+    userUpdates.full_legal_name = val;
+    userUpdates.full_name = val;
+    const parts = val.split(' ');
     userUpdates.first_name = parts[0] || '';
     userUpdates.last_name = parts.slice(1).join(' ') || '';
   }
@@ -366,10 +408,11 @@ export async function updateOfficialProfile(
   if (payload.last_name !== undefined) {
     userUpdates.last_name = payload.last_name;
   }
-  if (payload.organization_name !== undefined) {
-    userUpdates.organization_name = payload.organization_name;
-    userUpdates.organization = payload.organization_name;
-    profileUpdates.organization_name = payload.organization_name;
+  if (payload.organization_name !== undefined || payload.organization !== undefined) {
+    const org = payload.organization_name || payload.organization;
+    userUpdates.organization_name = org;
+    userUpdates.organization = org;
+    profileUpdates.organization_name = org;
   }
   if (payload.official_license_number !== undefined) {
     userUpdates.official_license_number = payload.official_license_number;
@@ -378,6 +421,13 @@ export async function updateOfficialProfile(
   if (payload.assigned_tournaments !== undefined) {
     userUpdates.assigned_tournaments = payload.assigned_tournaments;
     profileUpdates.assigned_tournaments = payload.assigned_tournaments;
+  }
+  if (payload.avatar_url !== undefined || payload.profile_image !== undefined) {
+    const avatar = (payload.avatar_url || payload.profile_image || '').trim();
+    userUpdates.avatar_url = avatar;
+    userUpdates.profile_image = avatar;
+    profileUpdates.avatar_url = avatar;
+    profileUpdates.profile_image = avatar;
   }
 
   const batch = db.batch();

@@ -129,24 +129,37 @@ export async function getOfficialSchedules(
  * Fetch chronological notification logs for an official.
  */
 export async function getOfficialNotifications(officialId: string): Promise<OfficialNotification[]> {
-  const snapshot = await db.collection('Official_Notifications')
-    .where('official_id', '==', officialId)
-    .get();
+  const rawUid = officialId.replace(/^off_/, '');
+  const canonicalOfficialId = officialId.startsWith('off_') ? officialId : `off_${officialId}`;
 
+  const [snap1, snap2, snap3] = await Promise.all([
+    db.collection('Notifications').where('recipient_id', 'in', [officialId, rawUid, canonicalOfficialId]).get(),
+    db.collection('Notifications').where('user_id', 'in', [officialId, rawUid, canonicalOfficialId]).get(),
+    db.collection('Notifications').where('official_id', '==', officialId).get(),
+  ]);
+
+  const seenIds = new Set<string>();
   const notifications: OfficialNotification[] = [];
-  snapshot.forEach((doc) => {
+
+  const processDoc = (doc: any) => {
+    if (seenIds.has(doc.id)) return;
+    seenIds.add(doc.id);
     const data = doc.data();
     notifications.push({
-      notification_id: data.notification_id,
-      official_id: data.official_id,
-      type: data.type,
-      title: data.title,
-      message: data.message,
+      notification_id: data.notification_id || doc.id,
+      official_id: data.official_id || data.recipient_id || officialId,
+      type: data.type || 'OFFICIAL_ALERT',
+      title: data.title || 'Notification',
+      message: data.message || '',
       reference_id: data.reference_id || null,
       is_read: data.is_read || false,
-      created_at: data.created_at,
+      created_at: data.created_at || new Date().toISOString(),
     });
-  });
+  };
+
+  snap1.forEach(processDoc);
+  snap2.forEach(processDoc);
+  snap3.forEach(processDoc);
 
   // Sort chronologically descending
   return notifications.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());

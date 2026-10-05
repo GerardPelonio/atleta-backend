@@ -16,13 +16,19 @@ export class ServiceError extends Error {
  * Retrieve coach settings (GET /api/v1/coaches/me/settings).
  */
 export async function getCoachSettings(coachId: string): Promise<CoachSettings> {
-  const settingsRef = db.collection('Coach_Settings').doc(coachId);
-  const doc = await settingsRef.get();
+  const rawUid = coachId.replace(/^coach_/, '');
+  const canonicalCoachId = coachId.startsWith('coach_') ? coachId : `coach_${coachId}`;
+
+  const profileDoc = await db.collection('Coach_Profiles').doc(canonicalCoachId).get();
+  const rawProfileDoc = !profileDoc.exists ? await db.collection('Coach_Profiles').doc(rawUid).get() : profileDoc;
+  const userDoc = await db.collection('Users').doc(rawUid).get();
+
+  const data = (rawProfileDoc.exists ? rawProfileDoc.data()?.settings : null) ||
+               (userDoc.exists ? userDoc.data()?.settings : null);
 
   const now = new Date().toISOString();
 
-  if (doc.exists) {
-    const data = doc.data()!;
+  if (data) {
     return {
       setting_id: data.setting_id || `setting_${coachId}`,
       coach_id: coachId,
@@ -35,7 +41,7 @@ export async function getCoachSettings(coachId: string): Promise<CoachSettings> 
     };
   }
 
-  // Initialize default coach settings if not existing
+  // Initialize default coach settings embedded in profile & user
   const defaultSettings: CoachSettings = {
     setting_id: `setting_${coachId}`,
     coach_id: coachId,
@@ -47,7 +53,12 @@ export async function getCoachSettings(coachId: string): Promise<CoachSettings> 
     updated_at: now,
   };
 
-  await settingsRef.set(defaultSettings, { merge: true });
+  await Promise.all([
+    db.collection('Coach_Profiles').doc(canonicalCoachId).set({ settings: defaultSettings }, { merge: true }),
+    db.collection('Coach_Profiles').doc(rawUid).set({ settings: defaultSettings }, { merge: true }),
+    db.collection('Users').doc(rawUid).set({ settings: defaultSettings }, { merge: true }),
+  ]);
+
   return defaultSettings;
 }
 
@@ -64,6 +75,9 @@ export async function updateCoachSettings(
     };
   },
 ): Promise<CoachSettings> {
+  const rawUid = coachId.replace(/^coach_/, '');
+  const canonicalCoachId = coachId.startsWith('coach_') ? coachId : `coach_${coachId}`;
+
   const currentSettings = await getCoachSettings(coachId);
 
   const updatedSync = payload.data_sync_preference || currentSettings.data_sync_preference;
@@ -80,7 +94,12 @@ export async function updateCoachSettings(
     updated_at: new Date().toISOString(),
   };
 
-  await db.collection('Coach_Settings').doc(coachId).set(updatedSettings, { merge: true });
+  await Promise.all([
+    db.collection('Coach_Profiles').doc(canonicalCoachId).set({ settings: updatedSettings }, { merge: true }),
+    db.collection('Coach_Profiles').doc(rawUid).set({ settings: updatedSettings }, { merge: true }),
+    db.collection('Users').doc(rawUid).set({ settings: updatedSettings }, { merge: true }),
+  ]);
+
   return updatedSettings;
 }
 
@@ -125,7 +144,10 @@ export async function updateCoachProfile(
   if (payload.current_institution) userUpdates.current_institution = payload.current_institution.trim();
   if (payload.regional_affiliation !== undefined) userUpdates.regional_affiliation = payload.regional_affiliation ? payload.regional_affiliation.trim() : null;
   if (payload.national_sports_league !== undefined) userUpdates.national_sports_league = payload.national_sports_league ? payload.national_sports_league.trim() : null;
-  if (payload.avatar_url !== undefined) userUpdates.avatar_url = payload.avatar_url;
+  if (payload.avatar_url !== undefined) {
+    userUpdates.avatar_url = payload.avatar_url;
+    userUpdates.profile_image = payload.avatar_url;
+  }
   if (payload.quote !== undefined) userUpdates.quote = payload.quote ? payload.quote.trim() : null;
   if (Array.isArray(payload.professional_documents)) {
     userUpdates.professional_documents = payload.professional_documents.filter(
@@ -149,7 +171,10 @@ export async function updateCoachProfile(
   if (payload.current_institution) coachUpdates.current_institution = payload.current_institution.trim();
   if (payload.regional_affiliation !== undefined) coachUpdates.regional_affiliation = payload.regional_affiliation ? payload.regional_affiliation.trim() : null;
   if (payload.national_sports_league !== undefined) coachUpdates.national_sports_league = payload.national_sports_league ? payload.national_sports_league.trim() : null;
-  if (payload.avatar_url !== undefined) coachUpdates.avatar_url = payload.avatar_url;
+  if (payload.avatar_url !== undefined) {
+    coachUpdates.avatar_url = payload.avatar_url;
+    coachUpdates.profile_image = payload.avatar_url;
+  }
   if (payload.quote !== undefined) coachUpdates.quote = payload.quote ? payload.quote.trim() : null;
   if (payload.certification_license_num !== undefined) coachUpdates.certification_license_num = payload.certification_license_num ? payload.certification_license_num.trim() : null;
   if (Array.isArray(payload.specialties)) coachUpdates.specialties = payload.specialties;
@@ -159,8 +184,19 @@ export async function updateCoachProfile(
     );
   }
 
-  // Patch canonical Coach_Profiles document
-  await db.collection('Coach_Profiles').doc(canonicalCoachId).set(coachUpdates, { merge: true });
+  // Patch canonical Coach_Profiles document and raw doc if exists
+  await Promise.all([
+    db.collection('Coach_Profiles').doc(canonicalCoachId).set(coachUpdates, { merge: true }),
+    db.collection('Coach_Profiles').doc(rawUserId).set(coachUpdates, { merge: true }).catch(() => null),
+  ]);
+
+  // Invalidate in-memory profile cache
+  try {
+    const { invalidateCoachProfileCache } = require('./coachInquiryService');
+    invalidateCoachProfileCache(coachId);
+    invalidateCoachProfileCache(rawUserId);
+    invalidateCoachProfileCache(canonicalCoachId);
+  } catch {}
 
   // Fetch updated profile documents
   const userDoc = await db.collection('Users').doc(rawUserId).get();

@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { db, dbV1, dbV2 } from '../utils/firebaseAdmin';
+import { db } from '../utils/firebaseAdmin';
 import {
   SportsConfiguration,
   CreateSportDTO,
@@ -10,11 +10,11 @@ import { logAdminAudit } from './adminService';
 import { generateStandardId } from '../utils/idGenerator';
 import { serverCache } from '../utils/cache';
 
-const primaryDb = db || dbV1;
+const primaryDb = db;
 
 export const DEFAULT_SPORTS_CONFIGURATIONS: SportsConfiguration[] = [
   {
-    sport_id: 'sport_basketball_default',
+    sport_id: 'sport_basketball',
     sport_name: 'Basketball',
     short_identifier: 'BBALL',
     configurable_stats: [
@@ -36,7 +36,7 @@ export const DEFAULT_SPORTS_CONFIGURATIONS: SportsConfiguration[] = [
     updated_at: '2026-01-01T00:00:00.000Z',
   },
   {
-    sport_id: 'sport_swimming_default',
+    sport_id: 'sport_swimming',
     sport_name: 'Swimming',
     short_identifier: 'SWIM',
     configurable_stats: [
@@ -50,7 +50,7 @@ export const DEFAULT_SPORTS_CONFIGURATIONS: SportsConfiguration[] = [
     updated_at: '2026-01-01T00:00:00.000Z',
   },
   {
-    sport_id: 'sport_track_field_default',
+    sport_id: 'sport_track_field',
     sport_name: 'Track & Field',
     short_identifier: 'TF',
     configurable_stats: [
@@ -66,7 +66,8 @@ export const DEFAULT_SPORTS_CONFIGURATIONS: SportsConfiguration[] = [
 ];
 
 /**
- * Ensures default sports exist in Firestore Sports_Configurations collection.
+ * Ensures default sports exist in Firestore Sports_Configurations collection without _default duplicates.
+ * Also cleans up any legacy '*_default' documents from Firestore.
  */
 export async function seedDefaultSportsIfEmpty(): Promise<void> {
   try {
@@ -78,6 +79,28 @@ export async function seedDefaultSportsIfEmpty(): Promise<void> {
         batch.set(primaryDb.collection('sports_configurations').doc(sport.sport_id), sport, { merge: true });
       }
       await batch.commit();
+    }
+
+    // Proactively clean up legacy *_default duplicate documents from Firestore
+    const collections = ['Sports_Configurations', 'sports_configurations', 'sports_configuration'];
+    for (const col of collections) {
+      try {
+        const defaultDocs = await primaryDb.collection(col).get();
+        if (!defaultDocs.empty) {
+          const deleteBatch = primaryDb.batch();
+          let deleteCount = 0;
+          for (const doc of defaultDocs.docs) {
+            if (doc.id.endsWith('_default') || (doc.data()?.sport_id && String(doc.data()?.sport_id).endsWith('_default'))) {
+              deleteBatch.delete(doc.ref);
+              deleteCount++;
+            }
+          }
+          if (deleteCount > 0) {
+            await deleteBatch.commit();
+            console.log(`🧹 Cleaned up ${deleteCount} legacy '_default' sport documents from collection '${col}'`);
+          }
+        }
+      } catch {}
     }
   } catch (err: any) {
     console.warn('⚠️ seedDefaultSportsIfEmpty warning:', err?.message || err);
@@ -130,20 +153,6 @@ export async function getAllSportsService(onlyActive: boolean = false): Promise<
           rawSports = [...rawSports, ...singularList];
         }
       } catch {}
-
-      // Fallback/Supplement from dbV1 if available and distinct
-      if (dbV1 && dbV1 !== primaryDb) {
-        try {
-          const v1Snap = await dbV1.collection('Sports_Configurations').get();
-          if (!v1Snap.empty) {
-            const v1List = v1Snap.docs.map((doc) => ({
-              sport_id: doc.id,
-              ...(doc.data() as object),
-            }));
-            rawSports = [...rawSports, ...v1List];
-          }
-        } catch {}
-      }
 
       // If still empty, supply default configurations
       if (rawSports.length === 0) {
@@ -198,9 +207,6 @@ export async function getSportByIdService(sportId: string): Promise<SportsConfig
   let doc = await primaryDb.collection('Sports_Configurations').doc(sportId).get().catch(() => null);
   if (!doc || !doc.exists) {
     doc = await primaryDb.collection('sports_configurations').doc(sportId).get().catch(() => null);
-  }
-  if ((!doc || !doc.exists) && dbV1 && dbV1 !== primaryDb) {
-    doc = await dbV1.collection('Sports_Configurations').doc(sportId).get().catch(() => null);
   }
   if (!doc || !doc.exists) {
     throw new ServiceError(`Sport configuration with ID '${sportId}' was not found.`, 404);
@@ -307,16 +313,6 @@ export async function createSportService(
 
   await batch.commit();
 
-  // Dual-write to dbV1 if distinct
-  if (dbV1 && dbV1 !== primaryDb) {
-    try {
-      const v1Batch = dbV1.batch();
-      v1Batch.set(dbV1.collection('Sports_Configurations').doc(sportId), newSport);
-      v1Batch.set(dbV1.collection('sports_configurations').doc(sportId), newSport);
-      await v1Batch.commit().catch(() => {});
-    } catch {}
-  }
-
   // Invalidate in-memory sports catalog cache
   try {
     serverCache.invalidateTags(['sports', 'catalog']);
@@ -358,9 +354,6 @@ export async function updateSportService(
   let sportDoc = await primaryDb.collection('Sports_Configurations').doc(sportId).get().catch(() => null);
   if (!sportDoc || !sportDoc.exists) {
     sportDoc = await primaryDb.collection('sports_configurations').doc(sportId).get().catch(() => null);
-  }
-  if ((!sportDoc || !sportDoc.exists) && dbV1 && dbV1 !== primaryDb) {
-    sportDoc = await dbV1.collection('Sports_Configurations').doc(sportId).get().catch(() => null);
   }
   if (!sportDoc || !sportDoc.exists) {
     throw new ServiceError(`Sport configuration with ID '${sportId}' was not found.`, 404);
@@ -410,15 +403,6 @@ export async function updateSportService(
   updateBatch.set(primaryDb.collection('sports_configurations').doc(sportId), updatedSport, { merge: true });
   await updateBatch.commit();
 
-  if (dbV1 && dbV1 !== primaryDb) {
-    try {
-      const v1Batch = dbV1.batch();
-      v1Batch.set(dbV1.collection('Sports_Configurations').doc(sportId), updatedSport, { merge: true });
-      v1Batch.set(dbV1.collection('sports_configurations').doc(sportId), updatedSport, { merge: true });
-      await v1Batch.commit().catch(() => {});
-    } catch {}
-  }
-
   // Invalidate in-memory sports catalog cache
   try {
     serverCache.invalidateTags(['sports', 'catalog']);
@@ -459,47 +443,91 @@ export async function deleteSportService(
   adminUserId: string = 'SYS_ADMIN',
   clientIp: string = '127.0.0.1'
 ): Promise<{ message: string; sport_id: string }> {
-  let sportDoc = await primaryDb.collection('Sports_Configurations').doc(sportId).get().catch(() => null);
-  if (!sportDoc || !sportDoc.exists) {
-    sportDoc = await primaryDb.collection('sports_configurations').doc(sportId).get().catch(() => null);
-  }
-  if ((!sportDoc || !sportDoc.exists) && dbV1 && dbV1 !== primaryDb) {
-    sportDoc = await dbV1.collection('Sports_Configurations').doc(sportId).get().catch(() => null);
-  }
-  if (!sportDoc || !sportDoc.exists) {
-    throw new ServiceError(`Sport configuration with ID '${sportId}' was not found.`, 404);
+  const cleanId = String(sportId).trim();
+  const lowerId = cleanId.toLowerCase();
+  const idVariants = Array.from(new Set([
+    sportId,
+    cleanId,
+    lowerId,
+    cleanId.replace(/_default$/, ''),
+    `sport_${cleanId.replace(/_default$/, '')}`,
+    `${cleanId}_default`,
+  ])).filter(Boolean);
+
+  const databases = [primaryDb];
+  const collections = ['Sports_Configurations', 'sports_configurations', 'sports_configuration'];
+
+  let matchedSportData: SportsConfiguration | null = null;
+  const docsToDelete: { db: any; ref: any }[] = [];
+
+  for (const currentDb of databases) {
+    for (const colName of collections) {
+      try {
+        // 1. Direct doc ID
+        for (const variant of idVariants) {
+          const dRef = currentDb.collection(colName).doc(variant);
+          const snap = await dRef.get().catch(() => null);
+          if (snap && snap.exists) {
+            if (!matchedSportData) matchedSportData = snap.data() as SportsConfiguration;
+            docsToDelete.push({ db: currentDb, ref: dRef });
+          }
+        }
+
+        // 2. Query by sport_id field
+        for (const variant of idVariants) {
+          const snap = await currentDb.collection(colName).where('sport_id', '==', variant).get().catch(() => null);
+          if (snap && !snap.empty) {
+            snap.docs.forEach((d) => {
+              if (!matchedSportData) matchedSportData = d.data() as SportsConfiguration;
+              docsToDelete.push({ db: currentDb, ref: d.ref });
+            });
+          }
+        }
+
+        // 3. Query by sport_name
+        const nameSnap = await currentDb.collection(colName).get().catch(() => null);
+        if (nameSnap && !nameSnap.empty) {
+          nameSnap.docs.forEach((d) => {
+            const data = d.data() as SportsConfiguration;
+            const sName = String(data.sport_name || '').trim().toLowerCase();
+            const sShort = String(data.short_identifier || '').trim().toUpperCase();
+            if (sName === lowerId || sName === cleanId.toLowerCase() || sShort === cleanId.toUpperCase()) {
+              if (!matchedSportData) matchedSportData = data;
+              docsToDelete.push({ db: currentDb, ref: d.ref });
+            }
+          });
+        }
+      } catch (err) {
+        console.warn(`⚠️ [DELETE SPORT] Query error in ${colName}:`, err);
+      }
+    }
   }
 
-  const existingSport = sportDoc.data() as SportsConfiguration;
+  // Check if sport was found
+  if (docsToDelete.length === 0 && !matchedSportData) {
+    throw new ServiceError(`Sport configuration with ID '${sportId}' was not found in database.`, 404);
+  }
+
+  const sportName = matchedSportData?.sport_name || sportId;
 
   // Prevent deletion of core system sports
   const isDefaultSport = DEFAULT_SPORTS_CONFIGURATIONS.some(
     (d) =>
-      d.sport_id.toLowerCase() === sportId.toLowerCase() ||
-      d.sport_name.toLowerCase() === (existingSport.sport_name || '').toLowerCase()
+      d.sport_id.toLowerCase() === lowerId ||
+      d.sport_id.toLowerCase() === `sport_${lowerId}` ||
+      d.sport_name.toLowerCase() === (sportName || '').toLowerCase()
   );
   if (isDefaultSport) {
     throw new ServiceError(
-      `Core system sport '${existingSport.sport_name}' cannot be deleted. You can deactivate it instead.`,
+      `Core system sport '${sportName}' cannot be deleted. You can deactivate it instead.`,
       400
     );
   }
 
-  // Delete from primaryDb Firestore (both canonical and lowercase collections)
-  const delBatch = primaryDb.batch();
-  delBatch.delete(primaryDb.collection('Sports_Configurations').doc(sportId));
-  delBatch.delete(primaryDb.collection('sports_configurations').doc(sportId));
-  await delBatch.commit().catch(async () => {
-    await primaryDb.collection('Sports_Configurations').doc(sportId).delete().catch(() => {});
-    await primaryDb.collection('sports_configurations').doc(sportId).delete().catch(() => {});
-  });
-
-  if (dbV1 && dbV1 !== primaryDb) {
+  // Delete all matching documents
+  for (const item of docsToDelete) {
     try {
-      const v1DelBatch = dbV1.batch();
-      v1DelBatch.delete(dbV1.collection('Sports_Configurations').doc(sportId));
-      v1DelBatch.delete(dbV1.collection('sports_configurations').doc(sportId));
-      await v1DelBatch.commit().catch(() => {});
+      await item.ref.delete().catch(() => {});
     } catch {}
   }
 
@@ -518,13 +546,13 @@ export async function deleteSportService(
     ip_address: clientIp,
     details: {
       sport_id: sportId,
-      sport_name: existingSport.sport_name,
-      short_identifier: existingSport.short_identifier,
+      sport_name: sportName,
+      deleted_documents_count: docsToDelete.length,
     },
   }).catch((err) => console.error('Admin audit error on deleteSport:', err));
 
   return {
-    message: `Sport configuration '${existingSport.sport_name}' deleted successfully.`,
+    message: `Sport configuration '${sportName}' deleted successfully from database.`,
     sport_id: sportId,
   };
 }

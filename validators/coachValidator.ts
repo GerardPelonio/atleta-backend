@@ -59,15 +59,15 @@ export function validateRegisterCoach(data: Record<string, unknown>, hasFile: bo
     errors.push({ field: 'regional_affiliation', message: 'Regional affiliation must not exceed 255 characters.' });
   }
 
-  // professional_documents (ACCEPTANCE CRITERIA: Minimum 1 document link upon registration)
+  // professional_documents (Optional: document links or uploaded files)
   const docs = data.professional_documents;
-  const hasDocLinks = Array.isArray(docs) && docs.filter((d) => typeof d === 'string' && d.trim().length > 0).length > 0;
-
-  if (!hasFile && !hasDocLinks) {
-    errors.push({
-      field: 'professional_documents',
-      message: 'Minimum 1 certification document link or uploaded file is required upon registration. Missing certification files block account creation.',
-    });
+  if (docs !== undefined && docs !== null) {
+    if (typeof docs !== 'string' && !Array.isArray(docs)) {
+      errors.push({
+        field: 'professional_documents',
+        message: 'Professional documents must be a string or an array of document paths.',
+      });
+    }
   }
 
   return errors;

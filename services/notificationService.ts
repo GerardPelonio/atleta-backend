@@ -127,7 +127,7 @@ export async function markNotificationAsRead(notificationId: string, recipientUs
     const rawUid = recipientUserId.replace(/^ath_/, '').replace(/^coach_/, '');
     const possibleRecipientIds = [recipientUserId, rawUid, `ath_${rawUid}`, `coach_${rawUid}`];
     if (possibleRecipientIds.includes(data.recipient_id)) {
-      await notifRef.update({ is_read: true });
+      await notifRef.update({ is_read: true, read_status: true, status: 'READ' });
       try {
         serverCache.invalidateTags([`notifs_${rawUid}`, `notifs_${recipientUserId}`]);
       } catch {}
@@ -158,7 +158,7 @@ export async function markAllNotificationsAsRead(recipientUserId: string): Promi
   const batch = db.batch();
   let count = 0;
   snapshot.forEach((doc) => {
-    batch.update(doc.ref, { is_read: true });
+    batch.update(doc.ref, { is_read: true, read_status: true, status: 'READ' });
     count++;
   });
 

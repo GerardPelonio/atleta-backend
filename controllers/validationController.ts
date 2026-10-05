@@ -102,8 +102,10 @@ export async function certifyValidationHandler(req: AuthRequest, res: Response):
 
 export async function deleteMatchHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    if (!req.user || req.user.role !== 'Official') {
-      res.status(401).json({ error: 'Unauthorized. Official role required.' });
+    const userRole = String(req.user?.role || '').toLowerCase().replace(/[\s_-]+/g, '');
+    const isAllowed = userRole.includes('official') || userRole.includes('admin') || userRole.includes('coach');
+    if (!req.user || !isAllowed) {
+      res.status(403).json({ error: 'Unauthorized. Required role: Official, Admin, or Coach.' });
       return;
     }
 
@@ -114,7 +116,7 @@ export async function deleteMatchHandler(req: AuthRequest, res: Response): Promi
     }
 
     const result = await deleteMatchService(matchId);
-    serverCache.invalidateTags(['matches', 'dashboard', 'validations', `match_${matchId}`]);
+    serverCache.invalidateTags(['matches', 'dashboard', 'validations', 'schedules', 'audits', `match_${matchId}`]);
     res.status(200).json(result);
   } catch (error: any) {
     if (error instanceof ServiceError) {

@@ -103,6 +103,10 @@ export interface OfficialSettings {
   split_screen_defaults: boolean;
   discrepancy_presets: boolean;
   match_reminders: boolean;
+  audit_notifications?: boolean;
+  auto_refresh?: boolean;
+  autoRefreshMatchQueue?: boolean;
+  autoRefresh?: boolean;
   updated_at: Date | string;
 }
 
@@ -119,6 +123,10 @@ export interface UpdateOfficialSettingsDto {
   split_screen_defaults?: boolean;
   discrepancy_presets?: boolean;
   match_reminders?: boolean;
+  audit_notifications?: boolean;
+  auto_refresh?: boolean;
+  autoRefreshMatchQueue?: boolean;
+  autoRefresh?: boolean;
 }
 
 // Admin_Profiles Subtype Entity
