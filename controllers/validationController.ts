@@ -43,7 +43,8 @@ export async function createOfficialMatchHandler(req: AuthRequest, res: Response
 
 export async function getPendingValidationsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    if (!req.user || req.user.role !== 'Official') {
+    const userRole = String(req.user?.role || '').toLowerCase();
+    if (!req.user || (!userRole.includes('official') && !userRole.includes('admin'))) {
       res.status(401).json({ error: 'Unauthorized. Official role required.' });
       return;
     }
@@ -70,7 +71,8 @@ export async function getPendingValidationsHandler(req: AuthRequest, res: Respon
 
 export async function certifyValidationHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    if (!req.user || req.user.role !== 'Official') {
+    const userRole = String(req.user?.role || '').toLowerCase();
+    if (!req.user || (!userRole.includes('official') && !userRole.includes('admin'))) {
       res.status(401).json({ error: 'Unauthorized. Official role required for certification.' });
       return;
     }
