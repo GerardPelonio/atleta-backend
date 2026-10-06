@@ -217,9 +217,20 @@ export async function getPendingValidationsService() {
     let matchDetails: MatchLog | undefined = undefined;
 
     if (auditData.match_id) {
-      const matchDoc = await db.collection('Match_Logs').doc(auditData.match_id).get();
-      if (matchDoc.exists) {
+      const matchId = auditData.match_id;
+      const matchDoc = await db.collection('Match_Logs').doc(matchId).get().catch(() => null);
+      if (matchDoc && matchDoc.exists) {
         matchDetails = matchDoc.data() as MatchLog;
+      } else {
+        const querySnap = await db
+          .collection('Match_Logs')
+          .where('match_id', '==', matchId)
+          .limit(1)
+          .get()
+          .catch(() => null);
+        if (querySnap && !querySnap.empty) {
+          matchDetails = querySnap.docs[0].data() as MatchLog;
+        }
       }
     }
 
@@ -238,29 +249,171 @@ export async function getPendingValidationsService() {
 /**
  * Certifies a pending validation and locks target match record to read-only status.
  * ACCEPTANCE CRITERIA: Re-auditing an already-certified match returns HTTP 409 Conflict.
+ * Solves: Lookup by direct document ID (doc(validationId)) AND fallback by match_id (where('match_id', '==', validationId)).
  */
 export async function certifyValidationService(
   validationId: string,
   officialUid: string,
   dto: CertifyValidationDto,
 ) {
-  // 1. Fetch Official Audit document
-  const validationRef = db.collection('Official_Audits').doc(validationId);
-  const validationDoc = await validationRef.get();
+  const cleanId = String(validationId || '').replace(/^#/, '').trim();
+  const idVariants = Array.from(
+    new Set([
+      validationId,
+      cleanId,
+      cleanId.toUpperCase(),
+      cleanId.toLowerCase(),
+      `VAL-${cleanId.replace(/^(VAL|MATCH)[-_]/i, '')}`,
+      `MATCH-${cleanId.replace(/^(VAL|MATCH)[-_]/i, '')}`,
+    ])
+  ).filter(Boolean);
 
-  if (!validationDoc.exists) {
-    throw new ServiceError(`Validation request '${validationId}' not found.`, 404);
+  // 1. Fetch Official Audit document:
+  // a. Direct document ID lookup
+  let validationRef: FirebaseFirestore.DocumentReference | null = null;
+  let validationDoc: FirebaseFirestore.DocumentSnapshot | null = null;
+
+  for (const variant of idVariants) {
+    const ref = db.collection('Official_Audits').doc(variant);
+    const snap = await ref.get().catch(() => null);
+    if (snap && snap.exists) {
+      validationRef = ref;
+      validationDoc = snap;
+      break;
+    }
   }
 
-  const auditData = validationDoc.data() as OfficialAudit;
-  const matchId = auditData.match_id;
+  // b. Fallback by match_id query
+  if (!validationDoc || !validationDoc.exists) {
+    for (const variant of idVariants) {
+      const snap = await db
+        .collection('Official_Audits')
+        .where('match_id', '==', variant)
+        .limit(1)
+        .get()
+        .catch(() => null);
 
-  // 2. Fetch Match_Logs document
-  const matchRef = db.collection('Match_Logs').doc(matchId);
-  const matchDoc = await matchRef.get();
+      if (snap && !snap.empty) {
+        validationRef = snap.docs[0].ref;
+        validationDoc = snap.docs[0];
+        break;
+      }
+    }
+  }
 
-  if (!matchDoc.exists) {
-    throw new ServiceError(`Target match record '${matchId}' not found.`, 404);
+  // c. Fallback by validation_id field query
+  if (!validationDoc || !validationDoc.exists) {
+    for (const variant of idVariants) {
+      const snap = await db
+        .collection('Official_Audits')
+        .where('validation_id', '==', variant)
+        .limit(1)
+        .get()
+        .catch(() => null);
+
+      if (snap && !snap.empty) {
+        validationRef = snap.docs[0].ref;
+        validationDoc = snap.docs[0];
+        break;
+      }
+    }
+  }
+
+  // 2. Resolve Match_Logs document
+  let matchRef: FirebaseFirestore.DocumentReference | null = null;
+  let matchDoc: FirebaseFirestore.DocumentSnapshot | null = null;
+  let auditData: Partial<OfficialAudit> = {};
+
+  if (validationDoc && validationDoc.exists) {
+    auditData = validationDoc.data() as OfficialAudit;
+    const targetMatchId = auditData.match_id || cleanId;
+    const matchVariants = Array.from(
+      new Set([
+        targetMatchId,
+        String(targetMatchId).replace(/^#/, '').trim(),
+        String(targetMatchId).toUpperCase(),
+        String(targetMatchId).toLowerCase(),
+        ...idVariants,
+      ])
+    ).filter(Boolean);
+
+    for (const mVariant of matchVariants) {
+      const ref = db.collection('Match_Logs').doc(mVariant);
+      const snap = await ref.get().catch(() => null);
+      if (snap && snap.exists) {
+        matchRef = ref;
+        matchDoc = snap;
+        break;
+      }
+    }
+
+    if (!matchDoc || !matchDoc.exists) {
+      for (const mVariant of matchVariants) {
+        const snap = await db
+          .collection('Match_Logs')
+          .where('match_id', '==', mVariant)
+          .limit(1)
+          .get()
+          .catch(() => null);
+
+        if (snap && !snap.empty) {
+          matchRef = snap.docs[0].ref;
+          matchDoc = snap.docs[0];
+          break;
+        }
+      }
+    }
+  } else {
+    // Audit document wasn't found directly, try finding target match directly by ID
+    for (const variant of idVariants) {
+      const ref = db.collection('Match_Logs').doc(variant);
+      const snap = await ref.get().catch(() => null);
+      if (snap && snap.exists) {
+        matchRef = ref;
+        matchDoc = snap;
+        break;
+      }
+    }
+
+    if (!matchDoc || !matchDoc.exists) {
+      for (const variant of idVariants) {
+        const snap = await db
+          .collection('Match_Logs')
+          .where('match_id', '==', variant)
+          .limit(1)
+          .get()
+          .catch(() => null);
+
+        if (snap && !snap.empty) {
+          matchRef = snap.docs[0].ref;
+          matchDoc = snap.docs[0];
+          break;
+        }
+      }
+    }
+
+    if (!matchDoc || !matchDoc.exists) {
+      throw new ServiceError(`Validation request or match record '${validationId}' not found.`, 404);
+    }
+
+    // Initialize audit metadata linked to this found match
+    const resolvedMatchData = matchDoc.data() as MatchLog;
+    const generatedValId = await generateStandardId('VAL');
+    validationRef = db.collection('Official_Audits').doc(generatedValId);
+    auditData = {
+      validation_id: generatedValId,
+      match_id: resolvedMatchData.match_id || cleanId,
+      official_id: officialUid,
+      status: 'Pending',
+      scoresheet_url: resolvedMatchData.scoresheet_url || '',
+      context_notes: '',
+      requested_by: officialUid,
+      created_at: new Date().toISOString(),
+    };
+  }
+
+  if (!matchDoc || !matchDoc.exists || !matchRef) {
+    throw new ServiceError(`Target match record '${auditData.match_id || validationId}' not found.`, 404);
   }
 
   const matchData = matchDoc.data() as MatchLog;
@@ -274,11 +427,11 @@ export async function certifyValidationService(
   let officialId = auditData.official_id;
   const rawOfficialUid = officialUid.replace(/^off_/, '');
   const canonicalOffUid = `off_${rawOfficialUid}`;
-  let profileDoc = await db.collection('Official_Profiles').doc(canonicalOffUid).get();
-  if (!profileDoc.exists) {
-    profileDoc = await db.collection('Official_Profiles').doc(rawOfficialUid).get();
+  let profileDoc = await db.collection('Official_Profiles').doc(canonicalOffUid).get().catch(() => null);
+  if (!profileDoc || !profileDoc.exists) {
+    profileDoc = await db.collection('Official_Profiles').doc(rawOfficialUid).get().catch(() => null);
   }
-  if (profileDoc.exists) {
+  if (profileDoc && profileDoc.exists) {
     officialId = profileDoc.data()?.official_id || canonicalOffUid;
   } else {
     officialId = canonicalOffUid;
@@ -291,7 +444,7 @@ export async function certifyValidationService(
     status: 'Approved',
     official_id: officialId,
     context_notes: dto.context_notes || auditData.context_notes || '',
-    scoresheet_url: dto.scoresheet_url || auditData.scoresheet_url || '',
+    scoresheet_url: dto.scoresheet_url || auditData.scoresheet_url || matchData.scoresheet_url || '',
     certified_at: now,
   };
 
@@ -303,8 +456,8 @@ export async function certifyValidationService(
   };
 
   const batch = db.batch();
-  batch.update(validationRef, updatedAudit);
-  batch.update(matchRef, updatedMatch);
+  batch.set(validationRef!, { ...auditData, ...updatedAudit }, { merge: true });
+  batch.set(matchRef, updatedMatch, { merge: true });
   await batch.commit();
 
   return {
