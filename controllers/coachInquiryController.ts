@@ -21,7 +21,10 @@ import { getCoachManagedAthletes } from '../services/teamService';
 export async function getCoachProfileHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const rawCoachParam = req.params.coachId;
-    const coachId = (Array.isArray(rawCoachParam) ? rawCoachParam[0] : rawCoachParam) || req.user?.uid;
+    let coachId: string | undefined = Array.isArray(rawCoachParam) ? rawCoachParam[0] : rawCoachParam;
+    if (!coachId || coachId === 'profile' || coachId === 'me') {
+      coachId = req.user?.uid;
+    }
 
     if (!coachId) {
       res.status(400).json({ error: 'Coach ID is required.' });
@@ -219,7 +222,10 @@ export async function getCoachAthletesHandler(req: AuthRequest, res: Response): 
 export async function getCoachManagedAthletesHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const rawCoachParam = req.params.coachId;
-    const coachId = (Array.isArray(rawCoachParam) ? rawCoachParam[0] : rawCoachParam) || req.user?.uid;
+    let coachId: string | undefined = Array.isArray(rawCoachParam) ? rawCoachParam[0] : rawCoachParam;
+    if (!coachId || coachId === 'profile' || coachId === 'me' || coachId === 'athletes') {
+      coachId = req.user?.uid;
+    }
 
     if (!coachId) {
       res.status(400).json({ error: 'Coach ID is required.' });

@@ -39,8 +39,15 @@ export function invalidateCoachCache(coachId?: string) {
  * Returns null if coach does not exist (triggers 404).
  */
 export async function getPublicCoachProfile(coachId: string): Promise<CoachPublicProfile | null> {
-  // Check for explicit non-existent pattern
-  if (coachId.includes('non-existent') || coachId.includes('nonexistent') || coachId === '404') {
+  // Check for explicit non-existent pattern or route tokens
+  if (
+    !coachId ||
+    coachId === 'profile' ||
+    coachId === 'me' ||
+    coachId.includes('non-existent') ||
+    coachId.includes('nonexistent') ||
+    coachId === '404'
+  ) {
     return null;
   }
 
@@ -94,14 +101,14 @@ export async function getPublicCoachProfile(coachId: string): Promise<CoachPubli
   let quote = coachData.quote || null;
   let experience = Number(coachData.years_of_experience || coachData.years_experience || 0);
   let credentials = coachData.credentials || coachData.certifications || [];
-  let uploadedDocuments = coachData.uploaded_documents || [];
-  let professionalDocuments = coachData.professional_documents || [];
+  let uploadedDocuments = coachData.uploaded_documents || coachData.professional_documents || [];
+  let professionalDocuments = coachData.professional_documents || coachData.uploaded_documents || [];
   let sportType = coachData.sport_type || '';
   let avatarUrl = coachData.avatar_url || coachData.profile_image || null;
 
   const lookupIds = [coachData.user_id, rawUid, canonicalCoachId, coachId].filter(Boolean) as string[];
   for (const uid of lookupIds) {
-    if (fullName && firstName && email && institution && regionalAffiliation && nationalLeague && avatarUrl && sportType) break;
+    if (fullName && firstName && email && institution && regionalAffiliation && nationalLeague && avatarUrl && sportType && credentials.length) break;
     const userDoc = await db.collection('Users').doc(uid).get();
     if (userDoc.exists) {
       const u = userDoc.data()!;
@@ -120,13 +127,25 @@ export async function getPublicCoachProfile(coachId: string): Promise<CoachPubli
       if (!credentials.length && (u.credentials || u.certifications)) {
         credentials = u.credentials || u.certifications || [];
       }
-      if (!uploadedDocuments.length && u.uploaded_documents) {
-        uploadedDocuments = u.uploaded_documents || [];
+      if (!uploadedDocuments.length && (u.uploaded_documents || u.professional_documents)) {
+        uploadedDocuments = u.uploaded_documents || u.professional_documents || [];
       }
-      if (!professionalDocuments.length && u.professional_documents) {
-        professionalDocuments = u.professional_documents || [];
+      if (!professionalDocuments.length && (u.professional_documents || u.uploaded_documents)) {
+        professionalDocuments = u.professional_documents || u.uploaded_documents || [];
       }
     }
+  }
+
+  if (!credentials.length && professionalDocuments.length) {
+    credentials = professionalDocuments.map((doc: any, i: number) => {
+      const docName = typeof doc === 'string' ? doc : doc.file_name || doc.name || `Document ${i + 1}`;
+      return {
+        id: typeof doc === 'object' && doc.id ? doc.id : `cred_${i}`,
+        title: docName.replace(/\.[^/.]+$/, '').replace(/_/g, ' '),
+        type: 'certified',
+        icon_name: 'shield-check',
+      };
+    });
   }
 
   if (!fullName) {
@@ -163,11 +182,15 @@ export async function getPublicCoachProfile(coachId: string): Promise<CoachPubli
   } catch {}
 
   try {
-    const matchesSnap = await db.collection('Matches')
-      .where('coach_id', 'in', [canonicalCoachId, rawUid, coachId])
-      .get();
-    if (!matchesSnap.empty) {
-      totalMatches = Math.max(totalMatches, matchesSnap.size);
+    const [matchesSnap1, matchesSnap2] = await Promise.all([
+      db.collection('Match_Logs').where('coach_id', 'in', [canonicalCoachId, rawUid, coachId]).get().catch(() => null),
+      db.collection('Matches').where('coach_id', 'in', [canonicalCoachId, rawUid, coachId]).get().catch(() => null),
+    ]);
+    const setOfMatchIds = new Set<string>();
+    matchesSnap1?.forEach((d) => setOfMatchIds.add(d.id));
+    matchesSnap2?.forEach((d) => setOfMatchIds.add(d.id));
+    if (setOfMatchIds.size > 0) {
+      totalMatches = Math.max(totalMatches, setOfMatchIds.size);
     }
   } catch {}
 
