@@ -1257,6 +1257,12 @@ export async function updateUserProfileService(uid: string, payload: Record<stri
   }
   await batch.commit();
 
+  try {
+    const { invalidateCoachProfileCache } = require('./coachInquiryService');
+    invalidateCoachProfileCache(uid);
+    invalidateCoachProfileCache(canonicalRoleDocId);
+  } catch {}
+
   return await getUserProfileService(uid);
 }
 
