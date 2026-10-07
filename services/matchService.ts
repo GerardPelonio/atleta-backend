@@ -1583,11 +1583,19 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
   const matchData = matchDoc.data() as any;
 
   let scoresheetUrl = matchData.scoresheet_url || '';
-  if (!scoresheetUrl) {
+  let resolvedNotes = matchData.notes || '';
+
+  if (!scoresheetUrl || !resolvedNotes) {
     try {
       const auditSnap = await db.collection('Official_Audits').where('match_id', '==', matchId).limit(1).get();
       if (!auditSnap.empty) {
-        scoresheetUrl = auditSnap.docs[0].data()?.scoresheet_url || '';
+        const auditData = auditSnap.docs[0].data();
+        if (!scoresheetUrl) {
+          scoresheetUrl = auditData?.scoresheet_url || '';
+        }
+        if (!resolvedNotes) {
+          resolvedNotes = auditData?.context_notes || '';
+        }
       }
     } catch (_) {}
   }
@@ -1815,7 +1823,8 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
     opponent_team_name: matchData.opponent_team_name,
     game_result: matchData.game_result,
     is_official: matchData.is_official !== false,
-    notes: matchData.notes ? (Array.isArray(matchData.notes) ? matchData.notes : [matchData.notes]) : [],
+    notes: resolvedNotes ? (Array.isArray(resolvedNotes) ? resolvedNotes : [resolvedNotes]) : [],
+    context_notes: typeof resolvedNotes === 'string' ? resolvedNotes : (Array.isArray(resolvedNotes) ? resolvedNotes.join(' ') : ''),
     team_summary: {
       team_id: matchData.team_id,
       team_name: teamName,
