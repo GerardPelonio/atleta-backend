@@ -452,6 +452,7 @@ export async function certifyValidationService(
   const updatedMatch: Partial<MatchLog> = {
     is_certified: true,
     is_locked: true,
+    notes: dto.context_notes !== undefined ? dto.context_notes : (matchData.notes || ''),
     scoresheet_url: dto.scoresheet_url || matchData.scoresheet_url || '',
   };
 
