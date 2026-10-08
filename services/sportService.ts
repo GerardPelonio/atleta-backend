@@ -76,32 +76,44 @@ export async function seedDefaultSportsIfEmpty(): Promise<void> {
       const batch = primaryDb.batch();
       for (const sport of DEFAULT_SPORTS_CONFIGURATIONS) {
         batch.set(primaryDb.collection('Sports_Configurations').doc(sport.sport_id), sport, { merge: true });
-        batch.set(primaryDb.collection('sports_configurations').doc(sport.sport_id), sport, { merge: true });
       }
       await batch.commit();
     }
 
-    // Proactively clean up legacy *_default duplicate documents from Firestore
-    const collections = ['Sports_Configurations', 'sports_configurations', 'sports_configuration'];
-    for (const col of collections) {
+    // Proactively clean up legacy duplicate documents / collections from Firestore
+    const legacyCollections = ['sports_configurations', 'sports_configuration'];
+    for (const col of legacyCollections) {
       try {
-        const defaultDocs = await primaryDb.collection(col).get();
-        if (!defaultDocs.empty) {
+        const snap = await primaryDb.collection(col).get();
+        if (!snap.empty) {
           const deleteBatch = primaryDb.batch();
-          let deleteCount = 0;
-          for (const doc of defaultDocs.docs) {
-            if (doc.id.endsWith('_default') || (doc.data()?.sport_id && String(doc.data()?.sport_id).endsWith('_default'))) {
-              deleteBatch.delete(doc.ref);
-              deleteCount++;
-            }
+          for (const doc of snap.docs) {
+            deleteBatch.delete(doc.ref);
           }
-          if (deleteCount > 0) {
-            await deleteBatch.commit();
-            console.log(`🧹 Cleaned up ${deleteCount} legacy '_default' sport documents from collection '${col}'`);
-          }
+          await deleteBatch.commit();
+          console.log(`🧹 Cleaned up ${snap.size} legacy documents from duplicate '${col}' collection`);
         }
       } catch {}
     }
+
+    // Clean up any legacy '*_default' documents from Sports_Configurations
+    try {
+      const defaultDocs = await primaryDb.collection('Sports_Configurations').get();
+      if (!defaultDocs.empty) {
+        const deleteBatch = primaryDb.batch();
+        let deleteCount = 0;
+        for (const doc of defaultDocs.docs) {
+          if (doc.id.endsWith('_default') || (doc.data()?.sport_id && String(doc.data()?.sport_id).endsWith('_default'))) {
+            deleteBatch.delete(doc.ref);
+            deleteCount++;
+          }
+        }
+        if (deleteCount > 0) {
+          await deleteBatch.commit();
+          console.log(`🧹 Cleaned up ${deleteCount} legacy '_default' sport documents from Sports_Configurations`);
+        }
+      }
+    } catch {}
   } catch (err: any) {
     console.warn('⚠️ seedDefaultSportsIfEmpty warning:', err?.message || err);
   }
@@ -131,28 +143,6 @@ export async function getAllSportsService(onlyActive: boolean = false): Promise<
       } catch (err: any) {
         console.warn('⚠️ Primary Sports_Configurations fetch warning:', err?.message || err);
       }
-
-      try {
-        const lowerSnap = await primaryDb.collection('sports_configurations').get();
-        if (!lowerSnap.empty) {
-          const lowerList = lowerSnap.docs.map((doc) => ({
-            sport_id: doc.id,
-            ...(doc.data() as object),
-          }));
-          rawSports = [...rawSports, ...lowerList];
-        }
-      } catch {}
-
-      try {
-        const singularSnap = await primaryDb.collection('sports_configuration').get();
-        if (!singularSnap.empty) {
-          const singularList = singularSnap.docs.map((doc) => ({
-            sport_id: doc.id,
-            ...(doc.data() as object),
-          }));
-          rawSports = [...rawSports, ...singularList];
-        }
-      } catch {}
 
       // If still empty, supply default configurations
       if (rawSports.length === 0) {
@@ -204,10 +194,7 @@ export async function getAllSportsService(onlyActive: boolean = false): Promise<
  * Retrieve single sport configuration by sport_id.
  */
 export async function getSportByIdService(sportId: string): Promise<SportsConfiguration> {
-  let doc = await primaryDb.collection('Sports_Configurations').doc(sportId).get().catch(() => null);
-  if (!doc || !doc.exists) {
-    doc = await primaryDb.collection('sports_configurations').doc(sportId).get().catch(() => null);
-  }
+  const doc = await primaryDb.collection('Sports_Configurations').doc(sportId).get().catch(() => null);
   if (!doc || !doc.exists) {
     throw new ServiceError(`Sport configuration with ID '${sportId}' was not found.`, 404);
   }
@@ -294,10 +281,9 @@ export async function createSportService(
     updated_at: now,
   };
 
-  // Atomic batch write to primaryDb (writes to both Sports_Configurations and sports_configurations)
+  // Atomic batch write to primaryDb (writes exclusively to canonical Sports_Configurations)
   const batch = primaryDb.batch();
   batch.set(primaryDb.collection('Sports_Configurations').doc(sportId), newSport);
-  batch.set(primaryDb.collection('sports_configurations').doc(sportId), newSport);
 
   const responsePayload = {
     message: 'Sport configuration registered successfully.',
@@ -351,10 +337,7 @@ export async function updateSportService(
   adminUserId: string = 'SYS_ADMIN',
   clientIp: string = '127.0.0.1'
 ): Promise<{ message: string; sport: SportsConfiguration }> {
-  let sportDoc = await primaryDb.collection('Sports_Configurations').doc(sportId).get().catch(() => null);
-  if (!sportDoc || !sportDoc.exists) {
-    sportDoc = await primaryDb.collection('sports_configurations').doc(sportId).get().catch(() => null);
-  }
+  const sportDoc = await primaryDb.collection('Sports_Configurations').doc(sportId).get().catch(() => null);
   if (!sportDoc || !sportDoc.exists) {
     throw new ServiceError(`Sport configuration with ID '${sportId}' was not found.`, 404);
   }
@@ -400,7 +383,6 @@ export async function updateSportService(
 
   const updateBatch = primaryDb.batch();
   updateBatch.set(primaryDb.collection('Sports_Configurations').doc(sportId), updatedSport, { merge: true });
-  updateBatch.set(primaryDb.collection('sports_configurations').doc(sportId), updatedSport, { merge: true });
   await updateBatch.commit();
 
   // Invalidate in-memory sports catalog cache
