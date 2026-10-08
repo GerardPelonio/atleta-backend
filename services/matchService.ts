@@ -1498,9 +1498,10 @@ export async function processAndStitchScoresheets(
 }
 
 /**
- * Dedicated Multi-File Scoresheet Scanner.
- * Processes multiple scoresheet pages/files for a single match or multi-sport meet,
- * sends all image parts to Gemini Vision in a single multimodal request, and merges the result.
+ * Dedicated Multi-File Scoresheet Scanner (Batch & Separate Match Extraction).
+ * Processes each uploaded scoresheet file individually in parallel via Gemini AI OCR,
+ * preserving separate match statistics, teams, sports, and boxscores for each uploaded file,
+ * returning a collection of separated matches (`matches: []`) alongside top-level match information.
  */
 export async function scanMultipleScoresheetsStandalone(
   files: Express.Multer.File[],
@@ -1527,106 +1528,62 @@ export async function scanMultipleScoresheetsStandalone(
     DEFAULT_OCR_KEY
   ).trim().replace(/^["']|["']$/g, '');
 
-  const { compositeBuffer, imageParts } = await processAndStitchScoresheets(files);
+  console.log(`🚀 [MULTI-OCR] Processing ${files.length} scoresheets separately in parallel...`);
 
-  const promptText = `Analyze all ${imageParts.length} attached scoresheet pages/files.
-If these pages represent multiple pages of a SINGLE match (e.g. Page 1 Boxscore + Page 2 Roster/Fouls), reconcile all player stats, points, fouls, quarter breakdowns, and team totals across all pages into the standard JSON format without duplicate players.
-If these pages represent DIFFERENT sports or different matches, parse and extract all athlete statistics across the detected sports into the standard format.
+  // Scan each file individually in parallel so different sports and separate matches stay distinct
+  const scanPromises = files.map(async (file, idx) => {
+    try {
+      const result = await scanScoresheetStandalone(file, geminiKey);
+      return {
+        index: idx,
+        file_name: file.originalname || `Scoresheet_${idx + 1}`,
+        status: 'success',
+        ...result,
+      };
+    } catch (err: any) {
+      console.error(`❌ [MULTI-OCR] Error scanning file ${idx + 1} (${file.originalname}):`, err.message);
+      return {
+        index: idx,
+        file_name: file.originalname || `Scoresheet_${idx + 1}`,
+        status: 'error',
+        error: err.message,
+        match_info: {
+          sport_type: 'Unknown',
+          match_name: file.originalname,
+        },
+        team_scores: [],
+        player_summary: [],
+        parsed_tables: { team_scores: [], player_summary: [] },
+      };
+    }
+  });
 
-${SCORESHEET_EXTRACTION_PROMPT}`;
+  const parsedMatches = await Promise.all(scanPromises);
 
-  const requestParts: any[] = [{ text: promptText }];
-  for (const part of imageParts) {
-    requestParts.push({
-      inline_data: {
-        mime_type: part.mimeType,
-        data: part.buffer.toString('base64'),
-      },
-    });
-  }
+  // Find the first successful match to provide as the primary top-level fallback
+  const primaryMatch = parsedMatches.find((m) => m.status === 'success') || parsedMatches[0];
 
-  const requestBody = {
-    contents: [{ parts: requestParts }],
-    generationConfig: {
-      temperature: 0.1,
-      maxOutputTokens: 8192,
+  // Aggregate all players across all matches for holistic overview if needed
+  const allPlayers = parsedMatches.flatMap((m) => m.player_summary || []);
+  const allTeamScores = parsedMatches.flatMap((m) => m.team_scores || []);
+
+  return {
+    batch_mode: true,
+    total_matches: files.length,
+    successful_matches: parsedMatches.filter((m) => m.status === 'success').length,
+    matches: parsedMatches,
+    // Top-level defaults for backward compatibility
+    filename: `batch_${files.length}_scoresheets.zip`,
+    scoresheet_url: primaryMatch?.scoresheet_url || '',
+    parsed_at: new Date().toISOString(),
+    match_info: primaryMatch?.match_info || {},
+    team_scores: allTeamScores.length > 0 ? allTeamScores : primaryMatch?.team_scores || [],
+    player_summary: allPlayers.length > 0 ? allPlayers : primaryMatch?.player_summary || [],
+    parsed_tables: {
+      team_scores: allTeamScores,
+      player_summary: allPlayers,
     },
   };
-
-  try {
-    const mockCompositeFile: Express.Multer.File = {
-      buffer: compositeBuffer,
-      mimetype: 'image/jpeg',
-      originalname: `multi_scoresheet_${Date.now()}.jpg`,
-      size: compositeBuffer.length,
-      fieldname: 'file',
-      encoding: '7bit',
-      destination: '',
-      filename: `multi_scoresheet_${Date.now()}.jpg`,
-      path: '',
-      stream: null as any,
-    };
-
-    const [content, scoresheetUrl] = await Promise.all([
-      callGeminiWithWaterfall(requestBody, geminiKey),
-      uploadScoresheetFileToStorage(`multi_${Date.now()}`, mockCompositeFile).catch(
-        () => `data:image/jpeg;base64,${compositeBuffer.toString('base64')}`
-      ),
-    ]);
-
-    const parsedData = extractJsonFromAiText(content);
-
-    const rawPlayerSummary: any[] = Array.isArray(parsedData.player_summary)
-      ? parsedData.player_summary
-      : (Array.isArray(parsedData.players) ? parsedData.players : (Array.isArray(parsedData.roster) ? parsedData.roster : []));
-
-    const teamScores: any[] = Array.isArray(parsedData.team_scores)
-      ? parsedData.team_scores
-      : (Array.isArray(parsedData.teams) ? parsedData.teams : []);
-
-    const detectedSport = parsedData.match_info?.sport_type || 'Basketball';
-    const isBasketball = String(detectedSport).toLowerCase().includes('basket');
-    const isIndividual = String(detectedSport).toLowerCase().includes('swim') || String(detectedSport).toLowerCase().includes('track') || String(detectedSport).toLowerCase().includes('field');
-
-    const enrichedPlayers = rawPlayerSummary.map((p: any, idx: number) => {
-      const normalized = normalizeExtractedPlayer(p, idx, 'standalone');
-      let computed: any;
-      if (isBasketball) {
-        computed = calculateBasketballMetrics(normalized);
-      } else if (isIndividual) {
-        computed = calculateIndividualSportMetrics(normalized);
-      } else {
-        computed = calculateDynamicSportMetrics(normalized);
-      }
-
-      return {
-        ...normalized,
-        stats: { ...normalized },
-        sport_stats: computed.enrichedStats || normalized,
-        calculated_efficiency: computed.efficiency,
-        calculated_player_efficiency: computed.efficiency,
-        true_shooting_pct: (computed as any).trueShootingPct || 0,
-      };
-    });
-
-    return {
-      filename: `multi_scoresheets_${files.length}_pages.jpg`,
-      file_size_bytes: compositeBuffer.length,
-      page_count: files.length,
-      scoresheet_url: scoresheetUrl,
-      parsed_at: new Date().toISOString(),
-      match_info: parsedData.match_info || {},
-      team_scores: teamScores,
-      player_summary: enrichedPlayers,
-      parsed_tables: {
-        team_scores: teamScores,
-        player_summary: enrichedPlayers,
-      },
-    };
-  } catch (aiErr: any) {
-    console.error('❌ [MULTI-SCAN OCR] Google Gemini failed:', aiErr.message);
-    throw new ServiceError(`Multi-scoresheet OCR scanning failed: ${aiErr.message}`, 502);
-  }
 }
 
 
