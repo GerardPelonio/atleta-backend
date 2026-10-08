@@ -1421,6 +1421,214 @@ export async function scanScoresheetStandalone(file?: Express.Multer.File, custo
   }
 }
 
+/**
+ * Dedicated Sharp Multi-Image Processing and Vertical Stitching Engine.
+ * Compresses each scoresheet page to max 1800px and composites them into a single master canvas.
+ */
+export async function processAndStitchScoresheets(
+  files: Express.Multer.File[]
+): Promise<{ compositeBuffer: Buffer; imageParts: { buffer: Buffer; mimeType: string; filename: string }[] }> {
+  const sharp = require('sharp');
+  const imageParts: { buffer: Buffer; mimeType: string; filename: string }[] = [];
+  const processedToStitch: { buffer: Buffer; width: number; height: number }[] = [];
+
+  for (const file of files) {
+    const mime = file.mimetype || 'image/jpeg';
+    const isImg = mime.startsWith('image/');
+    let processedBuffer = file.buffer;
+    let outMime = mime;
+
+    if (isImg) {
+      try {
+        const { data, info } = await sharp(file.buffer)
+          .resize({ width: 1800, height: 1800, fit: 'inside', withoutEnlargement: true })
+          .normalize()
+          .sharpen({ sigma: 1.0, m1: 1.0, m2: 2.0 })
+          .jpeg({ quality: 85, progressive: true })
+          .toBuffer({ resolveWithObject: true });
+
+        processedBuffer = data;
+        outMime = 'image/jpeg';
+        processedToStitch.push({ buffer: data, width: info.width, height: info.height });
+      } catch (sharpErr) {
+        console.warn('⚠️ [MULTI-OCR] Sharp optimization skipped for page:', sharpErr);
+      }
+    }
+
+    imageParts.push({
+      buffer: processedBuffer,
+      mimeType: outMime,
+      filename: file.originalname || 'scoresheet_page.jpg',
+    });
+  }
+
+  let compositeBuffer: Buffer;
+  if (processedToStitch.length > 0) {
+    try {
+      const totalHeight = processedToStitch.reduce((acc, img) => acc + img.height, 0);
+      const maxWidth = Math.max(...processedToStitch.map((img) => img.width));
+
+      let currentTop = 0;
+      const compositeInputs = processedToStitch.map((img) => {
+        const top = currentTop;
+        currentTop += img.height;
+        return { input: img.buffer, top, left: 0 };
+      });
+
+      compositeBuffer = await sharp({
+        create: {
+          width: maxWidth,
+          height: totalHeight,
+          channels: 4,
+          background: { r: 255, g: 255, b: 255, alpha: 1 },
+        },
+      })
+        .composite(compositeInputs)
+        .jpeg({ quality: 85, progressive: true })
+        .toBuffer();
+    } catch (stitchErr) {
+      console.warn('⚠️ [MULTI-OCR] Image stitching fallback to first image:', stitchErr);
+      compositeBuffer = imageParts[0].buffer;
+    }
+  } else {
+    compositeBuffer = imageParts[0].buffer;
+  }
+
+  return { compositeBuffer, imageParts };
+}
+
+/**
+ * Dedicated Multi-File Scoresheet Scanner.
+ * Processes multiple scoresheet pages/files for a single match or multi-sport meet,
+ * sends all image parts to Gemini Vision in a single multimodal request, and merges the result.
+ */
+export async function scanMultipleScoresheetsStandalone(
+  files: Express.Multer.File[],
+  customKey?: string
+): Promise<any> {
+  if (!files || files.length === 0) {
+    throw new ServiceError('No scoresheet files provided.', 400);
+  }
+
+  // If single file was passed, reuse single scanner logic seamlessly
+  if (files.length === 1) {
+    return scanScoresheetStandalone(files[0], customKey);
+  }
+
+  try {
+    require('dotenv').config();
+  } catch {}
+
+  const geminiKey = (customKey ||
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GEMINI_KEY ||
+    DEFAULT_OCR_KEY
+  ).trim().replace(/^["']|["']$/g, '');
+
+  const { compositeBuffer, imageParts } = await processAndStitchScoresheets(files);
+
+  const promptText = `Analyze all ${imageParts.length} attached scoresheet pages/files.
+If these pages represent multiple pages of a SINGLE match (e.g. Page 1 Boxscore + Page 2 Roster/Fouls), reconcile all player stats, points, fouls, quarter breakdowns, and team totals across all pages into the standard JSON format without duplicate players.
+If these pages represent DIFFERENT sports or different matches, parse and extract all athlete statistics across the detected sports into the standard format.
+
+${SCORESHEET_EXTRACTION_PROMPT}`;
+
+  const requestParts: any[] = [{ text: promptText }];
+  for (const part of imageParts) {
+    requestParts.push({
+      inline_data: {
+        mime_type: part.mimeType,
+        data: part.buffer.toString('base64'),
+      },
+    });
+  }
+
+  const requestBody = {
+    contents: [{ parts: requestParts }],
+    generationConfig: {
+      temperature: 0.1,
+      maxOutputTokens: 8192,
+    },
+  };
+
+  try {
+    const mockCompositeFile: Express.Multer.File = {
+      buffer: compositeBuffer,
+      mimetype: 'image/jpeg',
+      originalname: `multi_scoresheet_${Date.now()}.jpg`,
+      size: compositeBuffer.length,
+      fieldname: 'file',
+      encoding: '7bit',
+      destination: '',
+      filename: `multi_scoresheet_${Date.now()}.jpg`,
+      path: '',
+      stream: null as any,
+    };
+
+    const [content, scoresheetUrl] = await Promise.all([
+      callGeminiWithWaterfall(requestBody, geminiKey),
+      uploadScoresheetFileToStorage(`multi_${Date.now()}`, mockCompositeFile).catch(
+        () => `data:image/jpeg;base64,${compositeBuffer.toString('base64')}`
+      ),
+    ]);
+
+    const parsedData = extractJsonFromAiText(content);
+
+    const rawPlayerSummary: any[] = Array.isArray(parsedData.player_summary)
+      ? parsedData.player_summary
+      : (Array.isArray(parsedData.players) ? parsedData.players : (Array.isArray(parsedData.roster) ? parsedData.roster : []));
+
+    const teamScores: any[] = Array.isArray(parsedData.team_scores)
+      ? parsedData.team_scores
+      : (Array.isArray(parsedData.teams) ? parsedData.teams : []);
+
+    const detectedSport = parsedData.match_info?.sport_type || 'Basketball';
+    const isBasketball = String(detectedSport).toLowerCase().includes('basket');
+    const isIndividual = String(detectedSport).toLowerCase().includes('swim') || String(detectedSport).toLowerCase().includes('track') || String(detectedSport).toLowerCase().includes('field');
+
+    const enrichedPlayers = rawPlayerSummary.map((p: any, idx: number) => {
+      const normalized = normalizeExtractedPlayer(p, idx, 'standalone');
+      let computed: any;
+      if (isBasketball) {
+        computed = calculateBasketballMetrics(normalized);
+      } else if (isIndividual) {
+        computed = calculateIndividualSportMetrics(normalized);
+      } else {
+        computed = calculateDynamicSportMetrics(normalized);
+      }
+
+      return {
+        ...normalized,
+        stats: { ...normalized },
+        sport_stats: computed.enrichedStats || normalized,
+        calculated_efficiency: computed.efficiency,
+        calculated_player_efficiency: computed.efficiency,
+        true_shooting_pct: (computed as any).trueShootingPct || 0,
+      };
+    });
+
+    return {
+      filename: `multi_scoresheets_${files.length}_pages.jpg`,
+      file_size_bytes: compositeBuffer.length,
+      page_count: files.length,
+      scoresheet_url: scoresheetUrl,
+      parsed_at: new Date().toISOString(),
+      match_info: parsedData.match_info || {},
+      team_scores: teamScores,
+      player_summary: enrichedPlayers,
+      parsed_tables: {
+        team_scores: teamScores,
+        player_summary: enrichedPlayers,
+      },
+    };
+  } catch (aiErr: any) {
+    console.error('❌ [MULTI-SCAN OCR] Google Gemini failed:', aiErr.message);
+    throw new ServiceError(`Multi-scoresheet OCR scanning failed: ${aiErr.message}`, 502);
+  }
+}
+
 
 /**
  * Fetch compiled match stats and computed efficiency metrics.

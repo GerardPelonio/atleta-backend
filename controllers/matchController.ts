@@ -6,6 +6,7 @@ import {
   submitMatchSession,
   processScoresheetOCR,
   scanScoresheetStandalone,
+  scanMultipleScoresheetsStandalone,
   getMatchBoxscore,
   getMatchResultDetails,
 } from '../services/matchService';
@@ -229,6 +230,43 @@ export async function scanStandaloneScoresheet(req: AuthRequest, res: Response):
       return;
     }
     console.error('scanStandaloneScoresheet error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function scanMultiScoresheetsHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    let files: Express.Multer.File[] = [];
+    if (Array.isArray(req.files)) {
+      files = req.files as Express.Multer.File[];
+    } else if (req.files && typeof req.files === 'object') {
+      for (const key of Object.keys(req.files)) {
+        const item = (req.files as any)[key];
+        if (Array.isArray(item)) files.push(...item);
+        else if (item) files.push(item);
+      }
+    } else if (req.file) {
+      files = [req.file];
+    }
+
+    if (files.length === 0) {
+      res.status(400).json({ error: 'No scoresheet files uploaded.' });
+      return;
+    }
+
+    const customKey = (req.headers['x-gemini-key'] as string) || (req.headers['x-api-key'] as string) || (req.query.gemini_key as string) || (req.query.apiKey as string) || (req.body?.gemini_key as string) || (req.body?.apiKey as string);
+
+    const result = await scanMultipleScoresheetsStandalone(files, customKey);
+    res.status(200).json({
+      message: `Successfully processed and parsed ${files.length} scoresheet files.`,
+      ...result,
+    });
+  } catch (error: any) {
+    if (error instanceof ServiceError) {
+      res.status(error.statusCode).json({ error: error.message });
+      return;
+    }
+    console.error('scanMultiScoresheetsHandler error:', error);
     res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
   }
 }

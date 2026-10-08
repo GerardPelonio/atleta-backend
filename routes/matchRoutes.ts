@@ -5,6 +5,7 @@ import {
   submitMatch,
   uploadScoresheet,
   scanStandaloneScoresheet,
+  scanMultiScoresheetsHandler,
   getBoxscore,
   getMatchDetailsHandler,
   getAllMatchesHandler,
@@ -25,7 +26,13 @@ const upload = multer({
   limits: { fileSize: 30 * 1024 * 1024 },
 });
 
-// Dedicated Web & Mobile OCR Scoresheet Scanners
+// Dedicated Multi-File Scoresheet Scanner Endpoints
+router.post('/multi/scan-scoresheet', optionalAuth, upload.any(), scanMultiScoresheetsHandler);
+router.post('/multi/ocr', optionalAuth, upload.any(), scanMultiScoresheetsHandler);
+router.post('/web/multi/scan-scoresheet', optionalAuth, upload.any(), scanMultiScoresheetsHandler);
+router.post('/mobile/multi/scan-scoresheet', optionalAuth, upload.any(), scanMultiScoresheetsHandler);
+
+// Dedicated Web & Mobile OCR Scoresheet Scanners (Single-File)
 router.post('/web/scan-scoresheet', optionalAuth, upload.any(), scanStandaloneScoresheet);
 router.post('/web/ocr', optionalAuth, upload.any(), scanStandaloneScoresheet);
 router.post('/mobile/scan-scoresheet', optionalAuth, upload.any(), scanStandaloneScoresheet);
