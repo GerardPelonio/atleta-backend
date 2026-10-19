@@ -1392,7 +1392,7 @@ export async function requestPasswordResetService(email: string, clientFrontendU
     clientFrontendUrl ||
     process.env.FRONTEND_RESET_URL ||
     process.env.FRONTEND_URL ||
-    'https://atleta-frontend.vercel.app/reset-password'
+    '/reset-password'
   ).trim();
 
   if (baseUrl.endsWith('/')) {

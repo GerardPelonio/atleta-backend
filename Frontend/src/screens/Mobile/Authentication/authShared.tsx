@@ -47,7 +47,16 @@ const expoHostUri = Constants.expoConfig?.hostUri || (Constants as any)?.manifes
 const isTunnel = expoHostUri.includes("exp.direct") || expoHostUri.includes("ngrok") || !expoHostUri;
 const hostIp = (expoHostUri ? expoHostUri.split(":")[0] : "").trim() || "192.168.1.34";
 
-export const CLOUD_PROD_API = "https://atleta-backend.vercel.app/api/v1";
+const envProdApi = (
+  runtime.process?.env?.EXPO_PUBLIC_ATLETA_API ||
+  runtime.process?.env?.EXPO_PUBLIC_API_URL ||
+  runtime.process?.env?.REACT_APP_API_URL ||
+  ""
+).trim().replace(/\/+$/, "");
+
+export const CLOUD_PROD_API = envProdApi
+  ? (envProdApi.endsWith("/api/v1") ? envProdApi : `${envProdApi}/api/v1`)
+  : "/api/v1";
 export const API_BASE = CLOUD_PROD_API;
 
 export async function getActiveApiBase(): Promise<string> {
