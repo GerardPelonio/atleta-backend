@@ -354,77 +354,88 @@ export async function loginAdminService(
 
 /**
  * Retrieve pending coach verification applications and uploaded document links.
+ * Returns ALL coach accounts, whether or not they submitted optional documents during sign-up.
  */
 export async function getPendingCoachQueueService(filterStatus?: string) {
-  const snapshot = await db.collection('Coach_Profiles').get();
+  const [profileSnap, userSnap1, userSnap2] = await Promise.all([
+    db.collection('Coach_Profiles').get(),
+    db.collection('Users').where('role', '==', 'Coach').get().catch(() => ({ docs: [] } as any)),
+    db.collection('Users').where('role', '==', 'coach').get().catch(() => ({ docs: [] } as any)),
+  ]);
 
-  const coaches: any[] = [];
-  const userIds: string[] = [];
-  const seenUserIds = new Set<string>();
+  const coachesMap = new Map<string, any>();
+  const normalizeUid = (id: string) => id.replace(/^coach_/, '');
 
-  snapshot.docs.forEach((doc) => {
+  // 1. Process Users collection first (captures all signed up coaches)
+  const allUserDocs = [...userSnap1.docs, ...userSnap2.docs];
+  allUserDocs.forEach((doc: any) => {
     const data = doc.data();
+    const cleanUid = normalizeUid(doc.id);
     const effectiveStatus = data.account_status || data.status || 'Pending';
-    const effectiveUserId = data.user_id || doc.id.replace(/^coach_/, '');
+    const isApproved = effectiveStatus.toLowerCase() === 'active' || effectiveStatus.toLowerCase() === 'approved';
+    const isRejected = effectiveStatus.toLowerCase() === 'rejected';
+    const displayStatus = isApproved ? 'VERIFIED' : (isRejected ? 'REJECTED' : 'PENDING');
 
-    if (filterStatus && effectiveStatus.toLowerCase() !== filterStatus.toLowerCase()) {
-      return;
-    }
-
-    if (!seenUserIds.has(effectiveUserId)) {
-      seenUserIds.add(effectiveUserId);
-      const isApproved = effectiveStatus.toLowerCase() === 'active' || effectiveStatus.toLowerCase() === 'approved';
-      const isRejected = effectiveStatus.toLowerCase() === 'rejected';
-      const displayStatus = isApproved ? 'VERIFIED' : (isRejected ? 'REJECTED' : 'PENDING');
-
-      coaches.push({
-        coach_id: data.coach_id || (doc.id.startsWith('coach_') ? doc.id : `coach_${doc.id}`),
-        user_id: effectiveUserId,
-        first_name: data.first_name || '',
-        last_name: data.last_name || '',
-        full_name: data.full_name || `${data.first_name || ''} ${data.last_name || ''}`.trim(),
-        sport_type: data.sport_type || 'Unassigned',
-        years_of_experience: data.years_of_experience || 0,
-        current_institution: data.current_institution || 'N/A',
-        institutional_affiliation: data.current_institution || data.institutional_affiliation || 'N/A',
-        professional_documents: data.professional_documents || [],
-        account_status: effectiveStatus,
-        status: displayStatus,
-        rejection_reason: data.rejection_reason || '',
-        created_at: data.created_at || new Date().toISOString(),
-        date_uploaded: data.date_uploaded || data.created_at || new Date().toISOString(),
-      });
-      if (effectiveUserId) userIds.push(effectiveUserId);
-    }
+    coachesMap.set(cleanUid, {
+      coach_id: `coach_${cleanUid}`,
+      user_id: cleanUid,
+      first_name: data.first_name || '',
+      last_name: data.last_name || '',
+      full_name: data.full_name || `${data.first_name || ''} ${data.last_name || ''}`.trim() || 'Coach Applicant',
+      email: data.email || '',
+      sport_type: data.sport_type || data.sport || 'Unassigned',
+      years_of_experience: data.years_of_experience || 0,
+      current_institution: data.current_institution || data.institution || 'N/A',
+      institutional_affiliation: data.current_institution || data.institutional_affiliation || data.institution || 'N/A',
+      professional_documents: data.professional_documents || data.uploaded_documents || [],
+      account_status: effectiveStatus,
+      status: displayStatus,
+      rejection_reason: data.rejection_reason || '',
+      created_at: data.created_at || new Date().toISOString(),
+      date_uploaded: data.date_uploaded || data.created_at || new Date().toISOString(),
+    });
   });
 
-  // Resolve user emails & names in parallel
-  if (userIds.length > 0) {
-    const uniqueUids = Array.from(new Set(userIds));
-    const userDocs = await Promise.all(uniqueUids.map((uid) => db.collection('Users').doc(uid).get()));
-    const userMap = new Map<string, any>();
-    userDocs.forEach((uDoc) => {
-      if (uDoc.exists) {
-        userMap.set(uDoc.id, uDoc.data());
-      }
-    });
+  // 2. Overlay / Merge Coach_Profiles collection
+  profileSnap.docs.forEach((doc: any) => {
+    const data = doc.data();
+    const rawUid = data.user_id || doc.id;
+    const cleanUid = normalizeUid(rawUid);
+    const existing = coachesMap.get(cleanUid) || {};
+    const effectiveStatus = data.account_status || data.status || existing.account_status || 'Pending';
+    const isApproved = effectiveStatus.toLowerCase() === 'active' || effectiveStatus.toLowerCase() === 'approved';
+    const isRejected = effectiveStatus.toLowerCase() === 'rejected';
+    const displayStatus = isApproved ? 'VERIFIED' : (isRejected ? 'REJECTED' : 'PENDING');
 
-    coaches.forEach((coach) => {
-      const uData = userMap.get(coach.user_id);
-      if (uData) {
-        coach.email = uData.email || '';
-        coach.full_name = coach.full_name || `${uData.first_name || ''} ${uData.last_name || ''}`.trim();
-        if (uData.account_status) {
-          coach.account_status = uData.account_status;
-          const isApp = coach.account_status.toLowerCase() === 'active' || coach.account_status.toLowerCase() === 'approved';
-          const isRej = coach.account_status.toLowerCase() === 'rejected';
-          coach.status = isApp ? 'VERIFIED' : (isRej ? 'REJECTED' : 'PENDING');
-        }
-        if (uData.rejection_reason) {
-          coach.rejection_reason = uData.rejection_reason;
-        }
-      }
+    coachesMap.set(cleanUid, {
+      ...existing,
+      coach_id: data.coach_id || existing.coach_id || (doc.id.startsWith('coach_') ? doc.id : `coach_${doc.id}`),
+      user_id: cleanUid,
+      first_name: data.first_name || existing.first_name || '',
+      last_name: data.last_name || existing.last_name || '',
+      full_name: data.full_name || existing.full_name || `${data.first_name || existing.first_name || ''} ${data.last_name || existing.last_name || ''}`.trim(),
+      email: data.email || existing.email || '',
+      sport_type: data.sport_type || existing.sport_type || 'Unassigned',
+      years_of_experience: data.years_of_experience ?? existing.years_of_experience ?? 0,
+      current_institution: data.current_institution || existing.current_institution || 'N/A',
+      institutional_affiliation: data.current_institution || data.institutional_affiliation || existing.institutional_affiliation || 'N/A',
+      professional_documents: (Array.isArray(data.professional_documents) && data.professional_documents.length > 0)
+        ? data.professional_documents
+        : (Array.isArray(existing.professional_documents) ? existing.professional_documents : []),
+      account_status: effectiveStatus,
+      status: displayStatus,
+      rejection_reason: data.rejection_reason || existing.rejection_reason || '',
+      created_at: data.created_at || existing.created_at || new Date().toISOString(),
+      date_uploaded: data.date_uploaded || existing.date_uploaded || data.created_at || new Date().toISOString(),
     });
+  });
+
+  let coaches = Array.from(coachesMap.values());
+
+  if (filterStatus) {
+    coaches = coaches.filter(
+      (c) => (c.account_status || '').toLowerCase() === filterStatus.toLowerCase()
+    );
   }
 
   return coaches;
@@ -448,7 +459,10 @@ export async function approveCoachService(adminId: string, coachIdParam: string)
     if (!rawSnap.exists) {
       const querySnap = await db.collection('Coach_Profiles').where('coach_id', '==', coachIdParam).limit(1).get();
       if (querySnap.empty) {
-        throw new ServiceError(`Coach application with ID '${coachIdParam}' not found.`, 404);
+        const userSnap = await userRef.get();
+        if (!userSnap.exists) {
+          throw new ServiceError(`Coach application with ID '${coachIdParam}' not found.`, 404);
+        }
       }
     }
   }
@@ -538,7 +552,10 @@ export async function rejectCoachService(adminId: string, coachIdParam: string, 
     if (!rawSnap.exists) {
       const querySnap = await db.collection('Coach_Profiles').where('coach_id', '==', coachIdParam).limit(1).get();
       if (querySnap.empty) {
-        throw new ServiceError(`Coach application with ID '${coachIdParam}' not found.`, 404);
+        const userSnap = await userRef.get();
+        if (!userSnap.exists) {
+          throw new ServiceError(`Coach application with ID '${coachIdParam}' not found.`, 404);
+        }
       }
     }
   }

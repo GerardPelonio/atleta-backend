@@ -19,10 +19,10 @@ import type {
 } from './types';
 
 const envApi = (import.meta.env.VITE_ATLETA_API || import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL || '') as string;
-const rawBase = (envApi && envApi.trim() ? envApi.trim() : '').replace(/\/+$/, '');
+const rawBase = (envApi && envApi.trim() ? envApi.trim() : 'https://atleta-backend.vercel.app/api/v1').replace(/\/+$/, '');
 export const BASE_URL = rawBase
   ? (rawBase.endsWith('/api/v1') ? rawBase : `${rawBase}/api/v1`)
-  : '/api/v1';
+  : 'https://atleta-backend.vercel.app/api/v1';
 
 const TOKEN_KEY = 'atleta_official_token';
 const USER_KEY = 'atleta_official_user';
@@ -421,20 +421,13 @@ export const getAdminCoachQueue = async (forceRefresh = false): Promise<AdminCoa
     if (res.ok) {
       const data = await handleResponse<AdminCoachQueueResponse>(res);
       const rawQueue = Array.isArray(data?.queue) ? data.queue : [];
-      const credentialQueue = rawQueue.filter((c: AdminCoachQueueItem) => {
-        const docs = c.professional_documents || (c as any).uploaded_documents || (c as any).certificates;
-        if (Array.isArray(docs) && docs.length > 0) return true;
-        if (typeof (c as any).document_url === 'string' && (c as any).document_url.trim()) return true;
-        if (typeof (c as any).credential_url === 'string' && (c as any).credential_url.trim()) return true;
-        return false;
-      });
       const filteredData: AdminCoachQueueResponse = {
         ...data,
-        total_pending: credentialQueue.filter((c: AdminCoachQueueItem) => {
+        total_pending: rawQueue.filter((c: AdminCoachQueueItem) => {
           const st = (c.account_status || c.status || '').toLowerCase();
           return st !== 'active' && st !== 'verified' && st !== 'approved' && st !== 'rejected';
         }).length,
-        queue: credentialQueue,
+        queue: rawQueue,
       };
       setCachedData('admin_coach_queue', filteredData);
       return filteredData;

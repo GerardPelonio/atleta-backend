@@ -168,7 +168,14 @@ export const CoachAdmission: React.FC<CoachAdmissionProps> = ({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 700, color: '#0B132B', cursor: 'pointer' }}>
               <input type="checkbox" checked={isVerified} readOnly style={{ accentColor: '#0B132B' }} />
-              PROFESSIONAL LICENSE VALIDATED
+              <span>
+                PROFESSIONAL LICENSE VALIDATED
+                {(!currentCoach.professional_documents || currentCoach.professional_documents.length === 0) && (
+                  <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 500, marginLeft: '6px' }}>
+                    (Optional — None submitted upon sign-up)
+                  </span>
+                )}
+              </span>
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 700, color: '#0B132B', cursor: 'pointer' }}>
               <input type="checkbox" checked={isVerified} readOnly style={{ accentColor: '#0B132B' }} />

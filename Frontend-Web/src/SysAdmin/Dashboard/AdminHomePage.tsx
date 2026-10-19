@@ -93,26 +93,17 @@ const isOfficialRejected = (o?: AdminOfficialQueueItem | null) =>
 
 const isOfficialAudited = (o?: AdminOfficialQueueItem | null) => isOfficialApproved(o) || isOfficialRejected(o);
 
-const hasSubmittedCredentials = (c?: AdminCoachQueueItem | null): boolean => {
-  if (!c) return false;
-  const docs = c.professional_documents || (c as any).uploaded_documents || (c as any).certificates;
-  if (Array.isArray(docs) && docs.length > 0) return true;
-  if (typeof (c as any).document_url === 'string' && (c as any).document_url.trim()) return true;
-  if (typeof (c as any).credential_url === 'string' && (c as any).credential_url.trim()) return true;
-  return false;
-};
-
 export const AdminHomePage: React.FC = () => {
   const navigate = useNavigate();
 
   const [queueType, setQueueType] = useState<QueueType>('COACHES');
 
-  // Coaches Queue State: only coaches who submitted credentials
+  // Coaches Queue State: all coach accounts (documents are optional during sign-up)
   const [coachQueue, setCoachQueue] = useState<AdminCoachQueueItem[]>(() => {
-    const stored = getStoredCoaches().filter(hasSubmittedCredentials);
+    const stored = getStoredCoaches();
     if (stored.length > 0) return stored;
     const cached = getCachedData<AdminCoachQueueResponse>('admin_coach_queue')?.queue;
-    if (Array.isArray(cached) && cached.length > 0) return cached.filter(hasSubmittedCredentials);
+    if (Array.isArray(cached) && cached.length > 0) return cached;
     return [];
   });
 
@@ -137,13 +128,12 @@ export const AdminHomePage: React.FC = () => {
     try {
       const cached = getCachedData<AdminCoachQueueResponse>('admin_coach_queue');
       if (cached && !forceRefresh && Array.isArray(cached.queue) && cached.queue.length > 0) {
-        const filteredCached = cached.queue.filter(hasSubmittedCredentials);
-        setCoachQueue(filteredCached);
-        saveStoredCoaches(filteredCached);
+        setCoachQueue(cached.queue);
+        saveStoredCoaches(cached.queue);
         return;
       }
       const res = await getAdminCoachQueue(forceRefresh);
-      const incoming = Array.isArray(res?.queue) ? res.queue.filter(hasSubmittedCredentials) : [];
+      const incoming = Array.isArray(res?.queue) ? res.queue : [];
       setCoachQueue(incoming);
       saveStoredCoaches(incoming);
     } catch (e) {
