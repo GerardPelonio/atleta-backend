@@ -1,0 +1,417 @@
+import { Request, Response } from 'express';
+import jwt from 'jsonwebtoken';
+import { AuthRequest } from '../middlewares/authMiddleware';
+import {
+  validateRegisterUser,
+  validateLoginUser,
+  validatePasswordResetRequest,
+  validatePasswordResetConfirm,
+  validateChangePassword,
+} from '../validators/userValidator';
+import { validateRegisterCoach } from '../validators/coachValidator';
+import { ServiceError } from '../validators/matchValidator';
+import {
+  registerUserService,
+  registerCoachService,
+  loginUserService,
+  getUserProfileService,
+  updateUserProfileService,
+  uploadUserAvatarService,
+  getUserSettingsService,
+  updateUserSettingsService,
+  requestPasswordResetService,
+  resetPasswordConfirmService,
+  changePasswordService,
+  socialLoginService,
+} from '../services/userService';
+
+export async function registerUser(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const data = req.body as Record<string, unknown>;
+    const file = (req as any).file as Express.Multer.File | undefined;
+
+    const errors = validateRegisterUser(data, !!file);
+    if (errors.length > 0) {
+      res.status(400).json({ errors });
+      return;
+    }
+
+    const result = await registerUserService(data, file);
+    res.status(201).json({
+      message: 'User registered successfully.',
+      ...result,
+    });
+  } catch (error: any) {
+    if (
+      error.code === 'auth/email-already-exists' ||
+      error.code === 'auth/email-already-in-use' ||
+      (typeof error.message === 'string' && error.message.toLowerCase().includes('already in use'))
+    ) {
+      res.status(409).json({ error: 'An account with this email already exists. Please log in.' });
+      return;
+    }
+    if (error instanceof ServiceError || (error.status && error.status < 500)) {
+      res.status(error.statusCode || error.status || 400).json({ error: error.message });
+      return;
+    }
+    console.error('Register error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function registerCoach(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const data = req.body as Record<string, unknown>;
+    const file = (req as any).file as Express.Multer.File | undefined;
+
+    const errors = validateRegisterCoach(data, !!file);
+    if (errors.length > 0) {
+      res.status(400).json({ errors });
+      return;
+    }
+
+    const result = await registerCoachService(data, file);
+    res.status(201).json({
+      message: 'Coach registered successfully with certification documents.',
+      ...result,
+    });
+  } catch (error: any) {
+    if (
+      error.code === 'auth/email-already-exists' ||
+      error.code === 'auth/email-already-in-use' ||
+      (typeof error.message === 'string' && error.message.toLowerCase().includes('already in use'))
+    ) {
+      res.status(409).json({ error: 'A coach with this email already exists. Please log in.' });
+      return;
+    }
+    if (error.message && error.message.includes('certification document')) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    if (error instanceof ServiceError || (error.status && error.status < 500)) {
+      res.status(error.statusCode || error.status || 400).json({ error: error.message });
+      return;
+    }
+    console.error('Register coach error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+import { db } from '../utils/firebaseAdmin';
+
+export async function loginUser(req: AuthRequest, res: Response): Promise<void> {
+  const email = (req.body?.email || '').trim().toLowerCase().replace(/%40/gi, '@');
+  const password = req.body?.password;
+  const normalizedBody = { ...req.body, email };
+  try {
+    const errors = validateLoginUser(normalizedBody);
+    if (errors.length > 0) {
+      res.status(400).json({ errors });
+      return;
+    }
+
+    const result = await loginUserService(email, password);
+
+    try {
+      await db.collection('Login_Audit_Logs').add({
+        email: String(email || ''),
+        email_clean: String(email || '').trim().toLowerCase(),
+        success: true,
+        user_id: result?.user?.user_id,
+        role: result?.user?.role,
+        ip: (req.headers['x-forwarded-for'] as string) || req.ip || '',
+        user_agent: (req.headers['user-agent'] as string) || '',
+        timestamp: new Date().toISOString(),
+      });
+    } catch {}
+
+    res.status(200).json({
+      message: 'Login successful.',
+      ...result,
+    });
+  } catch (error: any) {
+    try {
+      await db.collection('Login_Audit_Logs').add({
+        email: String(email || ''),
+        email_clean: String(email || '').trim().toLowerCase(),
+        success: false,
+        error_code: error?.code || 'unknown',
+        error_message: error?.message || 'unknown',
+        ip: (req.headers['x-forwarded-for'] as string) || req.ip || '',
+        user_agent: (req.headers['user-agent'] as string) || '',
+        timestamp: new Date().toISOString(),
+      });
+    } catch {}
+
+    if (error instanceof ServiceError) {
+      res.status(error.statusCode).json({ error: error.message });
+      return;
+    }
+    if (
+      error.code === 'auth/invalid-credential' ||
+      error.code === 'auth/wrong-password' ||
+      error.code === 'auth/user-not-found'
+    ) {
+      res.status(401).json({ error: 'Invalid email or password.' });
+      return;
+    }
+    if (error.code === 'USER_NOT_FOUND') {
+      res.status(404).json({ error: error.message });
+      return;
+    }
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function socialLogin(req: Request, res: Response): Promise<void> {
+  try {
+    const body = (req.body || {}) as Record<string, any>;
+    const idToken = body.id_token || body.token || body.idToken || body.access_token || body.accessToken || body.credential;
+    const provider = body.provider;
+    const role = body.role;
+
+    if (!idToken) {
+      res.status(400).json({ error: 'id_token (Firebase ID token or Access Token from Google/Facebook) is required.' });
+      return;
+    }
+
+    const providerType = provider === 'facebook' ? 'facebook' : 'google';
+    const result = await socialLoginService(idToken, providerType, role || 'Athlete', body);
+
+    if (result && ((result as any).account_exists === false || (result as any).require_signup || (result as any).is_new_user)) {
+      res.status(200).json({
+        message: 'New user registration required.',
+        ...result,
+      });
+      return;
+    }
+
+    res.status(200).json({
+      message: `${providerType.toUpperCase()} login successful.`,
+      ...result,
+    });
+  } catch (error: any) {
+    console.error('socialLogin error:', error);
+    res.status(401).json({
+      error: error?.message || 'Social authentication failed.',
+      code: error?.code,
+    });
+  }
+}
+
+export async function getMe(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const uid = req.user!.uid;
+    const result = await getUserProfileService(uid);
+    res.status(200).json(result);
+  } catch (error: any) {
+    if (req.user) {
+      res.status(200).json({
+        user_id: req.user.uid,
+        uid: req.user.uid,
+        email: req.user.email || 'official@atleta.ph',
+        role: req.user.role || 'Official',
+        name: req.user.role || 'Tournament Official',
+        full_name: req.user.role || 'Tournament Official',
+        first_name: req.user.role || 'Tournament Official',
+        last_name: '',
+        permissions: ['READ_ALL', 'MANAGE_MATCHES', 'CERTIFY_SCORES'],
+      });
+      return;
+    }
+    console.error('GetMe error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function updateUserProfileHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const uid = req.user!.uid;
+    const result = await updateUserProfileService(uid, req.body || {});
+    res.status(200).json({
+      message: 'Profile updated successfully.',
+      ...result,
+    });
+  } catch (error: any) {
+    if (error.code === 'USER_NOT_FOUND') {
+      res.status(404).json({ error: error.message });
+      return;
+    }
+    console.error('updateUserProfileHandler error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function uploadAvatarHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const uid = req.user?.uid || (req.body?.user_id as string) || (req.params?.userId as string);
+    if (!uid) {
+      res.status(401).json({ error: 'Authentication required.' });
+      return;
+    }
+
+    const file = (req as any).file || (Array.isArray((req as any).files) ? (req as any).files[0] : undefined);
+    const dataUrl = req.body?.avatar_url || req.body?.profile_image || req.body?.avatar || req.body?.image;
+
+    const target = file || dataUrl;
+    if (!target) {
+      res.status(400).json({ error: 'Image file or avatar_url is required.' });
+      return;
+    }
+
+    const updated = await uploadUserAvatarService(uid, target);
+    const finalAvatar = (updated as any).avatar_url || (updated as any).user?.avatar_url || (updated as any).profile?.avatar_url || (typeof target === 'string' ? target : '');
+    res.status(200).json({
+      message: 'Avatar uploaded successfully.',
+      avatar_url: finalAvatar,
+      profile_image: finalAvatar,
+      user: updated.user,
+      profile: updated.profile,
+    });
+  } catch (error: any) {
+    if (error.code === 'USER_NOT_FOUND') {
+      res.status(404).json({ error: error.message });
+      return;
+    }
+    console.error('uploadAvatarHandler error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function getUserSettingsHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const uid = req.user!.uid;
+    const settings = await getUserSettingsService(uid);
+    res.status(200).json(settings);
+  } catch (error: any) {
+    console.error('getUserSettingsHandler error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function updateUserSettingsHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const uid = req.user!.uid;
+    const settings = await updateUserSettingsService(uid, req.body || {});
+    res.status(200).json({
+      message: 'Settings updated successfully.',
+      settings,
+      ...settings,
+    });
+  } catch (error: any) {
+    console.error('updateUserSettingsHandler error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function requestPasswordReset(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const errors = validatePasswordResetRequest(req.body);
+    if (errors.length > 0) {
+      res.status(400).json({ errors });
+      return;
+    }
+
+    const { email } = req.body;
+    const clientFrontendUrl = req.body?.frontend_url
+      || req.body?.redirect_url
+      || req.body?.reset_url;
+
+    const result = await requestPasswordResetService(email, clientFrontendUrl);
+    res.status(200).json(result);
+  } catch (error: any) {
+    if (error.code === 'SOCIAL_AUTH_ACCOUNT') {
+      res.status(400).json({ error: error.message, code: 'SOCIAL_AUTH_ACCOUNT' });
+      return;
+    }
+    if (error.code === 'USER_NOT_FOUND') {
+      res.status(404).json({ error: error.message });
+      return;
+    }
+    if (error.code === 'auth/user-not-found') {
+      res.status(404).json({ error: 'No registered account found with this email.' });
+      return;
+    }
+    console.error('RequestPasswordReset error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function resetPassword(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const bearerToken = req.headers?.authorization?.replace(/^Bearer\s+/i, '');
+    const token = (
+      req.body?.token ||
+      req.body?.reset_token ||
+      req.params?.token ||
+      req.query?.token ||
+      bearerToken ||
+      req.user?.uid
+    ) as string;
+    const new_password = (req.body?.new_password || req.body?.password || req.body?.newPassword) as string;
+    const emailHint = (req.body?.email || req.query?.email) as string | undefined;
+
+    const confirmErrors = validatePasswordResetConfirm({ token, new_password });
+    if (confirmErrors.length > 0) {
+      res.status(400).json({ errors: confirmErrors, error: confirmErrors[0].message });
+      return;
+    }
+
+    const result = await resetPasswordConfirmService(token, new_password, emailHint);
+    res.status(200).json(result);
+  } catch (error: any) {
+    if (error.code === 'SOCIAL_AUTH_ACCOUNT') {
+      res.status(400).json({ error: error.message, code: 'SOCIAL_AUTH_ACCOUNT' });
+      return;
+    }
+    if (error.code === 'INVALID_TOKEN') {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    console.error('ResetPassword error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function changePassword(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const new_password = (req.body?.new_password || req.body?.password || req.body?.newPassword) as string;
+    const errors = validateChangePassword({ password: new_password });
+    if (errors.length > 0) {
+      res.status(400).json({ errors });
+      return;
+    }
+
+    let uid = req.user?.uid;
+    if (!uid) {
+      const bearerToken = req.headers?.authorization?.replace(/^Bearer\s+/i, '');
+      if (bearerToken && process.env.JWT_SECRET) {
+        try {
+          const decoded = jwt.verify(bearerToken, process.env.JWT_SECRET) as any;
+          if (decoded?.uid) uid = decoded.uid;
+        } catch {
+          // Token verification failed
+        }
+      }
+    }
+
+    if (!uid) {
+      res.status(401).json({ error: 'Authentication required.' });
+      return;
+    }
+
+    await changePasswordService(uid, new_password);
+
+    res.status(200).json({
+      message: 'Password updated successfully.',
+    });
+  } catch (error: any) {
+    if (error.code === 'SOCIAL_AUTH_ACCOUNT') {
+      res.status(400).json({ error: error.message, code: 'SOCIAL_AUTH_ACCOUNT' });
+      return;
+    }
+    console.error('ChangePassword error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}

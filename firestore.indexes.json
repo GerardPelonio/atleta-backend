@@ -1,0 +1,81 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "Scouting_Registry",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "coach_scout_id", "order": "ASCENDING" },
+        { "fieldPath": "initiated_by", "order": "ASCENDING" },
+        { "fieldPath": "offer_status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "Scouting_Registry",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "athlete_id", "order": "ASCENDING" },
+        { "fieldPath": "initiated_by", "order": "ASCENDING" },
+        { "fieldPath": "date_initiated", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "Notifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "recipient_id", "order": "ASCENDING" },
+        { "fieldPath": "is_read", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "Notifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "recipient_id", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "Match_Logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "team_id", "order": "ASCENDING" },
+        { "fieldPath": "match_date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "Match_Logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "logged_by_coach_id", "order": "ASCENDING" },
+        { "fieldPath": "match_date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "Match_Logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sport_type", "order": "ASCENDING" },
+        { "fieldPath": "match_date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "Performance_Metrics",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "athlete_id", "order": "ASCENDING" },
+        { "fieldPath": "sport_category", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "Official_Validations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "requested_at", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

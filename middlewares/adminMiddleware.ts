@@ -1,0 +1,171 @@
+import { Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+import { AuthRequest } from './authMiddleware';
+import { logAdminAudit } from '../services/adminService';
+import { db } from '../utils/firebaseAdmin';
+import { serverCache } from '../utils/cache';
+
+export interface AdminAuthRequest extends AuthRequest {
+  adminUser?: {
+    uid: string;
+    email: string;
+    role: string;
+    clearance_level: number;
+    department_code: string;
+    is_elevated: boolean;
+  };
+}
+
+export async function requireSystemAdmin(
+  req: AdminAuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const authHeader = req.headers.authorization;
+  const clientIp = req.ip || (req.headers['x-forwarded-for'] as string) || '127.0.0.1';
+  const endpoint = req.originalUrl || req.url || '/admin';
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    await logAdminAudit({
+      user_id: 'ANONYMOUS',
+      email: 'UNKNOWN',
+      action: `${req.method} ${endpoint}`,
+      status: 'FAILED',
+      endpoint,
+      ip_address: clientIp,
+      details: { error: 'No Bearer authorization token provided' },
+    }).catch(() => {});
+    res.status(401).json({ error: 'Access denied. No token provided.' });
+    return;
+  }
+
+
+  const token = authHeader.split(' ')[1];
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) {
+    res.status(500).json({ error: 'Server authentication configuration error: JWT_SECRET missing.' });
+    return;
+  }
+
+  let decoded: {
+    uid: string;
+    email: string;
+    role: string;
+    clearance_level?: number;
+    department_code?: string;
+    is_elevated?: boolean;
+  } | null = null;
+
+  try {
+    decoded = jwt.verify(token, jwtSecret) as any;
+  } catch (_) {}
+
+  if (!decoded) {
+    await logAdminAudit({
+      user_id: 'UNKNOWN',
+      email: 'UNKNOWN',
+      action: `${req.method} ${endpoint}`,
+      status: 'FAILED',
+      endpoint,
+      ip_address: clientIp,
+      details: { error: 'Invalid or expired admin token' },
+    }).catch(() => {});
+    res.status(401).json({ error: 'Invalid or expired token.' });
+    return;
+  }
+
+  try {
+
+    const normRole = String(decoded.role || '').toLowerCase().replace(/[\s_-]+/g, '');
+    const isAdmin =
+      normRole === 'systemadmin' ||
+      normRole === 'systemadministrator' ||
+      normRole === 'admin';
+
+    if (!isAdmin) {
+      await logAdminAudit({
+        user_id: decoded.uid || 'UNKNOWN',
+        email: decoded.email || 'UNKNOWN',
+        action: `${req.method} ${endpoint}`,
+        status: 'FAILED',
+        endpoint,
+        ip_address: clientIp,
+        details: { error: 'Non-admin role token presented', role: decoded.role },
+      }).catch(() => {});
+      res.status(403).json({ error: 'Access denied. System Admin role required.' });
+      return;
+    }
+
+    const isActive = await serverCache.getOrSet(
+      `admin_active_${decoded.uid}`,
+      async () => {
+        const adminProfilesSnap = await db.collection('Admin_Profiles').where('user_id', '==', decoded.uid).limit(1).get();
+        if (!adminProfilesSnap.empty) {
+          const profile = adminProfilesSnap.docs[0].data();
+          return profile.is_active !== false;
+        }
+        return true;
+      },
+      60,
+      [`admin_${decoded.uid}`]
+    );
+
+    if (!isActive) {
+      await logAdminAudit({
+        user_id: decoded.uid,
+        email: decoded.email,
+        action: `${req.method} ${endpoint}`,
+        status: 'FAILED',
+        endpoint,
+        ip_address: clientIp,
+        details: { error: 'Admin profile is deactivated' },
+      }).catch(() => {});
+      res.status(403).json({ error: 'Access denied. Admin profile is deactivated.' });
+      return;
+    }
+
+    req.user = {
+      uid: decoded.uid,
+      email: decoded.email,
+      role: 'SystemAdmin',
+    };
+    req.adminUser = {
+      uid: decoded.uid,
+      email: decoded.email,
+      role: 'SystemAdmin',
+      clearance_level: decoded.clearance_level || 4,
+      department_code: decoded.department_code || 'SYS_ADMIN',
+      is_elevated: !!decoded.is_elevated,
+    };
+
+    if (req.method === 'GET') {
+      logAdminAudit({
+        user_id: decoded.uid,
+        email: decoded.email,
+        action: `${req.method} ${endpoint}`,
+        status: 'SUCCESS',
+        endpoint,
+        ip_address: clientIp,
+        details: {
+          clearance_level: req.adminUser.clearance_level,
+          department_code: req.adminUser.department_code,
+        },
+      }).catch(() => {});
+    }
+
+    next();
+  } catch (error: any) {
+    await logAdminAudit({
+      user_id: 'ANONYMOUS',
+      email: 'UNKNOWN',
+      action: `${req.method} ${endpoint}`,
+      status: 'FAILED',
+      endpoint,
+      ip_address: clientIp,
+      details: { error: 'Invalid or expired token', message: error?.message },
+    }).catch(() => {});
+    res.status(401).json({ error: 'Invalid or expired token.' });
+    return;
+  }
+
+}

@@ -1,0 +1,95 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
+import express, { Request, Response, NextFunction } from 'express';
+import cors from 'cors';
+import routes from './routes';
+
+const app = express();
+
+app.set('trust proxy', 1);
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Idempotency-Key, If-None-Match, Cache-Control, Pragma, Expires, Accept, X-Requested-With, x-gemini-key, x-api-key, gemini-key');
+  res.header('Access-Control-Expose-Headers', 'X-Response-Time-Ms, ETag, Idempotency-Key');
+  // Prevent Vercel edge CDN and HTTP clients from caching dynamic API responses
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  next();
+});
+
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'Idempotency-Key',
+    'If-None-Match',
+    'Cache-Control',
+    'Pragma',
+    'Expires',
+    'Accept',
+    'X-Requested-With',
+    'x-gemini-key',
+    'x-api-key',
+    'gemini-key',
+  ],
+  exposedHeaders: ['X-Response-Time-Ms', 'ETag', 'Idempotency-Key'],
+}));
+
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+
+app.use('/api/v1', routes);
+app.use('/api', routes);
+
+app.get(['/', '/api', '/api/v1'], (req: Request, res: Response) => {
+  res.status(200).json({
+    success: true,
+    message: 'Atleta Athletic Performance Monitoring & Scouting API',
+    version: '1.0',
+    platform: 'FERN Stack (Firebase, Express, React Native, Node.js)',
+    documentation: '/api/v1',
+  });
+});
+
+
+import { db } from './utils/firebaseAdmin';
+
+app.get(['/health', '/api/health', '/api/v1/health'], (req: Request, res: Response) => {
+  res.status(200).json({
+    success: true,
+    uptime: process.uptime(),
+    status: 'healthy',
+    project_id: (db as any).projectId || 'atleta-v1',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.use((req: Request, res: Response) => {
+  res.status(404).json({
+    success: false,
+    error: `Route '${req.method} ${req.originalUrl}' was not found on this server.`,
+  });
+});
+
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+  if (err instanceof SyntaxError && 'status' in err && err.status === 400 && 'body' in err) {
+    res.status(400).json({ error: 'Invalid JSON format in request body.' });
+    return;
+  }
+  console.error('Unhandled server error:', err);
+  res.status(err.status || 500).json({
+    success: false,
+    error: err.message || 'Internal Server Error',
+  });
+});
+
+export default app;
