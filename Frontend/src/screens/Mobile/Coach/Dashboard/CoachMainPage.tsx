@@ -2383,11 +2383,11 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
                     </Text>
                   </View>
                 ) : (
-                  filteredDashboardPlayers.slice(0, 4).map((player, index) => (
+                  filteredDashboardPlayers.map((player, index) => (
                     <PlayerRowItem
                       key={player.athlete_id}
                       player={player}
-                      isLast={index === Math.min(filteredDashboardPlayers.length, 4) - 1}
+                      isLast={index === filteredDashboardPlayers.length - 1}
                       onViewStats={handleViewStats}
                     />
                   ))

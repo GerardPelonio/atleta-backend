@@ -48,50 +48,9 @@ const isTunnel = expoHostUri.includes("exp.direct") || expoHostUri.includes("ngr
 const hostIp = (expoHostUri ? expoHostUri.split(":")[0] : "").trim() || "192.168.1.34";
 
 export const CLOUD_PROD_API = "https://atleta-backend.vercel.app/api/v1";
-const configuredApi = CLOUD_PROD_API;
+export const API_BASE = CLOUD_PROD_API;
 
-const rawDevApi = `http://${hostIp}:5000`;
-const CANDIDATE_DEV_API = `${rawDevApi}/api/v1`;
-
-// Default to production cloud API with local development probing
-let activeApiBase = CLOUD_PROD_API;
-export let API_BASE = CLOUD_PROD_API;
-
-let hasProbedApi = false;
 export async function getActiveApiBase(): Promise<string> {
-  if (hasProbedApi) return activeApiBase;
-
-  const candidateUrls = [
-    "http://10.0.2.2:5000/api/v1",
-    "http://localhost:5000/api/v1",
-    CANDIDATE_DEV_API,
-  ];
-
-  for (const candidate of candidateUrls) {
-    try {
-      const probeController = new AbortController();
-      const probeTimeout = setTimeout(() => probeController.abort(), 1200);
-      const res = await fetch(`${candidate}/health`, {
-        signal: probeController.signal,
-        headers: { Accept: "application/json" },
-      });
-      clearTimeout(probeTimeout);
-      if (res.ok) {
-        console.log("[API PROBE SUCCESS] Connected to:", candidate);
-        activeApiBase = candidate;
-        API_BASE = candidate;
-        hasProbedApi = true;
-        return candidate;
-      }
-    } catch (probeErr: any) {
-      console.log("[API PROBE FAILED]", candidate, probeErr?.message || probeErr);
-    }
-  }
-
-  console.log("[API PROBE FALLBACK] Using:", CLOUD_PROD_API);
-
-  activeApiBase = CLOUD_PROD_API;
-  API_BASE = CLOUD_PROD_API;
   return CLOUD_PROD_API;
 }
 
@@ -304,29 +263,11 @@ async function withRequestTimeout<T>(request: (signal: AbortSignal) => Promise<T
 }
 
 async function fetchApi(path: string, options: RequestInit) {
-  let response: Response | undefined;
-  const baseUrl = await getActiveApiBase();
-  const primaryUrl = `${baseUrl}${path}`;
+  const url = `${CLOUD_PROD_API}${path}`;
 
-  try {
-    response = await withRequestTimeout((signal) =>
-      fetch(primaryUrl, { ...options, signal })
-    );
-  } catch (err) {
-    if (baseUrl !== configuredApi) {
-      activeApiBase = configuredApi;
-      API_BASE = configuredApi;
-      try {
-        response = await withRequestTimeout((signal) =>
-          fetch(`${configuredApi}${path}`, { ...options, signal })
-        );
-      } catch (_) {}
-    }
-
-    if (!response) {
-      throw err;
-    }
-  }
+  const response = await withRequestTimeout((signal) =>
+    fetch(url, { ...options, signal })
+  );
 
   const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
@@ -358,7 +299,6 @@ const MICRO_CACHE_TTL_MS = 15000; // 15s microcache to eliminate redundant dupli
 export function clearAuthMicroCache() {
   getResponseMicroCache.clear();
   inFlightGetRequests.clear();
-  hasProbedApi = false;
 }
 
 // Handles authenticated JSON requests with Authorization Bearer header
