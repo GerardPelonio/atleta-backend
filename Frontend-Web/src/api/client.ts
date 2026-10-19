@@ -422,11 +422,8 @@ export const getAdminCoachQueue = async (forceRefresh = false): Promise<AdminCoa
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        Pragma: 'no-cache',
-        Expires: '0',
       },
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(12000),
     });
     if (res.ok) {
       const data = await handleResponse<AdminCoachQueueResponse>(res);

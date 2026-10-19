@@ -357,11 +357,9 @@ export async function loginAdminService(
  * Returns ALL coach accounts, whether or not they submitted optional documents during sign-up.
  */
 export async function getPendingCoachQueueService(filterStatus?: string) {
-  const [profileSnap, userSnap1, userSnap2, userSnap3, userPendingSnap] = await Promise.all([
+  const [profileSnap, userCoachSnap, userPendingSnap] = await Promise.all([
     db.collection('Coach_Profiles').get().catch(() => ({ docs: [] } as any)),
-    db.collection('Users').where('role', '==', 'Coach').get().catch(() => ({ docs: [] } as any)),
-    db.collection('Users').where('role', '==', 'coach').get().catch(() => ({ docs: [] } as any)),
-    db.collection('Users').where('role', '==', 'COACH').get().catch(() => ({ docs: [] } as any)),
+    db.collection('Users').where('role', 'in', ['Coach', 'coach', 'COACH']).get().catch(() => ({ docs: [] } as any)),
     db.collection('Users').where('account_status', 'in', ['Pending', 'pending', 'PENDING']).get().catch(() => ({ docs: [] } as any)),
   ]);
 
@@ -371,9 +369,7 @@ export async function getPendingCoachQueueService(filterStatus?: string) {
 
   // 1. Process Users collection first (captures all signed up coaches)
   const allUserDocs = [
-    ...userSnap1.docs,
-    ...userSnap2.docs,
-    ...userSnap3.docs,
+    ...userCoachSnap.docs,
     ...userPendingSnap.docs.filter((d: any) => {
       const r = String(d.data()?.role || '').toLowerCase();
       return r === 'coach' || (!r.includes('athlete') && !r.includes('official') && !r.includes('admin'));

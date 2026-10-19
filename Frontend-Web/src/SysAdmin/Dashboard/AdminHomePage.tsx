@@ -142,8 +142,17 @@ export const AdminHomePage: React.FC = () => {
       }
       const res = await getAdminCoachQueue(forceRefresh);
       const incoming = Array.isArray(res?.queue) ? res.queue : [];
-      setCoachQueue(incoming);
-      saveStoredCoaches(incoming);
+      if (incoming.length > 0) {
+        setCoachQueue(incoming);
+        saveStoredCoaches(incoming);
+      } else {
+        const stored = getStoredCoaches();
+        if (stored.length > 0) {
+          setCoachQueue(stored);
+        } else {
+          setCoachQueue([]);
+        }
+      }
     } catch (e) {
       console.error('Failed to load coach queue:', e);
     }
