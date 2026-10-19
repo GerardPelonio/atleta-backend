@@ -47,8 +47,10 @@ export const CoachAdmission: React.FC<CoachAdmissionProps> = ({
 
   const isVerified =
     (currentCoach.account_status || '').toLowerCase() === 'active' ||
+    (currentCoach.account_status || '').toLowerCase() === 'approved' ||
     (currentCoach.status || '').toUpperCase() === 'VERIFIED' ||
-    (currentCoach.status || '').toUpperCase() === 'ACTIVE';
+    (currentCoach.status || '').toUpperCase() === 'ACTIVE' ||
+    (currentCoach.status || '').toUpperCase() === 'APPROVED';
 
   const handleApprove = async () => {
     try {

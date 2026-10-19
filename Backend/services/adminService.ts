@@ -425,11 +425,19 @@ export async function getPendingCoachQueueService(filterStatus?: string) {
       : (coachesMap.has(cleanUid) ? cleanUid : (emailKey ? cleanUid : cleanUid));
 
     const existing = coachesMap.get(targetKey) || {};
-    const effectiveStatus = (data.account_status === 'Pending' || data.status === 'pending')
-      ? 'Pending'
-      : (data.account_status || data.status || existing.account_status || 'Pending');
-    const isApproved = String(effectiveStatus).toLowerCase() === 'active' || String(effectiveStatus).toLowerCase() === 'approved';
-    const isRejected = String(effectiveStatus).toLowerCase() === 'rejected';
+    const existingStatus = existing.account_status || existing.status;
+    const profileStatus = data.account_status || data.status;
+    const isApproved =
+      String(existingStatus || '').toLowerCase() === 'active' ||
+      String(existingStatus || '').toLowerCase() === 'approved' ||
+      String(profileStatus || '').toLowerCase() === 'active' ||
+      String(profileStatus || '').toLowerCase() === 'approved';
+    const isRejected =
+      !isApproved && (
+        String(existingStatus || '').toLowerCase() === 'rejected' ||
+        String(profileStatus || '').toLowerCase() === 'rejected'
+      );
+    const effectiveStatus = isApproved ? 'Active' : (isRejected ? 'Rejected' : (profileStatus || existingStatus || 'Pending'));
     const displayStatus = isApproved ? 'VERIFIED' : (isRejected ? 'REJECTED' : 'PENDING');
 
     coachesMap.set(targetKey, {

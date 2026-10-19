@@ -8,6 +8,8 @@ import {
   Award,
   Users,
   RefreshCw,
+  Search,
+  X as CloseIcon,
 } from 'lucide-react';
 import {
   getStoredToken,
@@ -69,8 +71,10 @@ type FilterType = 'ALL' | 'NON_AUDITED' | 'AUDITED';
 const isCoachVerified = (c?: AdminCoachQueueItem | null) =>
   !c ? false :
   (c.account_status || '').toLowerCase() === 'active' ||
+  (c.account_status || '').toLowerCase() === 'approved' ||
   (c.status || '').toUpperCase() === 'VERIFIED' ||
-  (c.status || '').toUpperCase() === 'ACTIVE';
+  (c.status || '').toUpperCase() === 'ACTIVE' ||
+  (c.status || '').toUpperCase() === 'APPROVED';
 
 const isCoachRejected = (c?: AdminCoachQueueItem | null) =>
   !c ? false :
@@ -123,7 +127,8 @@ export const AdminHomePage: React.FC = () => {
   const [filter, setFilter] = useState<FilterType>('ALL');
   const [page, setPage] = useState(1);
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
-  const itemsPerPage = 6;
+  const [itemsPerPage, setItemsPerPage] = useState<number>(10);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const loadCoachQueue = async (forceRefresh = true) => {
     try {
@@ -223,22 +228,49 @@ export const AdminHomePage: React.FC = () => {
   const currentPendingCount = queueType === 'COACHES' ? coachPendingCount : officialPendingCount;
 
   // Filter items
+  const query = searchQuery.trim().toLowerCase();
+
   const filteredCoaches = coachQueue.filter((c) => {
-    if (filter === 'NON_AUDITED') return !isCoachAudited(c);
-    if (filter === 'AUDITED') return isCoachAudited(c);
+    if (filter === 'NON_AUDITED' && isCoachAudited(c)) return false;
+    if (filter === 'AUDITED' && !isCoachAudited(c)) return false;
+    if (query) {
+      const name = `${c.full_name || ''} ${c.first_name || ''} ${c.last_name || ''}`.toLowerCase();
+      const email = String(c.email || '').toLowerCase();
+      const inst = String(c.institutional_affiliation || c.current_institution || '').toLowerCase();
+      const sport = String(c.sport_type || '').toLowerCase();
+      const id = String(c.coach_id || c.user_id || '').toLowerCase();
+      if (!name.includes(query) && !email.includes(query) && !inst.includes(query) && !sport.includes(query) && !id.includes(query)) {
+        return false;
+      }
+    }
     return true;
   });
 
   const filteredOfficials = officialQueue.filter((o) => {
-    if (filter === 'NON_AUDITED') return !isOfficialAudited(o);
-    if (filter === 'AUDITED') return isOfficialAudited(o);
+    if (filter === 'NON_AUDITED' && isOfficialAudited(o)) return false;
+    if (filter === 'AUDITED' && !isOfficialAudited(o)) return false;
+    if (query) {
+      const name = `${o.full_name || ''} ${o.first_name || ''} ${o.last_name || ''}`.toLowerCase();
+      const email = String(o.email || '').toLowerCase();
+      const org = String(o.organization_name || o.organization || '').toLowerCase();
+      const license = String(o.official_license_number || '').toLowerCase();
+      const id = String(o.official_id || o.user_id || '').toLowerCase();
+      if (!name.includes(query) && !email.includes(query) && !org.includes(query) && !license.includes(query) && !id.includes(query)) {
+        return false;
+      }
+    }
     return true;
   });
 
   const activeFilteredList = queueType === 'COACHES' ? filteredCoaches : filteredOfficials;
-  const totalPages = Math.max(1, Math.ceil(activeFilteredList.length / itemsPerPage));
-  const displayedCoaches = filteredCoaches.slice((page - 1) * itemsPerPage, page * itemsPerPage);
-  const displayedOfficials = filteredOfficials.slice((page - 1) * itemsPerPage, page * itemsPerPage);
+  const effectivePerPage = itemsPerPage === 0 ? Math.max(1, activeFilteredList.length) : itemsPerPage;
+  const totalPages = Math.max(1, Math.ceil(activeFilteredList.length / effectivePerPage));
+  const displayedCoaches = itemsPerPage === 0
+    ? filteredCoaches
+    : filteredCoaches.slice((page - 1) * effectivePerPage, page * effectivePerPage);
+  const displayedOfficials = itemsPerPage === 0
+    ? filteredOfficials
+    : filteredOfficials.slice((page - 1) * effectivePerPage, page * effectivePerPage);
 
   const queueHealthScore =
     coachQueue.length + officialQueue.length > 0
@@ -462,7 +494,59 @@ export const AdminHomePage: React.FC = () => {
                 </button>
               ))}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  backgroundColor: '#FFFFFF',
+                  border: '1.5px solid #CBD5E1',
+                  borderRadius: '3px',
+                  padding: '4px 10px',
+                  gap: '6px',
+                  minWidth: '220px',
+                }}
+              >
+                <Search style={{ width: 14, height: 14, color: '#64748B' }} />
+                <input
+                  type="text"
+                  placeholder={queueType === 'COACHES' ? 'Search coach, sport, school...' : 'Search official, org...'}
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setPage(1);
+                  }}
+                  style={{
+                    border: 'none',
+                    outline: 'none',
+                    fontSize: '12px',
+                    color: '#0B132B',
+                    width: '100%',
+                    backgroundColor: 'transparent',
+                    fontWeight: 600,
+                  }}
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery('');
+                      setPage(1);
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      color: '#94A3B8',
+                    }}
+                  >
+                    <CloseIcon style={{ width: 13, height: 13 }} />
+                  </button>
+                )}
+              </div>
               <span style={{ fontSize: '12px', color: '#64748B', fontWeight: 600 }}>
                 Showing {activeFilteredList.length} {queueType === 'COACHES' ? 'coach' : 'official'}
                 {activeFilteredList.length !== 1 ? (queueType === 'COACHES' ? 'es' : 's') : ''}
@@ -750,29 +834,63 @@ export const AdminHomePage: React.FC = () => {
             )}
           </div>
 
-          {/* Pagination */}
-          <div style={styles.paginationRow}>
-            <button
-              type="button"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              style={{ ...styles.pageArrowBtn, opacity: page <= 1 ? 0.35 : 1 }}
-              title="Previous Page"
-            >
-              <ChevronLeft style={{ width: 15, height: 15 }} />
-            </button>
-            <button type="button" style={styles.pageNumberBtn}>
-              PAGE {String(page).padStart(2, '0')}
-            </button>
-            <button
-              type="button"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              style={{ ...styles.pageArrowBtn, opacity: page >= totalPages ? 0.35 : 1 }}
-              title="Next Page"
-            >
-              <ChevronRight style={{ width: 15, height: 15 }} />
-            </button>
+          {/* Pagination & Rows Controls */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '16px', flexWrap: 'wrap', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 800, color: '#64748B', letterSpacing: '0.05em' }}>
+                SHOW PER PAGE:
+              </span>
+              {[
+                { label: '10', value: 10 },
+                { label: '25', value: 25 },
+                { label: 'ALL', value: 0 },
+              ].map((opt) => (
+                <button
+                  key={opt.label}
+                  type="button"
+                  onClick={() => {
+                    setItemsPerPage(opt.value);
+                    setPage(1);
+                  }}
+                  style={{
+                    padding: '3px 8px',
+                    fontSize: '11px',
+                    fontWeight: 800,
+                    borderRadius: '2px',
+                    border: itemsPerPage === opt.value ? '1px solid #0B132B' : '1px solid #CBD5E1',
+                    backgroundColor: itemsPerPage === opt.value ? '#0B132B' : '#FFFFFF',
+                    color: itemsPerPage === opt.value ? '#FFFFFF' : '#475569',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            <div style={styles.paginationRow}>
+              <button
+                type="button"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                style={{ ...styles.pageArrowBtn, opacity: page <= 1 ? 0.35 : 1 }}
+                title="Previous Page"
+              >
+                <ChevronLeft style={{ width: 15, height: 15 }} />
+              </button>
+              <button type="button" style={styles.pageNumberBtn}>
+                PAGE {String(page).padStart(2, '0')} OF {String(totalPages).padStart(2, '0')}
+              </button>
+              <button
+                type="button"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                style={{ ...styles.pageArrowBtn, opacity: page >= totalPages ? 0.35 : 1 }}
+                title="Next Page"
+              >
+                <ChevronRight style={{ width: 15, height: 15 }} />
+              </button>
+            </div>
           </div>
         </main>
       </div>
