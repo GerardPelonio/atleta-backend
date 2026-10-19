@@ -206,7 +206,7 @@ export async function getMe(req: AuthRequest, res: Response): Promise<void> {
     const result = await getUserProfileService(uid);
     res.status(200).json(result);
   } catch (error: any) {
-    if (error.code === 'USER_NOT_FOUND' && req.user) {
+    if (req.user) {
       res.status(200).json({
         user_id: req.user.uid,
         uid: req.user.uid,

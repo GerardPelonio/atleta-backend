@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   getStoredUser,
   getAllOfficialMatchesMaster,
+  getStoredOfficialMatches,
   getCachedData,
   prefetchMatchAuditDetail,
   isMatchCreatedByOfficial,
@@ -81,10 +82,10 @@ export const ViewAllMatch: React.FC = () => {
 
   // Master in-memory dataset of all official's matches
   const [allMatches, setAllMatches] = useState<MatchSummaryItem[]>(
-    () => getCachedData<MatchSummaryItem[]>('all_official_matches_master') || []
+    () => getStoredOfficialMatches(user)
   );
   const [loading, setLoading] = useState(
-    () => !getCachedData<MatchSummaryItem[]>('all_official_matches_master')
+    () => getStoredOfficialMatches(user).length === 0
   );
 
   useEffect(() => {
@@ -94,19 +95,31 @@ export const ViewAllMatch: React.FC = () => {
   // Fetch / refresh master dataset in background
   useEffect(() => {
     let isMounted = true;
-    const cached = getCachedData<MatchSummaryItem[]>('all_official_matches_master');
-    if (!cached || cached.length === 0) {
+    const initialList = getStoredOfficialMatches(user);
+    if (initialList.length > 0) {
+      setAllMatches(initialList);
+      setLoading(false);
+    } else {
       setLoading(true);
     }
 
     getAllOfficialMatchesMaster(false)
       .then((data) => {
-        if (isMounted && data) {
-          setAllMatches(data);
+        if (isMounted) {
+          if (Array.isArray(data) && data.length > 0) {
+            setAllMatches(data);
+          } else {
+            const fallback = getStoredOfficialMatches(user);
+            if (fallback.length > 0) setAllMatches(fallback);
+          }
         }
       })
       .catch((err) => {
         console.error('Failed to load official master matches:', err);
+        if (isMounted) {
+          const fallback = getStoredOfficialMatches(user);
+          if (fallback.length > 0) setAllMatches(fallback);
+        }
       })
       .finally(() => {
         if (isMounted) setLoading(false);

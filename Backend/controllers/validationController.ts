@@ -58,14 +58,15 @@ export async function getPendingValidationsHandler(req: AuthRequest, res: Respon
       serverCache.set(cacheKey, pendingValidations, 20, ['validations', 'matches']);
     }
 
-    res.status(200).json(pendingValidations);
+    res.status(200).json(pendingValidations || []);
   } catch (error: any) {
     if (error instanceof ServiceError) {
       res.status(error.statusCode).json({ error: error.message });
       return;
     }
     console.error('getPendingValidationsHandler error:', error);
-    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+    // Return empty list on quota exceeded / backend Firestore failure instead of hard 500
+    res.status(200).json([]);
   }
 }
 

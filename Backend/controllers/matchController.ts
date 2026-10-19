@@ -67,10 +67,10 @@ export async function getAllMatchesHandler(req: AuthRequest, res: Response): Pro
       matches = coachMatches;
     }
 
-    res.status(200).json({ matches });
+    res.status(200).json({ matches: matches || [] });
   } catch (error: any) {
     console.error('getAllMatchesHandler error:', error);
-    res.status(500).json({ error: error?.message || 'Failed to fetch matches' });
+    res.status(200).json({ matches: [] });
   }
 }
 

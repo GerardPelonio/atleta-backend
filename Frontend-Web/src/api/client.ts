@@ -1171,6 +1171,105 @@ export const isMatchCreatedByOfficial = (
   return false;
 };
 
+export const getStoredOfficialMatches = (
+  currentUser?: import('./types').AuthUser | null
+): import('./types').MatchSummaryItem[] => {
+  const user = currentUser || getStoredUser();
+  const list: import('./types').MatchSummaryItem[] = [];
+  const existingIds = new Set<string>();
+
+  // 1. Check in-memory master dataset
+  const mem = getCachedData<import('./types').MatchSummaryItem[]>('all_official_matches_master');
+  if (Array.isArray(mem) && mem.length > 0) {
+    mem.forEach((m) => {
+      const cid = String(m.match_id || '').replace(/^#/, '');
+      if (!isMatchDeleted(cid) && isMatchCreatedByOfficial(m, user)) {
+        list.push(m);
+        existingIds.add(cid);
+      }
+    });
+  }
+
+  // 2. Check localStorage master dataset
+  try {
+    const rawMaster = localStorage.getItem('atleta_cached_official_matches_master');
+    if (rawMaster) {
+      const parsed = JSON.parse(rawMaster);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((m: any) => {
+          const cid = String(m.match_id || '').replace(/^#/, '');
+          if (!existingIds.has(cid) && !isMatchDeleted(cid) && isMatchCreatedByOfficial(m, user)) {
+            list.push(m);
+            existingIds.add(cid);
+          }
+        });
+      }
+    }
+  } catch {}
+
+  // 3. Check localStorage official dashboard audit queue
+  try {
+    const rawDash = localStorage.getItem('atleta_cached_official_dashboard');
+    if (rawDash) {
+      const dash = JSON.parse(rawDash);
+      const queue = Array.isArray(dash?.audit_queue) ? dash.audit_queue : [];
+      queue.forEach((item: any, idx: number) => {
+        const match = item.match_details || {};
+        const rawId = String(match.match_id || item.match_id || `queue_${idx}`).replace(/^#/, '');
+        if (isMatchDeleted(rawId) || existingIds.has(rawId)) return;
+        if (!item.match_details && !item.home_team_name) return;
+
+        const customMatchName = String(
+          match.matchName ||
+          match.match_name ||
+          match.game_name ||
+          match.gameName ||
+          item.matchName ||
+          item.match_name ||
+          item.game_name ||
+          item.gameName ||
+          ''
+        ).trim();
+        const fallbackName = match.home_team_name && match.away_team_name ? `${match.home_team_name} vs. ${match.away_team_name}` : 'Tournament Match';
+
+        const isAudited = item.status === 'Approved' || item.status === 'Audited' || match.is_certified === true || isMatchLocallyCertified(rawId);
+        const assignedCoaches = Array.isArray(match.assigned_coaches) && match.assigned_coaches.length > 0
+          ? match.assigned_coaches
+          : Array.isArray(match.coaches) && match.coaches.length > 0
+            ? match.coaches
+            : [];
+        const coach = assignedCoaches.length > 0
+          ? assignedCoaches.join(', ')
+          : match.coach_name
+            ? `Coach ${match.coach_name}`
+            : item.requested_by && !String(item.requested_by).startsWith('off_') && !String(item.requested_by).includes('@') && String(item.requested_by).length < 25
+              ? `Coach ${item.requested_by}`
+              : 'Assigned Coach';
+
+        const fakeSummary: import('./types').MatchSummaryItem = {
+          match_id: `#${rawId}`,
+          validation_id: item.audit_id || rawId,
+          match_name: customMatchName || fallbackName,
+          matchName: customMatchName || fallbackName,
+          match_class: customMatchName || fallbackName,
+          sport: match.sport_type || 'Basketball',
+          coaches: coach,
+          date_time: match.match_date || item.requested_at || new Date().toISOString(),
+          status: isAudited ? 'AUDITED' : 'PENDING',
+          raw_match: { ...match, ...item },
+        };
+
+        if (isMatchCreatedByOfficial(fakeSummary, user)) {
+          list.push(fakeSummary);
+          existingIds.add(rawId);
+        }
+      });
+    }
+  } catch {}
+
+  return list;
+};
+
 export const createOfficialMatch = async (payload: CreateMatchPayload): Promise<any> => {
   const token = getStoredToken();
   const idempotencyKey = crypto.randomUUID();
@@ -1567,8 +1666,32 @@ export const getAuditMatches = async (
       fetch(`${BASE_URL}/validations/pending`, { headers }).then((r) => (r.ok ? r.json() : [])).catch(() => []),
     ]);
 
-    const dashboardQueue: any[] = Array.isArray(dashboardRes?.audit_queue) ? dashboardRes.audit_queue : [];
-    const allMatchesList: any[] = Array.isArray(matchesRes?.matches) ? matchesRes.matches : (Array.isArray(matchesRes) ? matchesRes : []);
+    let dashboardQueue: any[] = Array.isArray(dashboardRes?.audit_queue) ? dashboardRes.audit_queue : [];
+    if (dashboardQueue.length === 0) {
+      try {
+        const raw = localStorage.getItem('atleta_cached_official_dashboard');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed?.audit_queue) && parsed.audit_queue.length > 0) {
+            dashboardQueue = parsed.audit_queue;
+          }
+        }
+      } catch {}
+    }
+
+    let allMatchesList: any[] = Array.isArray(matchesRes?.matches) ? matchesRes.matches : (Array.isArray(matchesRes) ? matchesRes : []);
+    if (allMatchesList.length === 0) {
+      try {
+        const raw = localStorage.getItem('atleta_cached_official_matches_master');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            allMatchesList = parsed;
+          }
+        }
+      } catch {}
+    }
+
     const pendingValidations: any[] = Array.isArray(pendingRes) ? pendingRes : [];
 
     const userMe = getStoredUser();
@@ -1726,7 +1849,17 @@ export const getAuditMatches = async (
       };
     });
 
-    setCachedData('all_official_matches_master', items);
+    if (items.length > 0) {
+      setCachedData('all_official_matches_master', items);
+      try { localStorage.setItem('atleta_cached_official_matches_master', JSON.stringify(items)); } catch {}
+    } else {
+      // Don't wipe out valid local/stored matches when network request returns empty or fails
+      const fallback = getStoredOfficialMatches(userMe);
+      if (fallback.length > 0) {
+        items = fallback;
+        setCachedData('all_official_matches_master', fallback);
+      }
+    }
 
     // Filter by tab status
     if (statusFilter === 'PENDING') items = items.filter((i) => i.status === 'PENDING');
@@ -1748,6 +1881,8 @@ export const getAuditMatches = async (
     return items;
   } catch (error) {
     console.error('getAuditMatches error:', error);
+    const fallback = getStoredOfficialMatches();
+    if (fallback.length > 0) return fallback;
     return [];
   }
 };
@@ -1757,7 +1892,26 @@ export const getAllOfficialMatchesMaster = async (
 ): Promise<import('./types').MatchSummaryItem[]> => {
   const cached = getCachedData<import('./types').MatchSummaryItem[]>('all_official_matches_master');
   if (cached && Array.isArray(cached) && cached.length > 0 && !forceRefresh) return cached;
-  return getAuditMatches('ALL', 'ALL', forceRefresh);
+
+  const stored = getStoredOfficialMatches();
+  if (stored.length > 0 && !forceRefresh) {
+    setCachedData('all_official_matches_master', stored);
+    return stored;
+  }
+
+  const fetched = await getAuditMatches('ALL', 'ALL', forceRefresh);
+  if (Array.isArray(fetched) && fetched.length > 0) {
+    setCachedData('all_official_matches_master', fetched);
+    try { localStorage.setItem('atleta_cached_official_matches_master', JSON.stringify(fetched)); } catch {}
+    return fetched;
+  }
+
+  const fallback = getStoredOfficialMatches();
+  if (fallback.length > 0) {
+    setCachedData('all_official_matches_master', fallback);
+    return fallback;
+  }
+  return fetched || [];
 };
 
 export const prefetchAllOfficialAuditMatches = async (): Promise<void> => {
