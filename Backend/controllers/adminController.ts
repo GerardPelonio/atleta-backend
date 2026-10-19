@@ -77,9 +77,13 @@ export async function getAdminProfileHandler(req: AdminAuthRequest, res: Respons
 export async function getCoachQueueHandler(req: AdminAuthRequest, res: Response): Promise<void> {
   try {
     const queue = await getPendingCoachQueueService();
+    const totalPending = queue.filter((c: any) => {
+      const st = (c.account_status || c.status || '').toLowerCase();
+      return st !== 'active' && st !== 'verified' && st !== 'approved' && st !== 'rejected';
+    }).length;
     res.status(200).json({
       message: 'Pending coach accreditation queue retrieved successfully.',
-      total_pending: queue.length,
+      total_pending: totalPending,
       queue,
     });
   } catch (error: any) {
