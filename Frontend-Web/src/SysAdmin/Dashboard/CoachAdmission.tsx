@@ -62,7 +62,12 @@ export const CoachAdmission: React.FC<CoachAdmissionProps> = ({
         onClose();
       }, 1400);
     } catch (e: any) {
-      alert(e.message || 'Accreditation approval failed.');
+      const msg = e?.message || 'Accreditation approval failed.';
+      alert(msg);
+      if (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('does not exist')) {
+        onUpdate(currentCoach.coach_id, '__DELETED__', '__DELETED__');
+        onClose();
+      }
     } finally {
       setActionLoading(false);
     }
@@ -81,7 +86,12 @@ export const CoachAdmission: React.FC<CoachAdmissionProps> = ({
         onClose();
       }, 1400);
     } catch (e: any) {
-      alert(e.message || 'Rejection failed.');
+      const msg = e?.message || 'Rejection failed.';
+      alert(msg);
+      if (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('does not exist')) {
+        onUpdate(currentCoach.coach_id, '__DELETED__', '__DELETED__');
+        onClose();
+      }
     } finally {
       setActionLoading(false);
     }

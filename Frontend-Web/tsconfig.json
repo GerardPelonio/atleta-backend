@@ -21,9 +21,6 @@
   },
   "include": [
     "src",
-    "vite.config.ts",
-    "OCRLoggingPage.tsx",
-    "OfficialNavbar.tsx",
-    "src/Officials/OfficialSettings.tsx"
+    "vite.config.ts"
   ]
 }

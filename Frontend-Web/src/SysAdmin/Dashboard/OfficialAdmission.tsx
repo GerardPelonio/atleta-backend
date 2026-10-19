@@ -72,7 +72,12 @@ export const OfficialAdmission: React.FC<OfficialAdmissionProps> = ({
         onClose();
       }, 1400);
     } catch (e: any) {
-      alert(e.message || 'Official approval failed.');
+      const msg = e?.message || 'Official approval failed.';
+      alert(msg);
+      if (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('does not exist')) {
+        onUpdate(currentOfficial.official_id, '__DELETED__', false);
+        onClose();
+      }
     } finally {
       setActionLoading(false);
     }
@@ -97,7 +102,12 @@ export const OfficialAdmission: React.FC<OfficialAdmissionProps> = ({
         onClose();
       }, 1400);
     } catch (e: any) {
-      alert(e.message || 'Rejection failed.');
+      const msg = e?.message || 'Rejection failed.';
+      alert(msg);
+      if (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('does not exist')) {
+        onUpdate(currentOfficial.official_id, '__DELETED__', false);
+        onClose();
+      }
     } finally {
       setActionLoading(false);
     }

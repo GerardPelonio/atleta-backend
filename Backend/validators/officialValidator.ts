@@ -1,4 +1,4 @@
-import { ValidationError } from './userValidator';
+import { ValidationError, validatePasswordComplexity } from './userValidator';
 
 const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
 
@@ -24,13 +24,9 @@ export function validateRegisterOfficial(data: Record<string, unknown>): Validat
     errors.push({ field: 'email', message: 'Email must be a valid RFC 5322 compliant address.' });
   }
 
-  // password (Required, Min 6)
+  // password (Required, Complexity: min 8, uppercase, special char)
   const password = typeof data.password === 'string' ? data.password : '';
-  if (!password) {
-    errors.push({ field: 'password', message: 'Password is required.' });
-  } else if (password.length < 6) {
-    errors.push({ field: 'password', message: 'Password must be at least 6 characters.' });
-  }
+  errors.push(...validatePasswordComplexity(password, 'password'));
 
   // organization_name (Required)
   const orgName = typeof data.organization_name === 'string' ? data.organization_name.trim() : '';

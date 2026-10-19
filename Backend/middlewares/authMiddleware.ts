@@ -49,7 +49,6 @@ export function optionalAuth(req: AuthRequest, res: Response, next: NextFunction
     } catch (_) {}
   }
   next();
-  next();
 }
 
 export function requireCoach(req: AuthRequest, res: Response, next: NextFunction): void {

@@ -112,7 +112,7 @@ export const ViewAllMatch: React.FC = () => {
         if (isMounted) setLoading(false);
       });
 
-    getSports(false, true).then((res) => {
+    getSports().then((res) => {
       if (isMounted && res) {
         const list = Array.isArray(res.sports) ? res.sports : (Array.isArray(res) ? res : []);
         setDynamicSports(buildNormalizedSportsList(list));

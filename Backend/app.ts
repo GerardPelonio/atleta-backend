@@ -43,6 +43,7 @@ app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
 app.use('/api/v1', routes);
+app.use('/api', routes);
 
 app.get(['/', '/api', '/api/v1'], (req: Request, res: Response) => {
   res.status(200).json({

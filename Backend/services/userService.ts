@@ -595,8 +595,8 @@ export async function loginUserService(email: string, password: string) {
   const roleStr = String(role || '').toLowerCase();
   const isAdmin = roleStr.includes('admin');
 
-  // Official Sign-Up Approval Gate: Intercept login if not approved by system admin
-  if (!isAdmin && roleStr.includes('official')) {
+  // Admissions Gate: Intercept login if Coach or Official is not approved by system admin
+  if (!isAdmin && (roleStr.includes('official') || roleStr.includes('coach'))) {
     const rawStatus = String(
       userData.account_status ||
       userData.status ||
@@ -608,11 +608,12 @@ export async function loginUserService(email: string, password: string) {
     const isApprovedStatus = rawStatus === 'approved' || rawStatus === 'active' || rawStatus === 'verified';
 
     if (!isApprovedFlag && !isApprovedStatus) {
+      const entityName = roleStr.includes('coach') ? 'coach' : 'official';
       if (rawStatus === 'rejected' || rawStatus === 'declined') {
         const reason = userData.rejection_reason ? `: ${userData.rejection_reason}` : '.';
-        throw new ServiceError(`Your official account application was declined by the system administrator${reason}`, 403);
+        throw new ServiceError(`Your ${entityName} account application was declined by the system administrator${reason}`, 403);
       }
-      throw new ServiceError('Your official account is pending system admin approval.', 403);
+      throw new ServiceError(`Your ${entityName} account is pending system admin approval.`, 403);
     }
   }
 

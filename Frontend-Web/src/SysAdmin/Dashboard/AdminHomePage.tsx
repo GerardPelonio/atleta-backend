@@ -12,6 +12,7 @@ import {
   getStoredToken,
   getStoredUser,
   getCachedData,
+  setCachedData,
   getAdminCoachQueue,
   getAdminOfficialQueue,
 } from '../../api/client';
@@ -29,25 +30,6 @@ import { styles } from './styles/AdminHomePage';
 
 const COACH_STORAGE_KEY = 'atleta_admin_all_coaches';
 const OFFICIAL_STORAGE_KEY = 'atleta_admin_all_officials';
-
-const DEFAULT_INITIAL_COACHES: AdminCoachQueueItem[] = [
-  {
-    coach_id: 'coach_001',
-    user_id: 'usr_coach_001',
-    first_name: 'Erick Nathaniel',
-    last_name: 'De Belen',
-    full_name: 'Erick Nathaniel De Belen',
-    current_institution: 'University Athletics',
-    institutional_affiliation: 'University Athletics',
-    sport_type: 'Basketball',
-    years_of_experience: 5,
-    account_status: 'Active',
-    status: 'VERIFIED',
-    professional_documents: ['https://storage.googleapis.com/atleta/coach_license_sbp.pdf'],
-    created_at: '2026-01-15T08:30:00.000Z',
-    date_uploaded: '2026-01-15 08:30',
-  },
-];
 
 const getStoredCoaches = (): AdminCoachQueueItem[] => {
   try {
@@ -82,18 +64,56 @@ const saveStoredOfficials = (list: AdminOfficialQueueItem[]) => {
 type QueueType = 'COACHES' | 'OFFICIALS';
 type FilterType = 'ALL' | 'NON_AUDITED' | 'AUDITED';
 
+// Coach helper checks
+const isCoachVerified = (c?: AdminCoachQueueItem | null) =>
+  !c ? false :
+  (c.account_status || '').toLowerCase() === 'active' ||
+  (c.status || '').toUpperCase() === 'VERIFIED' ||
+  (c.status || '').toUpperCase() === 'ACTIVE';
+
+const isCoachRejected = (c?: AdminCoachQueueItem | null) =>
+  !c ? false :
+  (c.account_status || '').toLowerCase() === 'rejected' ||
+  (c.status || '').toUpperCase() === 'REJECTED';
+
+const isCoachAudited = (c?: AdminCoachQueueItem | null) => isCoachVerified(c) || isCoachRejected(c);
+
+// Official helper checks
+const isOfficialApproved = (o?: AdminOfficialQueueItem | null) =>
+  !o ? false :
+  o.is_approved === true ||
+  (o.status || '').toLowerCase() === 'approved' ||
+  (o.account_status || '').toLowerCase() === 'approved' ||
+  (o.account_status || '').toLowerCase() === 'active';
+
+const isOfficialRejected = (o?: AdminOfficialQueueItem | null) =>
+  !o ? false :
+  (o.status || '').toLowerCase() === 'rejected' ||
+  (o.account_status || '').toLowerCase() === 'rejected';
+
+const isOfficialAudited = (o?: AdminOfficialQueueItem | null) => isOfficialApproved(o) || isOfficialRejected(o);
+
+const hasSubmittedCredentials = (c?: AdminCoachQueueItem | null): boolean => {
+  if (!c) return false;
+  const docs = c.professional_documents || (c as any).uploaded_documents || (c as any).certificates;
+  if (Array.isArray(docs) && docs.length > 0) return true;
+  if (typeof (c as any).document_url === 'string' && (c as any).document_url.trim()) return true;
+  if (typeof (c as any).credential_url === 'string' && (c as any).credential_url.trim()) return true;
+  return false;
+};
+
 export const AdminHomePage: React.FC = () => {
   const navigate = useNavigate();
 
   const [queueType, setQueueType] = useState<QueueType>('COACHES');
 
-  // Coaches Queue State
+  // Coaches Queue State: only coaches who submitted credentials
   const [coachQueue, setCoachQueue] = useState<AdminCoachQueueItem[]>(() => {
-    const stored = getStoredCoaches();
+    const stored = getStoredCoaches().filter(hasSubmittedCredentials);
     if (stored.length > 0) return stored;
     const cached = getCachedData<AdminCoachQueueResponse>('admin_coach_queue')?.queue;
-    if (Array.isArray(cached) && cached.length > 0) return cached;
-    return DEFAULT_INITIAL_COACHES;
+    if (Array.isArray(cached) && cached.length > 0) return cached.filter(hasSubmittedCredentials);
+    return [];
   });
 
   // Officials Queue State
@@ -113,21 +133,19 @@ export const AdminHomePage: React.FC = () => {
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
   const itemsPerPage = 6;
 
-  const loadCoachQueue = async () => {
+  const loadCoachQueue = async (forceRefresh = false) => {
     try {
-      const res = await getAdminCoachQueue(true);
-      const incoming = Array.isArray(res?.queue) ? res.queue : [];
-      setCoachQueue((prev) => {
-        const map = new Map<string, AdminCoachQueueItem>();
-        prev.forEach((c) => map.set(c.coach_id || c.user_id, c));
-        incoming.forEach((c) => {
-          const id = c.coach_id || c.user_id;
-          map.set(id, { ...map.get(id), ...c });
-        });
-        const merged = Array.from(map.values());
-        saveStoredCoaches(merged);
-        return merged;
-      });
+      const cached = getCachedData<AdminCoachQueueResponse>('admin_coach_queue');
+      if (cached && !forceRefresh && Array.isArray(cached.queue) && cached.queue.length > 0) {
+        const filteredCached = cached.queue.filter(hasSubmittedCredentials);
+        setCoachQueue(filteredCached);
+        saveStoredCoaches(filteredCached);
+        return;
+      }
+      const res = await getAdminCoachQueue(forceRefresh);
+      const incoming = Array.isArray(res?.queue) ? res.queue.filter(hasSubmittedCredentials) : [];
+      setCoachQueue(incoming);
+      saveStoredCoaches(incoming);
     } catch (e) {
       console.error('Failed to load coach queue:', e);
     }
@@ -137,26 +155,20 @@ export const AdminHomePage: React.FC = () => {
     try {
       const res = await getAdminOfficialQueue(true);
       const incoming = Array.isArray(res?.queue) ? res.queue : [];
-      setOfficialQueue((prev) => {
-        const map = new Map<string, AdminOfficialQueueItem>();
-        prev.forEach((o) => map.set(o.official_id || o.user_id, o));
-        incoming.forEach((o) => {
-          const id = o.official_id || o.user_id;
-          map.set(id, { ...map.get(id), ...o });
-        });
-        const merged = Array.from(map.values());
-        saveStoredOfficials(merged);
-        return merged;
-      });
+      setOfficialQueue(incoming);
+      saveStoredOfficials(incoming);
     } catch (e) {
       console.error('Failed to load official queue:', e);
     }
   };
 
   const loadAll = async () => {
-    setLoading(true);
+    const hasCoaches = coachQueue.length > 0 || getStoredCoaches().length > 0;
+    if (!hasCoaches) {
+      setLoading(true);
+    }
     try {
-      await Promise.all([loadCoachQueue(), loadOfficialQueue()]);
+      await Promise.all([loadCoachQueue(false), loadOfficialQueue()]);
     } finally {
       setLoading(false);
     }
@@ -178,53 +190,35 @@ export const AdminHomePage: React.FC = () => {
 
   const handleUpdateCoach = (coachId: string, account_status: string, status: string) => {
     setCoachQueue((prev) => {
-      const updated = prev.map((c) => (c.coach_id === coachId ? { ...c, account_status, status } : c));
+      const updated =
+        status === '__DELETED__' || account_status === '__DELETED__'
+          ? prev.filter((c) => c.coach_id !== coachId && c.user_id !== coachId)
+          : prev.map((c) => (c.coach_id === coachId ? { ...c, account_status, status } : c));
       saveStoredCoaches(updated);
+      setCachedData('admin_coach_queue', { total_pending: updated.filter((c) => !isCoachAudited(c)).length, queue: updated });
       return updated;
     });
   };
 
   const handleUpdateOfficial = (officialId: string, status: string, isApproved: boolean) => {
     setOfficialQueue((prev) => {
-      const updated = prev.map((o) =>
-        o.official_id === officialId
-          ? {
-              ...o,
-              status,
-              is_approved: isApproved,
-              account_status: isApproved ? 'Active' : 'Rejected',
-            }
-          : o
-      );
+      const updated =
+        status === '__DELETED__'
+          ? prev.filter((o) => o.official_id !== officialId && o.user_id !== officialId)
+          : prev.map((o) =>
+              o.official_id === officialId
+                ? {
+                    ...o,
+                    status,
+                    is_approved: isApproved,
+                    account_status: isApproved ? 'Active' : 'Rejected',
+                  }
+                : o
+            );
       saveStoredOfficials(updated);
       return updated;
     });
   };
-
-  // Coach helper checks
-  const isCoachVerified = (c: AdminCoachQueueItem) =>
-    (c.account_status || '').toLowerCase() === 'active' ||
-    (c.status || '').toUpperCase() === 'VERIFIED' ||
-    (c.status || '').toUpperCase() === 'ACTIVE';
-
-  const isCoachRejected = (c: AdminCoachQueueItem) =>
-    (c.account_status || '').toLowerCase() === 'rejected' ||
-    (c.status || '').toUpperCase() === 'REJECTED';
-
-  const isCoachAudited = (c: AdminCoachQueueItem) => isCoachVerified(c) || isCoachRejected(c);
-
-  // Official helper checks
-  const isOfficialApproved = (o: AdminOfficialQueueItem) =>
-    o.is_approved === true ||
-    (o.status || '').toLowerCase() === 'approved' ||
-    (o.account_status || '').toLowerCase() === 'approved' ||
-    (o.account_status || '').toLowerCase() === 'active';
-
-  const isOfficialRejected = (o: AdminOfficialQueueItem) =>
-    (o.status || '').toLowerCase() === 'rejected' ||
-    (o.account_status || '').toLowerCase() === 'rejected';
-
-  const isOfficialAudited = (o: AdminOfficialQueueItem) => isOfficialApproved(o) || isOfficialRejected(o);
 
   // Counts
   const coachPendingCount = coachQueue.filter((c) => !isCoachAudited(c)).length;

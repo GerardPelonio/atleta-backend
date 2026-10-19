@@ -11,6 +11,27 @@ export interface ValidationError {
 }
 
 /**
+ * Validates password complexity: minimum 8 characters, at least 1 uppercase letter, at least 1 special character.
+ */
+export function validatePasswordComplexity(password: string, fieldName: string = 'password'): ValidationError[] {
+  const errors: ValidationError[] = [];
+  if (!password || password.trim().length === 0) {
+    errors.push({ field: fieldName, message: `${fieldName.replace(/_/g, ' ')} is required.` });
+  } else {
+    if (password.length < 8) {
+      errors.push({ field: fieldName, message: 'Password must be at least 8 characters long.' });
+    }
+    if (!/[A-Z]/.test(password)) {
+      errors.push({ field: fieldName, message: 'Password must include at least 1 uppercase letter.' });
+    }
+    if (!/[^a-zA-Z0-9]/.test(password)) {
+      errors.push({ field: fieldName, message: 'Password must include at least 1 special symbol (e.g. !@#$%^&*).' });
+    }
+  }
+  return errors;
+}
+
+/**
  * Normalizes input role string to exact UserRole enum
  */
 export function normalizeRole(roleInput: string): UserRole {
@@ -52,13 +73,9 @@ export function validateRegisterUser(data: Record<string, unknown>, hasFile: boo
     errors.push({ field: 'email', message: 'Email must be a valid RFC 5322 compliant address.' });
   }
 
-  // password (Required, Min 6)
+  // password (Required, Complexity: min 8, uppercase, special char)
   const password = typeof data.password === 'string' ? data.password : '';
-  if (!password) {
-    errors.push({ field: 'password', message: 'Password is required.' });
-  } else if (password.length < 6) {
-    errors.push({ field: 'password', message: 'Password must be at least 6 characters.' });
-  }
+  errors.push(...validatePasswordComplexity(password, 'password'));
 
   // contact_number (Optional, 11 characters)
   let contactNumber = typeof data.contact_number === 'string' ? data.contact_number.replace(/[\s\-_()]/g, '') : '';
@@ -209,11 +226,8 @@ export function validatePasswordResetConfirm(data: { token?: string; new_passwor
     errors.push({ field: 'token', message: 'Reset token is required.' });
   }
 
-  if (!data.new_password || data.new_password.length === 0) {
-    errors.push({ field: 'new_password', message: 'New password is required.' });
-  } else if (data.new_password.length < 6) {
-    errors.push({ field: 'new_password', message: 'New password must be at least 6 characters.' });
-  }
+  const newPassword = typeof data.new_password === 'string' ? data.new_password : '';
+  errors.push(...validatePasswordComplexity(newPassword, 'new_password'));
 
   return errors;
 }
@@ -223,13 +237,8 @@ export function validatePasswordResetConfirm(data: { token?: string; new_passwor
  */
 export function validateChangePassword(data: { password?: string; new_password?: string; newPassword?: string }): ValidationError[] {
   const errors: ValidationError[] = [];
-  const pwd = data.password || data.new_password || data.newPassword;
-
-  if (!pwd || pwd.trim().length === 0) {
-    errors.push({ field: 'password', message: 'Password is required.' });
-  } else if (pwd.length < 6) {
-    errors.push({ field: 'password', message: 'Password must be at least 6 characters.' });
-  }
+  const pwd = typeof data.password === 'string' ? data.password : (typeof data.new_password === 'string' ? data.new_password : (typeof data.newPassword === 'string' ? data.newPassword : ''));
+  errors.push(...validatePasswordComplexity(pwd, 'password'));
 
   return errors;
 }

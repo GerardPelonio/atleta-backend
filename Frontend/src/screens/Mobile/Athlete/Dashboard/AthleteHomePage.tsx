@@ -182,7 +182,7 @@ export function AthleteHomePage({ onLogout }: AthleteHomePageProps) {
           weekly_logs: weeklyLogsGrouped,
         };
 
-        const sportCategory = (raw.sport_type || raw.category || raw.sport || "BASKETBALL").toUpperCase();
+        const sportCategory = (raw.sport_category || raw.sport_type || raw.category || raw.sport || "BASKETBALL").toUpperCase();
         const isSwim = sportCategory.includes("SWIM");
         const isTrack = sportCategory.includes("TRACK") || sportCategory.includes("FIELD");
 

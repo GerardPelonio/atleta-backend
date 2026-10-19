@@ -1,4 +1,4 @@
-import { ValidationError } from './userValidator';
+import { ValidationError, validatePasswordComplexity } from './userValidator';
 
 // RFC 5322 compliant email regex
 const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
@@ -49,13 +49,9 @@ export function validateRegisterAdmin(data: Record<string, unknown>): Validation
     errors.push({ field: 'email', message: 'Email must belong to a verified institutional domain (e.g., .edu, .edu.ph, .gov, .gov.ph).' });
   }
 
-  // password (Required, Min 6)
+  // password (Required, Complexity: min 8, uppercase, special char)
   const password = typeof data.password === 'string' ? data.password : '';
-  if (!password) {
-    errors.push({ field: 'password', message: 'Password is required.' });
-  } else if (password.length < 6) {
-    errors.push({ field: 'password', message: 'Password must be at least 6 characters.' });
-  }
+  errors.push(...validatePasswordComplexity(password, 'password'));
 
   // department_code (Required, e.g., "SYS_ADMIN", "GOVERNANCE")
   const departmentCode = typeof data.department_code === 'string' ? data.department_code.trim() : '';

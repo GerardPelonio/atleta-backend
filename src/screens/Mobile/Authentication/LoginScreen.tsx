@@ -300,16 +300,12 @@ export function LoginScreen({ onGoSignup, onGoReset, onAuthenticated }: LoginScr
         onAuthenticated?.(role);
         form.reset(values);
       } catch (error: any) {
-        const rawMsg = error?.message || String(error);
-        const errorMessage = getAuthErrorMessage(error, "Invalid email or password. Please check your credentials and try again.");
-        const displayMsg = rawMsg && rawMsg !== "Something went wrong." && !rawMsg.includes("Invalid email")
-          ? `${errorMessage} (${rawMsg})`
-          : errorMessage;
+        const displayMsg = getAuthErrorMessage(error, "Invalid email or password. Please check your credentials and try again.");
         setFeedback({
           tone: "error",
           message: displayMsg
         });
-        Alert.alert("Authentication Failed", `${displayMsg}\n\nServer: ${API_BASE}`);
+        Alert.alert("Authentication Failed", displayMsg);
       } finally {
         setLoading(false);
       }
@@ -381,9 +377,6 @@ export function LoginScreen({ onGoSignup, onGoReset, onAuthenticated }: LoginScr
 
         <Text style={authScreenStyles.footer}>
           Don&apos;t have an account? <Text style={authScreenStyles.footerLink} onPress={() => onGoSignup?.()}>Sign Up</Text>
-        </Text>
-        <Text style={{ textAlign: "center", color: "#64748B", fontSize: 11, marginTop: 10 }}>
-          v0.1.1 • {API_BASE}
         </Text>
 
         <InAppGoogleAuthModal

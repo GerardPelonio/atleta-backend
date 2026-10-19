@@ -52,8 +52,8 @@ router.post('/log-match', optionalAuth, submitMatch);
 router.post('/', optionalAuth, submitMatch);
 
 // Official Match Endpoints
-router.post('/official', optionalAuth, createOfficialMatchHandler);
-router.post('/create-official', optionalAuth, createOfficialMatchHandler);
+router.post(['/official', '/official/'], optionalAuth, createOfficialMatchHandler);
+router.post(['/create-official', '/create-official/'], optionalAuth, createOfficialMatchHandler);
 
 // Single Match Lookup & Artifacts
 router.post('/:matchId/scoresheet', optionalAuth, upload.any(), uploadScoresheet);

@@ -9,12 +9,10 @@ import {
   getOfficialDashboard,
   getAllOfficialMatchesMaster,
   getOfficialSettings,
-  prefetchAllOfficialAuditMatches,
   prefetchMatchAuditDetail,
   isMatchCreatedByOfficial,
   isMatchLocallyCertified,
   isMatchDeleted,
-  warmOfficialAppCache,
   getSports,
   getScoresheetRequests,
 } from '../../api/client';
@@ -51,6 +49,16 @@ export const OfficialHomePage: React.FC = () => {
   const [loading, setLoading] = useState(() => {
     return !getCachedData('official_dashboard') && !localStorage.getItem('atleta_cached_official_dashboard');
   });
+  const [dataReady, setDataReady] = useState<boolean>(() => {
+    const memDash = getCachedData<OfficialDashboardResponse>('official_dashboard');
+    const memMatches = getCachedData<MatchSummaryItem[]>('all_official_matches_master');
+    if (memDash || (memMatches && memMatches.length > 0)) return true;
+    try {
+      const rawMatches = localStorage.getItem('atleta_cached_official_matches_master');
+      if (rawMatches && JSON.parse(rawMatches).length > 0) return true;
+    } catch { }
+    return false;
+  });
   const [acceptedRequests, setAcceptedRequests] = useState<Array<{ id: string; coachName: string; timestamp: number }>>(() => {
     try {
       const raw = localStorage.getItem('atleta_accepted_scoresheet_requests');
@@ -65,13 +73,14 @@ export const OfficialHomePage: React.FC = () => {
       if (res) {
         setDashboard(res);
         try { localStorage.setItem('atleta_cached_official_dashboard', JSON.stringify(res)); } catch { }
+        setDataReady(true);
       }
     }).catch(() => { });
     getAllOfficialMatchesMaster(true).then((res) => {
-      if (res) {
-        setMasterMatches(res);
-        try { localStorage.setItem('atleta_cached_official_matches_master', JSON.stringify(res)); } catch { }
-      }
+      const incoming = Array.isArray(res) ? res.filter((m) => !isMatchDeleted(m.match_id)) : [];
+      setMasterMatches(incoming);
+      try { localStorage.setItem('atleta_cached_official_matches_master', JSON.stringify(incoming)); } catch { }
+      setDataReady(true);
     }).catch(() => { });
   };
 
@@ -90,21 +99,25 @@ export const OfficialHomePage: React.FC = () => {
     }
 
     // 1. Load Matches progressively and cache
-    getOfficialDashboard().then((res) => {
-      if (res) {
+    getOfficialDashboard(true).then((res) => {
+      if (res && (res.total_matches > 0 || (res.audit_queue && res.audit_queue.length > 0))) {
         setDashboard(res);
         try { localStorage.setItem('atleta_cached_official_dashboard', JSON.stringify(res)); } catch { }
+        setDataReady(true);
       }
     }).catch(() => { });
 
-    getAllOfficialMatchesMaster().then((res) => {
-      if (res) {
-        setMasterMatches(res);
-        try { localStorage.setItem('atleta_cached_official_matches_master', JSON.stringify(res)); } catch { }
+    getAllOfficialMatchesMaster(true).then((res) => {
+      const incoming = Array.isArray(res) ? res.filter((m) => !isMatchDeleted(m.match_id)) : [];
+      if (incoming.length > 0) {
+        setMasterMatches(incoming);
+        try { localStorage.setItem('atleta_cached_official_matches_master', JSON.stringify(incoming)); } catch { }
       }
       setLoading(false);
+      setDataReady(true);
     }).catch(() => {
       setLoading(false);
+      setDataReady(true);
     });
 
     getMe().then((res) => {
@@ -118,9 +131,7 @@ export const OfficialHomePage: React.FC = () => {
     }).catch(() => { });
 
     getOfficialSettings().catch(() => { });
-    getSports(false, true).catch(() => { });
-    prefetchAllOfficialAuditMatches().catch(() => { });
-    warmOfficialAppCache().catch(() => { });
+    getSports().catch(() => { });
 
     getScoresheetRequests({ status: 'fulfilled' }).then((reqs) => {
       if (Array.isArray(reqs)) {
@@ -172,6 +183,7 @@ export const OfficialHomePage: React.FC = () => {
       const match = item.match_details || {};
       const rawId = String(match.match_id || item.match_id || `queue_${idx}`).replace(/^#/, '');
       if (isMatchDeleted(rawId)) return;
+      if (!item.match_details && !item.home_team_name) return;
 
       const customMatchName = String(
         match.matchName ||
@@ -228,8 +240,19 @@ export const OfficialHomePage: React.FC = () => {
     // Ensure certified status is accurately reflected for all matches
     list.forEach((m) => {
       const cleanId = m.match_id.replace(/^#/, '');
-      if (isMatchLocallyCertified(cleanId)) {
+      const valId = String(m.validation_id || '').replace(/^#/, '');
+      const raw = m.raw_match || {};
+      if (
+        isMatchLocallyCertified(cleanId) ||
+        (valId && isMatchLocallyCertified(valId)) ||
+        raw.is_certified === true ||
+        String(raw.is_certified) === 'true' ||
+        raw.status === 'AUDITED' ||
+        raw.status === 'OFFICIAL' ||
+        (m.status as any) === 'OFFICIAL'
+      ) {
         m.status = 'AUDITED';
+        if (m.raw_match) m.raw_match.is_certified = true;
       }
     });
 
@@ -345,6 +368,8 @@ export const OfficialHomePage: React.FC = () => {
     officialMatches.filter((i) => i.status === 'AUDITED').length
   ).padStart(2, '0');
 
+  const isKpiLoading = (!dataReady && officialMatches.length === 0) || (loading && officialMatches.length === 0);
+
   const roleStr = String(user?.role || getStoredUser()?.role || '').toLowerCase().replace(/[\s_-]+/g, '');
   if (roleStr.includes('admin')) {
     return (
@@ -378,15 +403,39 @@ export const OfficialHomePage: React.FC = () => {
           <div style={styles.kpiGrid}>
             <div style={styles.kpiBox}>
               <span style={{ ...styles.kpiLabel, color: '#94A3B8' }}>TOTAL MATCHES</span>
-              <h2 style={styles.kpiValue}>{loading ? '...' : totalMatches}</h2>
+              <h2 style={styles.kpiValue}>
+                {isKpiLoading ? (
+                  <div style={{ display: 'flex', alignItems: 'center', height: '38px' }}>
+                    <Loader2 style={{ width: 24, height: 24, animation: 'spin 1s linear infinite', color: '#0B132B' }} />
+                  </div>
+                ) : (
+                  totalMatches
+                )}
+              </h2>
             </div>
             <div style={styles.kpiBox}>
               <span style={{ ...styles.kpiLabel, color: '#D97706' }}>PENDING VERIFICATION</span>
-              <h2 style={styles.kpiValue}>{loading ? '...' : pendingCount}</h2>
+              <h2 style={styles.kpiValue}>
+                {isKpiLoading ? (
+                  <div style={{ display: 'flex', alignItems: 'center', height: '38px' }}>
+                    <Loader2 style={{ width: 24, height: 24, animation: 'spin 1s linear infinite', color: '#D97706' }} />
+                  </div>
+                ) : (
+                  pendingCount
+                )}
+              </h2>
             </div>
             <div style={styles.kpiBox}>
               <span style={{ ...styles.kpiLabel, color: '#059669' }}>AUDITED COMPLETED</span>
-              <h2 style={styles.kpiValue}>{loading ? '...' : auditedCount}</h2>
+              <h2 style={styles.kpiValue}>
+                {isKpiLoading ? (
+                  <div style={{ display: 'flex', alignItems: 'center', height: '38px' }}>
+                    <Loader2 style={{ width: 24, height: 24, animation: 'spin 1s linear infinite', color: '#059669' }} />
+                  </div>
+                ) : (
+                  auditedCount
+                )}
+              </h2>
             </div>
           </div>
 
@@ -397,7 +446,6 @@ export const OfficialHomePage: React.FC = () => {
               to="/matches"
               className="hover-view-all"
               style={styles.viewAllLink}
-              onMouseEnter={() => prefetchAllOfficialAuditMatches()}
             >
               VIEW ALL <ExternalLink style={{ width: 12, height: 12 }} />
             </Link>
@@ -415,7 +463,7 @@ export const OfficialHomePage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {loading && newMatchesList.length === 0 ? (
+                {isKpiLoading && newMatchesList.length === 0 ? (
                   <tr>
                     <td colSpan={5} style={{ ...styles.td, textAlign: 'center', padding: '32px' }}>
                       <Loader2 style={{ width: 24, height: 24, animation: 'spin 1s linear infinite', margin: '0 auto', color: '#0B132B' }} />
@@ -463,7 +511,11 @@ export const OfficialHomePage: React.FC = () => {
           <div style={styles.recentActivityCard}>
             <div style={styles.activityHead}>RECENT ACTIVITY</div>
             <div style={styles.activityBody}>
-              {recentActivities.length > 0 ? (
+              {isKpiLoading && recentActivities.length === 0 ? (
+                <div style={{ display: 'flex', justifyContent: 'center', padding: '24px' }}>
+                  <Loader2 style={{ width: 22, height: 22, animation: 'spin 1s linear infinite', color: '#0B132B' }} />
+                </div>
+              ) : recentActivities.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   {recentActivities.slice(0, 6).map((act, i) => (
                     <div

@@ -13,54 +13,71 @@ export const readFileAsDataUrl = (file: File): Promise<string> => {
 
 export const compressImageForOcr = (
   file: File,
-  maxDimension = 1800,
-  quality = 0.85
+  maxDimension = 1600,
+  quality = 0.8
 ): Promise<{ base64Data: string; mimeType: string; dataUrl: string }> => {
   return new Promise((resolve) => {
-    if (!file.type || !file.type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+    const timeout = setTimeout(async () => {
+      try {
+        const dUrl = await readFileAsDataUrl(file);
         resolve({
-          base64Data: dataUrl.split(',')[1] || '',
+          base64Data: dUrl.split(',')[1] || '',
           mimeType: file.type || 'image/jpeg',
-          dataUrl,
+          dataUrl: dUrl,
         });
-      };
-      reader.onerror = () => resolve({ base64Data: '', mimeType: '', dataUrl: '' });
-      reader.readAsDataURL(file);
+      } catch {
+        resolve({ base64Data: '', mimeType: file.type || 'image/jpeg', dataUrl: '' });
+      }
+    }, 4000);
+
+    if (!file.type || !file.type.startsWith('image/')) {
+      clearTimeout(timeout);
+      readFileAsDataUrl(file)
+        .then((dataUrl) => {
+          resolve({
+            base64Data: dataUrl.split(',')[1] || '',
+            mimeType: file.type || 'image/jpeg',
+            dataUrl,
+          });
+        })
+        .catch(() => {
+          resolve({ base64Data: '', mimeType: file.type || 'image/jpeg', dataUrl: '' });
+        });
       return;
     }
 
     const reader = new FileReader();
     reader.onload = (e) => {
+      const rawUrl = typeof e.target?.result === 'string' ? e.target.result : '';
       const img = new Image();
       img.onload = () => {
-        let { width, height } = img;
-        if (width > maxDimension || height > maxDimension) {
-          if (width > height) {
-            height = Math.round((height * maxDimension) / width);
-            width = maxDimension;
-          } else {
-            width = Math.round((width * maxDimension) / height);
-            height = maxDimension;
+        clearTimeout(timeout);
+        try {
+          let { width, height } = img;
+          if (width > maxDimension || height > maxDimension) {
+            if (width > height) {
+              height = Math.round((height * maxDimension) / width);
+              width = maxDimension;
+            } else {
+              width = Math.round((width * maxDimension) / height);
+              height = maxDimension;
+            }
           }
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-          const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
-          resolve({
-            base64Data: compressedDataUrl.split(',')[1] || '',
-            mimeType: 'image/jpeg',
-            dataUrl: compressedDataUrl,
-          });
-          return;
-        }
-        const rawUrl = typeof e.target?.result === 'string' ? e.target.result : '';
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+            resolve({
+              base64Data: compressedDataUrl.split(',')[1] || '',
+              mimeType: 'image/jpeg',
+              dataUrl: compressedDataUrl,
+            });
+            return;
+          }
+        } catch { }
         resolve({
           base64Data: rawUrl.split(',')[1] || '',
           mimeType: file.type || 'image/jpeg',
@@ -68,61 +85,113 @@ export const compressImageForOcr = (
         });
       };
       img.onerror = () => {
-        const rawUrl = typeof e.target?.result === 'string' ? e.target.result : '';
+        clearTimeout(timeout);
         resolve({
           base64Data: rawUrl.split(',')[1] || '',
           mimeType: file.type || 'image/jpeg',
           dataUrl: rawUrl,
         });
       };
-      img.src = typeof e.target?.result === 'string' ? e.target.result : '';
+      img.src = rawUrl;
     };
-    reader.onerror = () => resolve({ base64Data: '', mimeType: '', dataUrl: '' });
+    reader.onerror = () => {
+      clearTimeout(timeout);
+      resolve({ base64Data: '', mimeType: '', dataUrl: '' });
+    };
     reader.readAsDataURL(file);
   });
 };
 
 /**
- * Single-file OCR scan routing directly to the backend OCR scanning engine
- * (aligned with mobile canonical endpoint: /matches/ocr/scan)
+ * Single-file OCR scan routing to backend OCR scanning engines.
+ * Supports both JSON base64 payloads (required by Vercel Serverless) and multipart FormData.
  */
 export const scanScoresheetOCR = async (file: File): Promise<any> => {
-  const token = getStoredToken();
-  const formData = new FormData();
-  formData.append('file', file);
+  // 1. Prepare base64 representation for serverless backend compatibility (Vercel Node)
+  let base64Payload = '';
+  let payloadMime = file.type || 'image/jpeg';
+
+  try {
+    if (file.type && file.type.startsWith('image/')) {
+      const comp = await compressImageForOcr(file, 1600, 0.8);
+      base64Payload = comp.base64Data;
+      payloadMime = comp.mimeType || file.type || 'image/jpeg';
+    } else {
+      const dUrl = await readFileAsDataUrl(file);
+      base64Payload = dUrl.split(',')[1] || '';
+      payloadMime = file.type || (file.name.endsWith('.csv') ? 'text/csv' : 'application/pdf');
+    }
+  } catch {
+    const dUrl = await readFileAsDataUrl(file);
+    base64Payload = dUrl.split(',')[1] || '';
+  }
 
   const endpoints = [
-    `http://localhost:5000/api/v1/matches/ocr/scan`,
-    `http://localhost:5000/api/v1/matches/scan-scoresheet`,
-    `${BASE_URL}/matches/ocr/scan`,
     `${BASE_URL}/matches/scan-scoresheet`,
+    `${BASE_URL}/matches/ocr/scan`,
     `${BASE_URL}/matches/web/scan-scoresheet`,
   ];
 
   let lastError: Error | null = null;
+
   for (const ep of endpoints) {
+    // Attempt 1: Multipart FormData without auth header (to prevent optionalAuth duplicate next() bug)
     try {
-      const res = await fetch(ep, {
+      const formData = new FormData();
+      formData.append('file', file, file.name);
+      formData.append('scoresheet', file, file.name);
+
+      const formRes = await fetch(ep, {
         method: 'POST',
         headers: {
           Accept: 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: formData,
       });
 
-      if (res.ok) {
-        return await handleResponse<any>(res);
-      } else {
-        const errTxt = await res.text().catch(() => '');
-        lastError = new Error(`OCR scanner returned status ${res.status}: ${errTxt}`);
+      if (formRes.ok) {
+        return await handleResponse<any>(formRes);
+      }
+
+      const errTxt = await formRes.text().catch(() => '');
+      if (formRes.status !== 404) {
+        lastError = new Error(`OCR scanner returned status ${formRes.status}: ${errTxt}`);
       }
     } catch (err: any) {
       lastError = err;
     }
+
+    // Attempt 2: JSON Base64 Payload without auth header
+    if (base64Payload) {
+      try {
+        const jsonRes = await fetch(ep, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            base64: base64Payload,
+            filename: file.name,
+            mimetype: payloadMime,
+          }),
+        });
+
+        if (jsonRes.ok) {
+          return await handleResponse<any>(jsonRes);
+        }
+
+        const errTxt = await jsonRes.text().catch(() => '');
+        if (jsonRes.status !== 404) {
+          lastError = new Error(`OCR scanner returned status ${jsonRes.status}: ${errTxt}`);
+        }
+      } catch (err: any) {
+        lastError = err;
+      }
+    }
   }
 
-  throw lastError || new Error('Failed to connect to backend OCR scanner. Please make sure the backend server is running on port 5000.');
+  throw lastError || new Error('Failed to connect to backend OCR scanner. Please make sure the backend server is reachable.');
 };
 
 export const scanScoresheetStandalone = async (rawFile: File): Promise<any> => {
@@ -146,15 +215,12 @@ export const scanMultipleScoresheets = async (files: File[]): Promise<any> => {
   if (!files || files.length === 0) return null;
   if (files.length === 1) return scanScoresheetOCR(files[0]);
 
-  const token = getStoredToken();
   const formData = new FormData();
   files.forEach((f) => {
     formData.append('files', f);
   });
 
   const endpoints = [
-    `http://localhost:5000/api/v1/matches/mobile/multi/scan-scoresheet`,
-    `http://localhost:5000/api/v1/matches/multi/scan-scoresheet`,
     `${BASE_URL}/matches/mobile/multi/scan-scoresheet`,
     `${BASE_URL}/matches/multi/scan-scoresheet`,
     `${BASE_URL}/matches/web/multi/scan-scoresheet`,
@@ -167,7 +233,6 @@ export const scanMultipleScoresheets = async (files: File[]): Promise<any> => {
         method: 'POST',
         headers: {
           Accept: 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: formData,
       });
@@ -212,9 +277,24 @@ export const uploadScoresheetFile = async (matchId: string, rawFile: File): Prom
   const cleanId = matchId.replace(/^#/, '');
   const token = getStoredToken();
   const formData = new FormData();
-  formData.append('file', rawFile);
-  formData.append('scoresheet', rawFile);
+  formData.append('file', rawFile, rawFile.name);
+  formData.append('scoresheet', rawFile, rawFile.name);
 
+  // Attempt without auth header first to avoid backend optionalAuth duplicate next() bug
+  try {
+    const res = await fetch(`${BASE_URL}/matches/${cleanId}/scoresheet`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+      },
+      body: formData,
+    });
+    if (res.ok) {
+      return await handleResponse<any>(res);
+    }
+  } catch {}
+
+  // Secondary attempt with token
   const res = await fetch(`${BASE_URL}/matches/${cleanId}/scoresheet`, {
     method: 'POST',
     headers: {
@@ -239,8 +319,22 @@ export const uploadMultipleScoresheetFiles = async (matchId: string, files: File
   const token = getStoredToken();
   const formData = new FormData();
   files.forEach((f) => {
-    formData.append('files', f);
+    formData.append('files', f, f.name);
   });
+
+  // Attempt without auth header first
+  try {
+    const res = await fetch(`${BASE_URL}/matches/${cleanId}/multi/scoresheet`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+      },
+      body: formData,
+    });
+    if (res.ok) {
+      return await handleResponse<any>(res);
+    }
+  } catch {}
 
   try {
     const res = await fetch(`${BASE_URL}/matches/${cleanId}/multi/scoresheet`, {

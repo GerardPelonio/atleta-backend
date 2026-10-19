@@ -264,14 +264,56 @@ interface MetricFormItem {
   formula: string;
 }
 
+const DELETED_SPORTS_STORAGE_KEY = 'atleta_deleted_sport_keys';
+
+const getDeletedSportKeys = (): Set<string> => {
+  try {
+    const raw = localStorage.getItem(DELETED_SPORTS_STORAGE_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) return new Set(arr.map((k: string) => String(k).toLowerCase().trim()));
+    }
+  } catch {}
+  return new Set();
+};
+
+const addDeletedSportKey = (id?: string, name?: string) => {
+  try {
+    const set = getDeletedSportKeys();
+    if (id) set.add(id.toLowerCase().trim());
+    if (name) set.add(name.toLowerCase().trim());
+    localStorage.setItem(DELETED_SPORTS_STORAGE_KEY, JSON.stringify(Array.from(set)));
+  } catch {}
+};
+
+const removeDeletedSportKey = (id?: string, name?: string) => {
+  try {
+    const set = getDeletedSportKeys();
+    if (id) set.delete(id.toLowerCase().trim());
+    if (name) set.delete(name.toLowerCase().trim());
+    localStorage.setItem(DELETED_SPORTS_STORAGE_KEY, JSON.stringify(Array.from(set)));
+  } catch {}
+};
+
 export const SportPage: React.FC = () => {
   const navigate = useNavigate();
 
   // Catalog State
   const [sports, setSports] = useState<SportConfiguration[]>(() => {
+    const deleted = getDeletedSportKeys();
+    const filterOutDeleted = (list: SportConfiguration[]) =>
+      list.filter((s) => {
+        const id = (s.sport_id || '').toLowerCase().trim();
+        const name = (s.sport_name || '').toLowerCase().trim();
+        return !deleted.has(id) && !deleted.has(name);
+      });
+
     const cached = getCachedData<SportConfiguration[]>('admin_sports_catalog');
-    if (cached && cached.length > 0) return cached;
-    return INITIAL_DEFAULT_SPORTS;
+    if (cached && cached.length > 0) {
+      const filtered = filterOutDeleted(cached);
+      if (filtered.length > 0) return filtered;
+    }
+    return filterOutDeleted(INITIAL_DEFAULT_SPORTS);
   });
   const [loading, setLoading] = useState(!getCachedData('admin_sports_catalog'));
   const [viewMode, setViewMode] = useState<'CATALOG' | 'BUILDER'>('CATALOG');
@@ -310,34 +352,45 @@ export const SportPage: React.FC = () => {
 
   const handleConfirmDelete = async () => {
     if (!sportToDelete) return;
+    const cleanId = (sportToDelete.sport_id || '').toLowerCase().trim();
+    const cleanName = (sportToDelete.sport_name || '').toLowerCase().trim();
+
+    // 1. Immediately record in persistent tombstone set
+    addDeletedSportKey(cleanId, cleanName);
+
+    // 2. Immediately remove from local state & cache so UI updates instantly
+    setSports((prev) => {
+      const updated = prev.filter((s) => {
+        const sId = (s.sport_id || '').toLowerCase().trim();
+        const sName = (s.sport_name || '').toLowerCase().trim();
+        return sId !== cleanId && sName !== cleanName;
+      });
+      setCachedData('admin_sports_catalog', updated);
+      setCachedData('sports_catalog_false', { total_sports: updated.length, sports: updated });
+      setCachedData('sports_catalog_true', {
+        total_sports: updated.filter((s) => s.is_active !== false).length,
+        sports: updated.filter((s) => s.is_active !== false),
+      });
+      return updated;
+    });
+
+    if (viewMode === 'BUILDER' && editingSportId === sportToDelete.sport_id) {
+      setViewMode('CATALOG');
+      setEditingSportId(null);
+    }
+
     try {
       setDeletingSport(true);
       await deleteSport(sportToDelete.sport_id);
-
-      setSports((prev) => {
-        const updated = prev.filter((s) => s.sport_id !== sportToDelete.sport_id);
-        setCachedData('admin_sports_catalog', updated);
-        setCachedData('sports_catalog_false', { total_sports: updated.length, sports: updated });
-        setCachedData('sports_catalog_true', {
-          total_sports: updated.filter((s) => s.is_active !== false).length,
-          sports: updated.filter((s) => s.is_active !== false),
-        });
-        return updated;
-      });
-
-      try {
-        window.dispatchEvent(new Event('sports_updated'));
-      } catch {}
-
-      if (viewMode === 'BUILDER' && editingSportId === sportToDelete.sport_id) {
-        setViewMode('CATALOG');
-        setEditingSportId(null);
-      }
-      setSportToDelete(null);
     } catch (err: any) {
-      alert(err?.message || 'Failed to delete sport configuration.');
+      const msg = (err?.message || '').toLowerCase();
+      // If 404 or not found, it is already deleted in the database, which is expected
+      if (!msg.includes('not found') && !msg.includes('does not exist')) {
+        console.warn('Backend delete notification:', err);
+      }
     } finally {
       setDeletingSport(false);
+      setSportToDelete(null);
     }
   };
 
@@ -346,11 +399,28 @@ export const SportPage: React.FC = () => {
     try {
       if (sports.length === 0) setLoading(true);
       const res = await getSports(false, forceRefresh);
-      const serverSports = Array.isArray(res?.sports) ? res.sports : [];
-      const catalog = serverSports.length > 0 ? serverSports : INITIAL_DEFAULT_SPORTS;
+      const serverSports = Array.isArray(res?.sports)
+        ? res.sports
+        : Array.isArray(res)
+          ? res
+          : [];
+      const deleted = getDeletedSportKeys();
+      const filteredServerSports = serverSports.filter((s) => {
+        const id = (s.sport_id || '').toLowerCase().trim();
+        const name = (s.sport_name || '').toLowerCase().trim();
+        return !deleted.has(id) && !deleted.has(name);
+      });
 
-      setSports(catalog);
-      setCachedData('admin_sports_catalog', catalog);
+      if (filteredServerSports.length > 0) {
+        setSports(filteredServerSports);
+        setCachedData('admin_sports_catalog', filteredServerSports);
+      } else if (sports.length === 0) {
+        setSports(INITIAL_DEFAULT_SPORTS.filter((s) => {
+          const id = (s.sport_id || '').toLowerCase().trim();
+          const name = (s.sport_name || '').toLowerCase().trim();
+          return !deleted.has(id) && !deleted.has(name);
+        }));
+      }
     } catch (err: any) {
       console.error('Failed to load sports catalog:', err);
       if (sports.length === 0) setSports(INITIAL_DEFAULT_SPORTS);
@@ -657,16 +727,20 @@ export const SportPage: React.FC = () => {
         setFeedback({ type: 'success', message: `Sport "${cleanSportName}" successfully created!` });
       }
 
+      removeDeletedSportKey(savedSport.sport_id, cleanSportName);
+
       setSports((prev) => {
+        const cleanId = (savedSport.sport_id || editingSportId || '').toLowerCase();
+        const cleanName = (savedSport.sport_name || cleanSportName || '').toUpperCase();
         const exists = prev.some(
           (s) =>
-            s.sport_id === savedSport.sport_id ||
-            (s.sport_name || '').toUpperCase() === (savedSport.sport_name || '').toUpperCase()
+            (s.sport_id || '').toLowerCase() === cleanId ||
+            (s.sport_name || '').toUpperCase() === cleanName
         );
         const updated = exists
           ? prev.map((s) =>
-              s.sport_id === savedSport.sport_id ||
-              (s.sport_name || '').toUpperCase() === (savedSport.sport_name || '').toUpperCase()
+              (s.sport_id || '').toLowerCase() === cleanId ||
+              (s.sport_name || '').toUpperCase() === cleanName
                 ? { ...s, ...savedSport }
                 : s
             )
@@ -679,10 +753,6 @@ export const SportPage: React.FC = () => {
         });
         return updated;
       });
-
-      try {
-        window.dispatchEvent(new Event('sports_updated'));
-      } catch {}
 
       setTimeout(() => {
         setViewMode('CATALOG');

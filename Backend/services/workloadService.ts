@@ -77,9 +77,9 @@ export async function logSrpeEntry(params: {
     srpe_score: params.srpe_score,
     daily_load: dailyLoad,
     entry_date: params.entry_date,
-    logged_by_coach_id: params.logged_by_coach_id || undefined,
-    logged_by_name: params.logged_by_name || undefined,
-    notes: params.notes || undefined,
+    logged_by_coach_id: params.logged_by_coach_id || null as any,
+    logged_by_name: params.logged_by_name || null as any,
+    notes: params.notes || null as any,
     session_type: params.session_type || 'Practice',
     created_at: now,
   };
@@ -104,8 +104,9 @@ export async function logSrpeEntry(params: {
   const loads28d = loads.slice(0, 28);
 
   const acuteLoadSum = loads7d.reduce((a, b) => a + b, 0);
+  const acuteLoadAvg = loads7d.length > 0 ? round(acuteLoadSum / loads7d.length) : 0;
   const chronicLoadAvg = loads28d.length > 0 ? round(loads28d.reduce((a, b) => a + b, 0) / loads28d.length) : 0;
-  const acwrRatio = chronicLoadAvg > 0 ? round(acuteLoadSum / chronicLoadAvg) : 0;
+  const acwrRatio = chronicLoadAvg > 0 ? round(acuteLoadAvg / chronicLoadAvg) : (acuteLoadAvg > 0 ? 1.0 : 0);
 
   const mean7d = loads7d.length > 0 ? mean(loads7d) : dailyLoad;
   const std7d = loads7d.length > 0 ? stddev(loads7d) : 0;
@@ -160,7 +161,9 @@ export async function logSrpeEntry(params: {
     body_stress: bodyStress,
     target_intensity: targetIntensity,
     weekly_logs: weeklyLogs,
-    recent_entries: sortedEntries.slice(0, 15),
+    recent_entries: sortedEntries.slice(0, 15).map((e) =>
+      Object.fromEntries(Object.entries(e).filter(([_, v]) => v !== undefined))
+    ),
     updated_at: now,
   };
 
@@ -227,7 +230,7 @@ export async function getWorkloadAnalytics(athleteId: string): Promise<WorkloadA
   const loads28d = allDailyLoads.slice(0, 28);
   const loads30d = allDailyLoads.slice(0, 30);
 
-  const acuteLoad = loads7d.length > 0 ? round(sum(loads7d)) : 0;
+  const acuteLoad = loads7d.length > 0 ? round(mean(loads7d)) : 0;
   const chronicLoad = loads28d.length > 0 ? round(mean(loads28d)) : 380;
   const acwrRatio = chronicLoad > 0 ? round(acuteLoad / chronicLoad) : 1.0;
 
@@ -304,10 +307,13 @@ export async function getAthleteWorkloadSummary(athleteId: string): Promise<any>
   const acuteLoadSum = loads7d.length > 0
     ? loads7d.reduce((a, b) => a + b, 0)
     : Number(savedWorkload.acute_load_7day_avg || 0);
+  const acuteLoadAvg = loads7d.length > 0
+    ? round(acuteLoadSum / loads7d.length)
+    : Number(savedWorkload.acute_load_7day_avg || 0);
   const chronicLoadAvg = loads28d.length > 0
     ? round(loads28d.reduce((a, b) => a + b, 0) / loads28d.length)
     : Number(savedWorkload.chronic_load_28day_avg || 0);
-  const acwrRatio = chronicLoadAvg > 0 ? round(acuteLoadSum / chronicLoadAvg) : 0;
+  const acwrRatio = chronicLoadAvg > 0 ? round(acuteLoadAvg / chronicLoadAvg) : 0;
 
   const mean7d = loads7d.length > 0 ? mean(loads7d) : 0;
   const std7d = loads7d.length > 0 ? stddev(loads7d) : 0;

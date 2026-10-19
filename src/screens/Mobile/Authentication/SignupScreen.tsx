@@ -107,7 +107,7 @@ const DEFAULT_ATHLETE_VALUES: AthleteSignupValues = {
   contact_number: "",
   birthdate: "",
   gender: "Male",
-  province: "",
+  province: "Camarines Sur",
   sport_type: "" as any,
   terms_accepted: false
 };

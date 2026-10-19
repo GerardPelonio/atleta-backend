@@ -36,6 +36,9 @@ export function validateUpdateRoster(data: Record<string, unknown> | any[]): Val
   if (!roster || !Array.isArray(roster)) {
     errors.push({ field: 'roster', message: 'Roster must be an array of player objects (or provided as {"roster": [...]} or {"roster_list": [...]}).' });
   } else {
+    const seenAthletes = new Set<string>();
+    const seenJerseys = new Set<string | number>();
+
     for (let i = 0; i < roster.length; i++) {
       const item = roster[i];
       if (!item || typeof item !== 'object' || (!item.athlete_id && !item.user_id)) {
@@ -43,6 +46,26 @@ export function validateUpdateRoster(data: Record<string, unknown> | any[]): Val
           field: `roster[${i}].athlete_id`,
           message: 'Each roster item must contain a valid athlete_id or user_id string.',
         });
+      } else {
+        const athleteId = String(item.athlete_id || item.user_id).trim();
+        if (seenAthletes.has(athleteId)) {
+          errors.push({
+            field: `roster[${i}].athlete_id`,
+            message: `Duplicate athlete ID '${athleteId}' found in roster.`,
+          });
+        }
+        seenAthletes.add(athleteId);
+
+        if (item.jersey_number !== undefined && item.jersey_number !== null && item.jersey_number !== '') {
+          const jersey = String(item.jersey_number).trim();
+          if (seenJerseys.has(jersey)) {
+            errors.push({
+              field: `roster[${i}].jersey_number`,
+              message: `Duplicate jersey number '${jersey}' found in roster.`,
+            });
+          }
+          seenJerseys.add(jersey);
+        }
       }
     }
   }

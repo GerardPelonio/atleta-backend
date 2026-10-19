@@ -17,8 +17,9 @@ import {
   getMe,
   fulfillScoresheetRequest,
   rejectScoresheetRequest,
+  getOfficialSchedules,
 } from '../../api/client';
-import type { AuthUser, OfficialNotificationItem } from '../../api/types';
+import type { AuthUser, OfficialNotificationItem, OfficialScheduleItem } from '../../api/types';
 import { Navbar } from '../Components/Navbar';
 import { Sidebar } from '../Components/Sidebar';
 import { useNotifications } from './useNotifications';
@@ -37,6 +38,7 @@ export const NotificationPage: React.FC = () => {
     refresh,
     markAllRead,
     markSingleRead,
+    dismissNotification,
     clearHistory,
   } = useNotifications();
 
@@ -45,6 +47,9 @@ export const NotificationPage: React.FC = () => {
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [successNotifId, setSuccessNotifId] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [rejectModalNotif, setRejectModalNotif] = useState<OfficialNotificationItem | null>(null);
+  const [rejectReason, setRejectReason] = useState<string>('Scoresheet request could not be fulfilled at this time.');
+  const [uploadSuccessModal, setUploadSuccessModal] = useState<{ matchName: string; coachName: string } | null>(null);
   const fileInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
 
   useEffect(() => {
@@ -54,6 +59,23 @@ export const NotificationPage: React.FC = () => {
     }
     getMe().then((res) => setUser(res)).catch(() => {});
   }, [navigate]);
+
+  const [schedules, setSchedules] = useState<OfficialScheduleItem[]>(() =>
+    getCachedData<OfficialScheduleItem[]>('official_schedules_all_all') || []
+  );
+
+  useEffect(() => {
+    getOfficialSchedules().then((res) => {
+      if (Array.isArray(res)) setSchedules(res);
+    }).catch(() => {});
+  }, []);
+
+  const getDaysLeft = (targetDate?: string): number | null => {
+    if (!targetDate) return null;
+    const time = new Date(targetDate).getTime();
+    if (isNaN(time)) return null;
+    return Math.ceil((time - Date.now()) / (1000 * 60 * 60 * 24));
+  };
 
   const formatEtcDateTime = (raw: string): string => {
     try {
@@ -74,32 +96,33 @@ export const NotificationPage: React.FC = () => {
     const notifId = notif.notification_id;
     const reqId = notif.request_id || notif.reference_id || notifId.replace(/^req_/, '');
     const matchId = notif.match_id || notif.reference_id || reqId;
+    const coachName = notif.requested_by_coach || notif.coach_name || 'Assigned Coach';
+    const matchName = notif.match_context || notif.match_name || 'Match';
 
     try {
       setUploadingId(notifId);
       setUploadError(null);
-      setSuccessNotifId(null);
+      setSuccessNotifId(notifId);
+      markSingleRead(notifId);
 
-      await fulfillScoresheetRequest(reqId, file, matchId);
-
-      // Record accepted request into local storage activity tracking
+      // Record accepted request into local storage activity tracking instantly
       try {
         const rawExisting = localStorage.getItem('atleta_accepted_scoresheet_requests');
         const existing = rawExisting ? JSON.parse(rawExisting) : [];
-        const coachName = notif.requested_by_coach || notif.coach_name || 'Assigned Coach';
         const entry = { id: reqId, coachName, timestamp: Date.now() };
         const updated = [entry, ...existing.filter((e: any) => e.id !== reqId)];
         localStorage.setItem('atleta_accepted_scoresheet_requests', JSON.stringify(updated));
       } catch {}
 
-      // Auto-mark notification as read on the official side
-      markSingleRead(notifId);
-      setSuccessNotifId(notifId);
+      // Instant UI interruption for successful scoresheet attachment
+      setUploadSuccessModal({ matchName, coachName });
 
-      // Refresh list to pull updated fulfilled state
-      setTimeout(() => {
-        refresh();
-      }, 500);
+      // Background fulfillment
+      fulfillScoresheetRequest(reqId, file, matchId)
+        .then(() => refresh())
+        .catch((err: any) => {
+          console.error('Scoresheet background fulfillment error:', err);
+        });
     } catch (err: any) {
       console.error('Scoresheet fulfillment failed:', err);
       setUploadError(err?.message || 'Failed to upload and share scoresheet.');
@@ -108,27 +131,21 @@ export const NotificationPage: React.FC = () => {
     }
   };
 
-  const handleRejectRequest = async (notif: OfficialNotificationItem) => {
+  const confirmReject = async () => {
+    if (!rejectModalNotif) return;
+    const notif = rejectModalNotif;
     const notifId = notif.notification_id;
     const reqId = notif.request_id || notif.reference_id || notifId.replace(/^req_/, '');
-    const coachName = notif.requested_by_coach || notif.coach_name || 'the coach';
-
-    const reason = window.prompt(
-      `Please state the reason for rejecting the scoresheet request from ${coachName}:`,
-      'Scoresheet request could not be fulfilled at this time.'
-    );
-    if (reason === null) return;
 
     try {
       setRejectingId(notifId);
       setUploadError(null);
 
-      await rejectScoresheetRequest(reqId, reason);
-      markSingleRead(notifId);
+      // Instantly remove notification and persist removal across refresh
+      dismissNotification(notifId);
+      setRejectModalNotif(null);
 
-      setTimeout(() => {
-        refresh();
-      }, 500);
+      await rejectScoresheetRequest(reqId, rejectReason);
     } catch (err: any) {
       console.error('Scoresheet rejection failed:', err);
       setUploadError(err?.message || 'Failed to reject scoresheet request.');
@@ -290,9 +307,9 @@ export const NotificationPage: React.FC = () => {
                   notif.title.toLowerCase().includes('stats');
 
                 if (isAudit) {
-                  const coachName = (notif.requested_by_coach || notif.requested_by || 'Coach Sarah Jenkins').toUpperCase();
-                  const matchContext = (notif.match_context || notif.match_name || 'ADNU VS. UNC - INTRAMURALS 2026').toUpperCase();
-                  const sportDiscipline = (notif.sport_discipline || notif.sport || 'BASKETBALL').toUpperCase();
+                  const coachName = (notif.requested_by_coach || notif.coach_name || notif.requested_by || 'Coach').toUpperCase();
+                  const matchContext = (notif.match_context || notif.match_name || 'Official Match').toUpperCase();
+                  const sportDiscipline = (notif.sport_discipline || notif.sport || 'Sports').toUpperCase();
                   const isUploadingThis = uploadingId === notif.notification_id;
                   const isRejectingThis = rejectingId === notif.notification_id;
                   const isFulfilled = notif.status === 'fulfilled' || notif.status === 'accepted' || Boolean(notif.scoresheet_url);
@@ -431,9 +448,36 @@ export const NotificationPage: React.FC = () => {
                           <button
                             type="button"
                             disabled={isUploadingThis || isRejectingThis}
-                            onClick={() => handleRejectRequest(notif)}
-                            style={styles.rejectBtn}
-                            className="hover-btn-outline"
+                            onClick={() => {
+                              setRejectModalNotif(notif);
+                              setRejectReason('Scoresheet request could not be fulfilled at this time.');
+                            }}
+                            style={{
+                              backgroundColor: '#FFFFFF',
+                              border: '1.5px solid #EF4444',
+                              color: '#DC2626',
+                              borderRadius: '2px',
+                              padding: '9px 16px',
+                              fontSize: '11.5px',
+                              fontWeight: 700,
+                              letterSpacing: '0.04em',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              textTransform: 'uppercase',
+                              transition: 'all 0.15s ease',
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = '#DC2626';
+                              e.currentTarget.style.color = '#FFFFFF';
+                              e.currentTarget.style.borderColor = '#DC2626';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = '#FFFFFF';
+                              e.currentTarget.style.color = '#DC2626';
+                              e.currentTarget.style.borderColor = '#EF4444';
+                            }}
                           >
                             {isRejectingThis ? (
                               <>
@@ -479,25 +523,84 @@ export const NotificationPage: React.FC = () => {
                 }
 
                 // Schedule Updates Card
-                let displaySchedTitle = notif.title.toUpperCase();
-                if (!displaySchedTitle.startsWith('SCHEDULE UPDATES:')) {
-                  displaySchedTitle = `SCHEDULE UPDATES: ${displaySchedTitle}`;
+                const cleanRef = String(notif.reference_id || notif.match_id || notif.notification_id || '').replace(/^#|^sched_|^reminder_|^rem_|^notif_/, '');
+                const matchedSched = schedules.find((s) => {
+                  const sId = String(s.match_id || s.schedule_id || '').replace(/^#|^sched_/, '');
+                  return sId && (cleanRef.includes(sId) || sId.includes(cleanRef));
+                });
+
+                const targetDate = matchedSched?.scheduled_time || (matchedSched as any)?.match_date || matchedSched?.venue_logistics?.time || notif.scheduled_time || notif.match_date;
+                const daysLeft = getDaysLeft(targetDate);
+                const hasDaysLeft = daysLeft !== null && daysLeft >= 1 && daysLeft <= 3;
+                const matchName = matchedSched?.matchName || (matchedSched?.home_team && matchedSched?.away_team ? `${matchedSched.home_team} vs. ${matchedSched.away_team}` : notif.match_context || '');
+                const venueLabel = matchedSched?.venue || matchedSched?.venue_logistics?.location || 'Assigned Venue';
+
+                let displaySchedTitle = notif.title.trim();
+                let displaySchedDesc = notif.message.trim();
+
+                if (hasDaysLeft) {
+                  displaySchedTitle = `${daysLeft} DAY${daysLeft > 1 ? 'S' : ''} LEFT${matchName ? `: ${matchName.toUpperCase()}` : ''}`;
+                  displaySchedDesc = `Match reminder: ${matchName || 'Your scheduled game'} has ${daysLeft} day${daysLeft > 1 ? 's' : ''} left before the match (${venueLabel}).`;
+                } else if (!displaySchedTitle || displaySchedTitle.toLowerCase() === 'notification') {
+                  displaySchedTitle = matchName ? `MATCH REMINDER: ${matchName.toUpperCase()}` : 'SCHEDULE UPDATE';
+                  if (!displaySchedDesc || displaySchedDesc.toLowerCase() === 'notification') {
+                    displaySchedDesc = matchName ? `Upcoming game scheduled for ${matchName} at ${venueLabel}.` : 'You have an upcoming match update.';
+                  }
                 }
 
+                if (!displaySchedTitle.toUpperCase().startsWith('SCHEDULE UPDATES:')) {
+                  displaySchedTitle = `SCHEDULE UPDATES: ${displaySchedTitle.toUpperCase()}`;
+                }
+
+                const isRead = Boolean(notif.is_read);
+
                 return (
-                  <div key={notif.notification_id} style={styles.scheduleCard}>
+                  <div
+                    key={notif.notification_id}
+                    style={{
+                      ...styles.scheduleCard,
+                      ...(isRead ? {
+                        backgroundColor: '#F8FAFC',
+                        borderColor: '#CBD5E1',
+                        opacity: 0.85,
+                      } : {}),
+                    }}
+                  >
                     <div style={styles.scheduleTopRow}>
-                      <h3 style={styles.scheduleHeaderTitle}>
-                        <span style={styles.squareBullet} />
+                      <h3 style={{
+                        ...styles.scheduleHeaderTitle,
+                        ...(isRead ? { color: '#64748B' } : {}),
+                      }}>
+                        <span style={{
+                          ...styles.squareBullet,
+                          ...(isRead ? { backgroundColor: '#94A3B8' } : {}),
+                        }} />
                         <span>{displaySchedTitle}</span>
+                        {isRead && (
+                          <span style={{
+                            fontSize: '9.5px',
+                            fontWeight: 800,
+                            letterSpacing: '0.05em',
+                            color: '#64748B',
+                            backgroundColor: '#E2E8F0',
+                            padding: '2px 6px',
+                            borderRadius: '2px',
+                            marginLeft: '8px',
+                          }}>
+                            READ
+                          </span>
+                        )}
                       </h3>
                       <span style={styles.cardTimestamp}>
                         {formatEtcDateTime(notif.created_at)}
                       </span>
                     </div>
 
-                    <p style={styles.scheduleDescription}>
-                      {notif.message || notif.title}
+                    <p style={{
+                      ...styles.scheduleDescription,
+                      ...(isRead ? { color: '#64748B' } : {}),
+                    }}>
+                      {displaySchedDesc || notif.message || notif.title}
                     </p>
 
                     <div style={styles.scheduleActionsRow}>
@@ -511,9 +614,21 @@ export const NotificationPage: React.FC = () => {
                       >
                         VIEW DETAILS
                       </button>
+                      {!isRead && (
+                        <button
+                          type="button"
+                          onClick={() => markSingleRead(notif.notification_id)}
+                          style={{
+                            ...styles.viewDetailsLink,
+                            color: '#64748B',
+                          }}
+                        >
+                          MARK AS READ
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={() => markSingleRead(notif.notification_id)}
+                        onClick={() => dismissNotification(notif.notification_id)}
                         style={styles.dismissLink}
                       >
                         DISMISS
@@ -522,6 +637,188 @@ export const NotificationPage: React.FC = () => {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {/* UI Interruption: Reject Request Modal */}
+          {rejectModalNotif && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(11, 19, 43, 0.6)',
+              backdropFilter: 'blur(3px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 9999,
+              padding: '20px',
+            }}>
+              <div style={{
+                backgroundColor: '#FFFFFF',
+                border: '2px solid #EF4444',
+                borderRadius: '4px',
+                width: '100%',
+                maxWidth: '460px',
+                padding: '24px',
+                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '16px',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#DC2626' }}>
+                  <AlertCircle style={{ width: 22, height: 22, flexShrink: 0 }} />
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, letterSpacing: '0.02em', textTransform: 'uppercase' }}>
+                    Reject Scoresheet Request?
+                  </h3>
+                </div>
+
+                <p style={{ margin: 0, fontSize: '13px', color: '#475569', lineHeight: 1.5 }}>
+                  Are you sure you want to reject this request from <strong>{rejectModalNotif.requested_by_coach || rejectModalNotif.coach_name || 'the coach'}</strong> for <strong>{rejectModalNotif.match_context || rejectModalNotif.match_name || 'Match'}</strong>?
+                  This will remove the request from your active notification queue.
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Reason for Rejection:
+                  </label>
+                  <textarea
+                    value={rejectReason}
+                    onChange={(e) => setRejectReason(e.target.value)}
+                    rows={2}
+                    style={{
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      border: '1px solid #CBD5E1',
+                      borderRadius: '2px',
+                      padding: '8px 10px',
+                      fontSize: '12.5px',
+                      fontFamily: 'inherit',
+                      resize: 'none',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setRejectModalNotif(null)}
+                    style={{
+                      padding: '9px 16px',
+                      backgroundColor: '#F1F5F9',
+                      border: '1px solid #CBD5E1',
+                      borderRadius: '2px',
+                      fontSize: '11.5px',
+                      fontWeight: 700,
+                      color: '#475569',
+                      cursor: 'pointer',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={Boolean(rejectingId)}
+                    onClick={confirmReject}
+                    style={{
+                      padding: '9px 16px',
+                      backgroundColor: '#DC2626',
+                      border: 'none',
+                      borderRadius: '2px',
+                      fontSize: '11.5px',
+                      fontWeight: 800,
+                      color: '#FFFFFF',
+                      cursor: 'pointer',
+                      textTransform: 'uppercase',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    {rejectingId ? <Loader2 style={{ width: 14, height: 14, animation: 'spin 1s linear infinite' }} /> : null}
+                    <span>Reject Request</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* UI Interruption: Upload Success Modal */}
+          {uploadSuccessModal && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(11, 19, 43, 0.6)',
+              backdropFilter: 'blur(3px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 9999,
+              padding: '20px',
+            }}>
+              <div style={{
+                backgroundColor: '#FFFFFF',
+                border: '2px solid #10B981',
+                borderRadius: '4px',
+                width: '100%',
+                maxWidth: '440px',
+                padding: '24px',
+                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '16px',
+                textAlign: 'center',
+                alignItems: 'center',
+              }}>
+                <div style={{
+                  width: '48px',
+                  height: '48px',
+                  borderRadius: '50%',
+                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#10B981',
+                }}>
+                  <CheckCircle2 style={{ width: 28, height: 28 }} />
+                </div>
+
+                <div>
+                  <h3 style={{ margin: '0 0 6px 0', fontSize: '16px', fontWeight: 800, color: '#0B132B', textTransform: 'uppercase' }}>
+                    Scoresheet Attached Successfully!
+                  </h3>
+                  <p style={{ margin: 0, fontSize: '13px', color: '#64748B', lineHeight: 1.5 }}>
+                    The official scoresheet for <strong>{uploadSuccessModal.matchName}</strong> has been uploaded and linked to <strong>{uploadSuccessModal.coachName}</strong>.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setUploadSuccessModal(null)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 16px',
+                    backgroundColor: '#0B132B',
+                    border: 'none',
+                    borderRadius: '2px',
+                    fontSize: '12px',
+                    fontWeight: 800,
+                    color: '#FFFFFF',
+                    cursor: 'pointer',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                  }}
+                >
+                  Done
+                </button>
+              </div>
             </div>
           )}
         </main>

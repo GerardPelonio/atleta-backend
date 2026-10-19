@@ -42,8 +42,16 @@ export async function registerUser(req: AuthRequest, res: Response): Promise<voi
       ...result,
     });
   } catch (error: any) {
-    if (error.code === 'auth/email-already-exists') {
-      res.status(409).json({ error: 'A user with this email already exists.' });
+    if (
+      error.code === 'auth/email-already-exists' ||
+      error.code === 'auth/email-already-in-use' ||
+      (typeof error.message === 'string' && error.message.toLowerCase().includes('already in use'))
+    ) {
+      res.status(409).json({ error: 'An account with this email already exists. Please log in.' });
+      return;
+    }
+    if (error instanceof ServiceError || (error.status && error.status < 500)) {
+      res.status(error.statusCode || error.status || 400).json({ error: error.message });
       return;
     }
     console.error('Register error:', error);
@@ -68,12 +76,20 @@ export async function registerCoach(req: AuthRequest, res: Response): Promise<vo
       ...result,
     });
   } catch (error: any) {
-    if (error.code === 'auth/email-already-exists') {
-      res.status(409).json({ error: 'A coach with this email already exists.' });
+    if (
+      error.code === 'auth/email-already-exists' ||
+      error.code === 'auth/email-already-in-use' ||
+      (typeof error.message === 'string' && error.message.toLowerCase().includes('already in use'))
+    ) {
+      res.status(409).json({ error: 'A coach with this email already exists. Please log in.' });
       return;
     }
     if (error.message && error.message.includes('certification document')) {
       res.status(400).json({ error: error.message });
+      return;
+    }
+    if (error instanceof ServiceError || (error.status && error.status < 500)) {
+      res.status(error.statusCode || error.status || 400).json({ error: error.message });
       return;
     }
     console.error('Register coach error:', error);
@@ -336,8 +352,9 @@ export async function resetPassword(req: AuthRequest, res: Response): Promise<vo
     const new_password = (req.body?.new_password || req.body?.password || req.body?.newPassword) as string;
     const emailHint = (req.body?.email || req.query?.email) as string | undefined;
 
-    if (!new_password || new_password.length < 6) {
-      res.status(400).json({ error: 'New password must be at least 6 characters.' });
+    const confirmErrors = validatePasswordResetConfirm({ token, new_password });
+    if (confirmErrors.length > 0) {
+      res.status(400).json({ errors: confirmErrors, error: confirmErrors[0].message });
       return;
     }
 

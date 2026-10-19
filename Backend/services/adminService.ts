@@ -6,6 +6,7 @@ import { clientAuth } from '../utils/firebaseClient';
 import { RegisterAdminDto, LoginAdminDto, AdminProfile, User, CoachAccreditationAuditLog } from '../models/userModel';
 import { ServiceError } from '../validators/matchValidator';
 import { createNotification } from './notificationService';
+import { sendCoachStatusEmailService } from './emailService';
 import { hashPassword, verifyPassword, sanitizeUser, sanitizeProfile } from '../utils/passwordUtils';
 
 export interface AdminAuditLog {
@@ -493,6 +494,18 @@ export async function approveCoachService(adminId: string, coachIdParam: string)
     message: 'Your coach accreditation application and professional certificates have been verified and approved. Your account is now active with full platform access.',
   }).catch((err) => console.error('Failed to send coach approval notification:', err));
 
+  // Dispatch confirmation email to applicant coach
+  userRef.get().then((uSnap) => {
+    if (uSnap.exists) {
+      const uData = uSnap.data();
+      const coachEmail = uData?.email;
+      const coachName = uData?.full_name || `${uData?.first_name || ''} ${uData?.last_name || ''}`.trim();
+      if (coachEmail) {
+        sendCoachStatusEmailService(coachEmail, coachName, 'APPROVED').catch(() => null);
+      }
+    }
+  }).catch(() => null);
+
   return {
     message: 'Coach account approved and activated successfully.',
     coach_id: canonicalCoachId,
@@ -572,6 +585,18 @@ export async function rejectCoachService(adminId: string, coachIdParam: string, 
     title: 'Coach Accreditation Application Declined',
     message: `Your coach accreditation application was declined. Reason: ${reason}. You may upload updated verification documents to re-apply.`,
   }).catch((err) => console.error('Failed to send coach rejection notification:', err));
+
+  // Dispatch rejection email to applicant coach
+  userRef.get().then((uSnap) => {
+    if (uSnap.exists) {
+      const uData = uSnap.data();
+      const coachEmail = uData?.email;
+      const coachName = uData?.full_name || `${uData?.first_name || ''} ${uData?.last_name || ''}`.trim();
+      if (coachEmail) {
+        sendCoachStatusEmailService(coachEmail, coachName, 'REJECTED', reason).catch(() => null);
+      }
+    }
+  }).catch(() => null);
 
   return {
     message: 'Coach application declined.',

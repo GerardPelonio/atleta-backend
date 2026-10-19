@@ -595,7 +595,7 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
   useEffect(() => {
     let isMounted = true;
 
-    const withSyncTimeout = <T,>(p: Promise<T>, ms = 2400, fallback: T = null as any): Promise<T> => {
+    const withSyncTimeout = <T,>(p: Promise<T>, ms = 8000, fallback: T = null as any): Promise<T> => {
       return Promise.race([
         p,
         new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
@@ -606,7 +606,7 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
       if (isMounted) {
         setIsDashboardLoading(false);
       }
-    }, 2800);
+    }, 8500);
 
     const fetchCoachDashboardData = async () => {
       try {

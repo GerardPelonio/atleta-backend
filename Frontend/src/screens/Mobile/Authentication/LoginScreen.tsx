@@ -118,7 +118,7 @@ export function LoginScreen({ onGoSignup, onGoReset, onAuthenticated }: LoginScr
       if (jwtPayload?.picture) extractedAvatar = jwtPayload.picture;
 
       const endpoint = provider === "google" ? "/users/google-login" : "/users/facebook-login";
-      const payload = {
+      const socialAuthPayload = {
         id_token: idToken,
         idToken,
         token: idToken,
@@ -134,7 +134,7 @@ export function LoginScreen({ onGoSignup, onGoReset, onAuthenticated }: LoginScr
 
       let result: any = null;
       try {
-        result = await requestJson(endpoint, payload);
+        result = await requestJson(endpoint, socialAuthPayload);
       } catch (err: any) {
         const msg = (err?.message || "").toLowerCase();
         if (msg.includes("not found") || msg.includes("exist") || msg.includes("sign up") || msg.includes("signup")) {
@@ -182,24 +182,31 @@ export function LoginScreen({ onGoSignup, onGoReset, onAuthenticated }: LoginScr
       // Branch A (Account Exists):
       // Fetch user's role from Firestore, securely store session tokens via Expo SecureStore, and route directly to dashboard.
       const token = extractAuthToken(result);
-      const role = extractAuthRole(result, extractedEmail);
+      const tokenPayload = token ? parseJwtPayload(token) : null;
 
-      if (token) await storeAuthToken(token);
-      await storeAuthRole(role);
+      // Verify that the returned token belongs to the authenticated social account
+      if (extractedEmail && tokenPayload?.email) {
+        const payloadEmail = String(tokenPayload.email).trim().toLowerCase();
+        if (payloadEmail !== extractedEmail) {
+          throw new Error(`Account mismatch: signed in as ${extractedEmail} but retrieved session for ${payloadEmail}.`);
+        }
+      }
+
+      const tokenRole = tokenPayload?.role ? String(tokenPayload.role).toLowerCase() : "";
+      const role = (tokenRole === "coach" || tokenRole === "athlete" ? tokenRole : extractAuthRole(result, extractedEmail)) as AuthRole;
 
       clearAuthMicroCache();
       clearFirebaseClientCaches();
-      await AsyncStorage.multiRemove([
-        "atleta_coach_dashboard_cache_v2",
-        "atleta_offline_coach_profile_cache",
-        "atleta_offline_athlete_profile_cache",
-        "atleta_offline_teams_cache",
-        "atleta_offline_matches_cache",
-        "atleta_offline_athletes_cache",
-        "atleta_offline_sports_cache",
-        "atleta_coach_settings",
-        "atleta_cached_user",
-      ]).catch(() => null);
+      try {
+        const allKeys = await AsyncStorage.getAllKeys();
+        const atletaKeys = allKeys.filter((k) => k.startsWith("atleta_") || k.startsWith("@atleta_"));
+        if (atletaKeys.length > 0) {
+          await AsyncStorage.multiRemove(atletaKeys);
+        }
+      } catch (_) {}
+
+      if (token) await storeAuthToken(token);
+      await storeAuthRole(role);
 
       onAuthenticated?.(role);
     } catch (error: any) {
@@ -237,15 +244,21 @@ export function LoginScreen({ onGoSignup, onGoReset, onAuthenticated }: LoginScr
     setFeedback(null);
 
     try {
-      if (Platform.OS !== "web" && NativeGoogleSignin && typeof NativeGoogleSignin.hasPlayServices === "function") {
-        await NativeGoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-        const signInResult = await NativeGoogleSignin.signIn();
-        const idToken = (signInResult as any)?.data?.idToken || (signInResult as any)?.idToken;
-        const userObj = (signInResult as any)?.data?.user || (signInResult as any)?.user;
+      if (Platform.OS !== "web" && NativeGoogleSignin) {
+        // Explicitly sign out first so Google always displays the account chooser
+        if (typeof NativeGoogleSignin.signOut === "function") {
+          await NativeGoogleSignin.signOut().catch(() => null);
+        }
+        if (typeof NativeGoogleSignin.hasPlayServices === "function") {
+          await NativeGoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+          const signInResult = await NativeGoogleSignin.signIn();
+          const idToken = (signInResult as any)?.data?.idToken || (signInResult as any)?.idToken;
+          const userObj = (signInResult as any)?.data?.user || (signInResult as any)?.user;
 
-        if (idToken) {
-          await handleSocialAuthWithToken("google", idToken, userObj);
-          return;
+          if (idToken) {
+            await handleSocialAuthWithToken("google", idToken, userObj);
+            return;
+          }
         }
       }
     } catch (nativeError: any) {
@@ -278,38 +291,32 @@ export function LoginScreen({ onGoSignup, onGoReset, onAuthenticated }: LoginScr
         };
         const result = await requestJson("/users/login", payload);
         const token = extractAuthToken(result);
-        const role = extractAuthRole(result, payload.email);
+        const tokenPayload = token ? parseJwtPayload(token) : null;
+        const tokenRole = tokenPayload?.role ? String(tokenPayload.role).toLowerCase() : "";
+        const role = (tokenRole === "coach" || tokenRole === "athlete" ? tokenRole : extractAuthRole(result, payload.email)) as AuthRole;
+
+        clearAuthMicroCache();
+        clearFirebaseClientCaches();
+        try {
+          const allKeys = await AsyncStorage.getAllKeys();
+          const atletaKeys = allKeys.filter((k) => k.startsWith("atleta_") || k.startsWith("@atleta_"));
+          if (atletaKeys.length > 0) {
+            await AsyncStorage.multiRemove(atletaKeys);
+          }
+        } catch (_) {}
 
         if (token) await storeAuthToken(token);
         await storeAuthRole(role);
 
-        clearAuthMicroCache();
-        clearFirebaseClientCaches();
-        await AsyncStorage.multiRemove([
-          "atleta_coach_dashboard_cache_v2",
-          "atleta_offline_coach_profile_cache",
-          "atleta_offline_athlete_profile_cache",
-          "atleta_offline_teams_cache",
-          "atleta_offline_matches_cache",
-          "atleta_offline_athletes_cache",
-          "atleta_offline_sports_cache",
-          "atleta_coach_settings",
-          "atleta_cached_user",
-        ]).catch(() => null);
-
         onAuthenticated?.(role);
         form.reset(values);
       } catch (error: any) {
-        const rawMsg = error?.message || String(error);
-        const errorMessage = getAuthErrorMessage(error, "Invalid email or password. Please check your credentials and try again.");
-        const displayMsg = rawMsg && rawMsg !== "Something went wrong." && !rawMsg.includes("Invalid email")
-          ? `${errorMessage} (${rawMsg})`
-          : errorMessage;
+        const displayMsg = getAuthErrorMessage(error, "Invalid email or password. Please check your credentials and try again.");
         setFeedback({
           tone: "error",
           message: displayMsg
         });
-        Alert.alert("Authentication Failed", `${displayMsg}\n\nServer: ${API_BASE}`);
+        Alert.alert("Authentication Failed", displayMsg);
       } finally {
         setLoading(false);
       }
@@ -381,9 +388,6 @@ export function LoginScreen({ onGoSignup, onGoReset, onAuthenticated }: LoginScr
 
         <Text style={authScreenStyles.footer}>
           Don&apos;t have an account? <Text style={authScreenStyles.footerLink} onPress={() => onGoSignup?.()}>Sign Up</Text>
-        </Text>
-        <Text style={{ textAlign: "center", color: "#64748B", fontSize: 11, marginTop: 10 }}>
-          v0.1.1 • {API_BASE}
         </Text>
 
         <InAppGoogleAuthModal

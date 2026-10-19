@@ -1,4 +1,5 @@
 import { db } from '../utils/firebaseAdmin';
+import { serverCache } from '../utils/cache';
 import {
   Team,
   TeamRosterMember,
@@ -41,6 +42,9 @@ export function invalidateTeamCache() {
   rosterAthleteCache.clear();
   coachTeamsCache.clear();
   coachManagedAthletesCache.clear();
+  try {
+    serverCache.clear();
+  } catch (_) {}
 }
 
 // ─── Helper: Enrich coach from Coach_Profiles + Users ───────────────────────
@@ -275,10 +279,30 @@ export async function getCoachTeams(coachId: string): Promise<TeamSummary[]> {
   const possibleCoachIds = Array.from(new Set([coachId, `coach_${cleanId}`, cleanId]));
 
   // Primary source of truth: atleta-v1
-  const snapshotV1 = await db.collection('Teams').where('coach_id', 'in', possibleCoachIds).get().catch(() => ({ docs: [] }));
+  const [snapshotV1, staffSnapshot, coachProfileDoc1, coachProfileDoc2] = await Promise.all([
+    db.collection('Teams').where('coach_id', 'in', possibleCoachIds).get().catch(() => ({ docs: [] })),
+    db.collection('Teams').where('coaching_staff', 'array-contains-any', possibleCoachIds).get().catch(() => ({ docs: [] })),
+    db.collection('Coach_Profiles').doc(`coach_${cleanId}`).get().catch(() => null),
+    db.collection('Coach_Profiles').doc(cleanId).get().catch(() => null),
+  ]);
 
   const docsMap = new Map<string, any>();
   snapshotV1.docs.forEach((d: any) => docsMap.set(d.id, d));
+  staffSnapshot.docs.forEach((d: any) => docsMap.set(d.id, d));
+
+  const coachProfileData = (coachProfileDoc1 && coachProfileDoc1.exists)
+    ? coachProfileDoc1.data()
+    : ((coachProfileDoc2 && coachProfileDoc2.exists) ? coachProfileDoc2.data() : null);
+
+  const managedIds: string[] = Array.isArray(coachProfileData?.teams_managed) ? coachProfileData.teams_managed : [];
+  for (const tId of managedIds) {
+    if (!docsMap.has(tId)) {
+      const tDoc = await db.collection('Teams').doc(tId).get().catch(() => null);
+      if (tDoc && tDoc.exists) {
+        docsMap.set(tDoc.id, tDoc);
+      }
+    }
+  }
 
   const teams: TeamSummary[] = [];
 
@@ -668,6 +692,25 @@ export async function updateTeamRoster(
       'Unauthorized. Coaches may only edit squad rosters for teams they manage.',
       403,
     );
+  }
+
+  // Enforce no duplicate athlete IDs or jersey numbers
+  const seenAthletes = new Set<string>();
+  const seenJerseys = new Set<string>();
+  for (const item of rosterItems) {
+    const athId = item.athlete_id;
+    if (seenAthletes.has(athId)) {
+      throw new ServiceError(`Duplicate athlete ID '${athId}' in roster payload.`, 400);
+    }
+    seenAthletes.add(athId);
+
+    if (item.jersey_number !== undefined && item.jersey_number !== null && !isNaN(Number(item.jersey_number))) {
+      const jersey = String(item.jersey_number).trim();
+      if (seenJerseys.has(jersey)) {
+        throw new ServiceError(`Duplicate jersey number '${jersey}' assigned to multiple athletes.`, 400);
+      }
+      seenJerseys.add(jersey);
+    }
   }
 
   // Check eligibility documents for all athletes in roster

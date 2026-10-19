@@ -93,6 +93,9 @@ export interface OfficialDashboardResponse {
   pending_count: number;
   audited_count: number;
   audit_queue: AuditQueueItem[];
+  completed_audits?: number;
+  pending_audits?: number;
+  [key: string]: any;
 }
 
 export interface OfficialScheduleItem {
@@ -257,6 +260,7 @@ export interface MatchAuditDetail {
   };
   race_results?: RaceResultRow[];
   scoresheet_url?: string;
+  scoresheet_urls?: string[];
   audit_context_notes?: string;
   is_certified?: boolean;
   is_locked?: boolean;

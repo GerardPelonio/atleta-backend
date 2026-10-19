@@ -396,6 +396,17 @@ export async function processAthleteOfflineBatchService(
       switch (tx.action_type) {
         case 'UPDATE_PROFILE': {
           const p = tx.payload;
+          const profileDoc = await db.collection('Athlete_Profiles').doc(athleteId).get();
+          if (profileDoc.exists) {
+            const currentProfile = profileDoc.data()!;
+            const serverUpdatedAt = currentProfile.updated_at ? new Date(currentProfile.updated_at).getTime() : 0;
+            const clientTimestamp = new Date(tx.client_timestamp).getTime();
+            if (serverUpdatedAt > clientTimestamp) {
+              // Server state is strictly newer than client offline edit (LWW conflict)
+              serverResult = { ...currentProfile, conflict_status: 'SERVER_WINS_CONFLICT' };
+              break;
+            }
+          }
           const updatedProfile = await updateAthleteProfile(athleteId, p);
           serverResult = updatedProfile;
           break;
@@ -509,14 +520,24 @@ export async function getCoachOfflineSnapshotService(coachId: string): Promise<C
       };
 
       // Fetch teams managed by coach
-      const teamsSnap = await db.collection('Teams').where('coach_id', '==', coachId).get();
+      const cleanId = coachId.replace(/^coach_/, '');
+      const possibleCoachIds = Array.from(new Set([coachId, `coach_${cleanId}`, cleanId]));
+
+      const [teamsSnap, staffSnap] = await Promise.all([
+        db.collection('Teams').where('coach_id', 'in', possibleCoachIds).get().catch(() => ({ docs: [] })),
+        db.collection('Teams').where('coaching_staff', 'array-contains-any', possibleCoachIds).get().catch(() => ({ docs: [] })),
+      ]);
+
+      const teamsMap = new Map<string, any>();
+      teamsSnap.docs.forEach((d: any) => teamsMap.set(d.id, d.data()));
+      staffSnap.docs.forEach((d: any) => teamsMap.set(d.id, d.data()));
+
       const teams: any[] = [];
       const rosters: Record<string, any[]> = {};
 
-      for (const doc of teamsSnap.docs) {
-        const t = doc.data();
+      for (const t of teamsMap.values()) {
         teams.push(t);
-        const rosterIds: string[] = t.roster_list || t.roster_athletes || [];
+        const rosterIds: string[] = (t.roster_list || t.roster_athletes || []).map((x: any) => typeof x === 'string' ? x : (x.athlete_id || x.user_id)).filter(Boolean);
         if (rosterIds.length > 0) {
           const athleteDocs = await db.collection('Athlete_Profiles').where('athlete_id', 'in', rosterIds.slice(0, 10)).get().catch(() => null);
           rosters[t.team_id] = athleteDocs ? athleteDocs.docs.map(d => d.data()) : [];

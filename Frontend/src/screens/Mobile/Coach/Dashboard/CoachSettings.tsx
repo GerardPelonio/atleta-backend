@@ -574,32 +574,36 @@ export function CoachSettings({
 
       {/* LOGOUT CONFIRMATION MODAL */}
       <Modal visible={showLogoutModal} transparent animationType="fade" onRequestClose={() => setShowLogoutModal(false)}>
-        <TouchableOpacity style={styles.confirmOverlayBackdrop} activeOpacity={1} onPress={() => setShowLogoutModal(false)}>
-          <View style={styles.confirmDialogCard}>
-            <View style={styles.logoutIconCircle}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.75)", justifyContent: "center", alignItems: "center", padding: 24 }}>
+          <View style={{ width: "100%", maxWidth: 360, backgroundColor: "#0F172A", borderRadius: 16, padding: 24, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", alignItems: "center" }}>
+            <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: "rgba(239,68,68,0.15)", justifyContent: "center", alignItems: "center", marginBottom: 16 }}>
               <Ionicons name="log-out-outline" size={32} color="#EF4444" />
             </View>
-            <Text style={styles.logoutConfirmTitle}>Log Out Account?</Text>
-            <Text style={styles.logoutConfirmMessage}>
+            <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "800", marginBottom: 8, textAlign: "center" }}>Log Out Account?</Text>
+            <Text style={{ color: "#94A3B8", fontSize: 13, lineHeight: 18, textAlign: "center", marginBottom: 24 }}>
               Are you sure you want to log out of your Coach session? You will need to log back in to access your teams.
             </Text>
-            <View style={styles.confirmButtonRow}>
-              <TouchableOpacity style={styles.cancelLogoutButton} onPress={() => setShowLogoutModal(false)} activeOpacity={0.8}>
-                <Text style={styles.cancelLogoutText}>CANCEL</Text>
+            <View style={{ flexDirection: "row", gap: 12, width: "100%" }}>
+              <TouchableOpacity
+                style={{ flex: 1, backgroundColor: "#1E293B", paddingVertical: 14, borderRadius: 10, alignItems: "center" }}
+                onPress={() => setShowLogoutModal(false)}
+                activeOpacity={0.8}
+              >
+                <Text style={{ color: "#94A3B8", fontWeight: "700", fontSize: 13 }}>CANCEL</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.confirmLogoutButton}
+                style={{ flex: 1, backgroundColor: "#EF4444", paddingVertical: 14, borderRadius: 10, alignItems: "center" }}
                 onPress={() => {
                   setShowLogoutModal(false);
                   if (onLogout) onLogout();
                 }}
                 activeOpacity={0.8}
               >
-                <Text style={styles.confirmLogoutText}>YES, LOG OUT</Text>
+                <Text style={{ color: "#FFFFFF", fontWeight: "800", fontSize: 13 }}>YES, LOG OUT</Text>
               </TouchableOpacity>
             </View>
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
 
       {/* CHANGE PASSWORD MODAL */}

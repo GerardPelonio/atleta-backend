@@ -122,3 +122,104 @@ export async function sendPasswordResetEmailService(
     return { sent: false, message: 'Dev Mode: Reset link generated and logged to console.' };
   }
 }
+
+/**
+ * Send coach accreditation status update email (Approved / Declined / Resubmission Required).
+ */
+export async function sendCoachStatusEmailService(
+  toEmail: string,
+  coachName: string,
+  status: 'APPROVED' | 'REJECTED' | 'RESUBMISSION',
+  reason?: string
+): Promise<{ sent: boolean; message: string }> {
+  const transporter = createTransporter();
+  const isApproved = status === 'APPROVED';
+  const title = isApproved ? 'Coach Accreditation Approved' : 'Coach Application Update';
+  const heading = isApproved ? 'Congratulations! Accreditation Approved' : 'Application Status Update';
+  const detail = isApproved
+    ? 'Your coach accreditation application and professional certifications have been verified and approved. You now have full access to team management, rosters, and live match logging.'
+    : `Your coach accreditation application was not approved at this time.${reason ? ` Reason: ${reason}` : ''}`;
+
+  const mailOptions = {
+    from: process.env.EMAIL_USER || '"Atleta Platform" <noreply@atleta.com>',
+    to: toEmail,
+    subject: `${title} — Atleta`,
+    html: `
+      <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 620px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
+        <div style="background-color: #141c3a; padding: 28px 40px;">
+          <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 700;">ATLETA</h1>
+          <p style="margin: 4px 0 0; color: #a0aec0; font-size: 12px; text-transform: uppercase;">Coach Accreditation System</p>
+        </div>
+        <div style="padding: 40px 40px 32px;">
+          <h2 style="margin: 0 0 16px; color: #141c3a; font-size: 20px;">${heading}</h2>
+          <p style="margin: 0 0 12px; color: #374151; font-size: 15px; line-height: 1.6;">Dear Coach ${coachName || 'Coach'},</p>
+          <p style="margin: 0 0 16px; color: #374151; font-size: 15px; line-height: 1.6;">${detail}</p>
+        </div>
+        <div style="background-color: #f3f4f6; padding: 20px 40px; border-top: 1px solid #e5e7eb;">
+          <p style="margin: 0; color: #9ca3af; font-size: 11px; text-align: center;">&copy; ${new Date().getFullYear()} Atleta. All rights reserved.</p>
+        </div>
+      </div>
+    `,
+  };
+
+  if (transporter) {
+    try {
+      await transporter.sendMail(mailOptions);
+      return { sent: true, message: `Status email sent to ${toEmail}.` };
+    } catch (err: any) {
+      console.warn('sendCoachStatusEmailService send error:', err?.message || err);
+    }
+  }
+
+  console.log(`[NODEMAILER DEV MODE] Coach ${status} Email dispatched to ${toEmail}`);
+  return { sent: false, message: `Dev Mode: Coach ${status} status email logged for ${toEmail}.` };
+}
+
+/**
+ * Send recruitment inquiry notification email to coach.
+ */
+export async function sendRecruitmentInquiryEmailService(
+  toEmail: string,
+  coachName: string,
+  athleteName: string,
+  message?: string
+): Promise<{ sent: boolean; message: string }> {
+  const transporter = createTransporter();
+  const mailOptions = {
+    from: process.env.EMAIL_USER || '"Atleta Platform" <noreply@atleta.com>',
+    to: toEmail,
+    subject: `New Athlete Recruitment Inquiry — ${athleteName}`,
+    html: `
+      <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 620px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
+        <div style="background-color: #141c3a; padding: 28px 40px;">
+          <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 700;">ATLETA</h1>
+          <p style="margin: 4px 0 0; color: #a0aec0; font-size: 12px; text-transform: uppercase;">Scouting & Recruitment Network</p>
+        </div>
+        <div style="padding: 40px 40px 32px;">
+          <h2 style="margin: 0 0 16px; color: #141c3a; font-size: 20px;">New Inquiry Received</h2>
+          <p style="margin: 0 0 12px; color: #374151; font-size: 15px; line-height: 1.6;">Dear Coach ${coachName || 'Coach'},</p>
+          <p style="margin: 0 0 16px; color: #374151; font-size: 15px; line-height: 1.6;">Athlete <strong>${athleteName}</strong> has sent you a recruitment inquiry:</p>
+          <blockquote style="margin: 0 0 20px; padding: 12px 16px; background-color: #f8f9fa; border-left: 4px solid #141c3a; color: #4b5563;">
+            "${message || 'I am interested in joining your athletic program.'}"
+          </blockquote>
+        </div>
+        <div style="background-color: #f3f4f6; padding: 20px 40px; border-top: 1px solid #e5e7eb;">
+          <p style="margin: 0; color: #9ca3af; font-size: 11px; text-align: center;">&copy; ${new Date().getFullYear()} Atleta. All rights reserved.</p>
+        </div>
+      </div>
+    `,
+  };
+
+  if (transporter) {
+    try {
+      await transporter.sendMail(mailOptions);
+      return { sent: true, message: `Inquiry email sent to ${toEmail}.` };
+    } catch (err: any) {
+      console.warn('sendRecruitmentInquiryEmailService error:', err?.message || err);
+    }
+  }
+
+  console.log(`[NODEMAILER DEV MODE] Recruitment inquiry email logged for ${toEmail}`);
+  return { sent: false, message: `Dev Mode: Inquiry notification logged for ${toEmail}.` };
+}
+

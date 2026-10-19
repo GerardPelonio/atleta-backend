@@ -416,12 +416,86 @@ const isSameMatch = (m1: any, m2: any): boolean => {
 const mergeContinuationRosters = (base: RawOCRDetectedData, continuation: RawOCRDetectedData): RawOCRDetectedData => {
   const mergedAthletes = [...base.athlete_overview];
 
+  // Detect individual/timed sport: Core (Swimming, Track & Field, Running) or Custom Sports added by System Admin
+  const sportName = (base.sport_type || continuation.sport_type || '').trim().toUpperCase();
+  let isIndividualSport =
+    sportName.includes('SWIM') ||
+    sportName.includes('TRACK') ||
+    sportName.includes('FIELD') ||
+    sportName.includes('RUN') ||
+    sportName.includes('ATHLETIC') ||
+    sportName.includes('TIME') ||
+    sportName.includes('RACE') ||
+    sportName.includes('CYCL') ||
+    sportName.includes('ROW') ||
+    sportName.includes('TRIATHLON') ||
+    sportName.includes('SPRINT') ||
+    sportName.includes('HURDLE') ||
+    sportName.includes('MARATHON') ||
+    sportName.includes('INDIVIDUAL');
+
+  if (!isIndividualSport) {
+    try {
+      const rawCat = typeof localStorage !== 'undefined'
+        ? (localStorage.getItem('atleta_admin_sports_catalog') || localStorage.getItem('admin_sports_catalog'))
+        : null;
+      if (rawCat) {
+        const cat = JSON.parse(rawCat);
+        if (Array.isArray(cat)) {
+          const match = cat.find((s: any) =>
+            String(s.sport_name || s.short_identifier || s.sport_id || '').toUpperCase() === sportName
+          );
+          if (match && Array.isArray(match.configurable_stats)) {
+            isIndividualSport = match.configurable_stats.some((st: any) => {
+              const mCat = String(st.measurement_category || '').toLowerCase();
+              const key = String(st.stat_name_key || '').toLowerCase();
+              return mCat.includes('time') || key.includes('time') || key.includes('split') || key.includes('lap') || key.includes('distance');
+            });
+          }
+        }
+      }
+    } catch {}
+  }
+
   continuation.athlete_overview.forEach((incoming) => {
-    const incomingEvent = String(incoming.event || incoming.event_id || '').trim().toLowerCase();
+    const incomingEvent = String(incoming.event || incoming.event_id || (incoming.stats as any)?.event || '').trim().toLowerCase();
+    const incomingDist = String(incoming.distance_m || (incoming.stats as any)?.distance_m || '').trim().toLowerCase();
+    const incomingHeat = String(incoming.heat || (incoming.stats as any)?.heat || '').trim().toLowerCase();
 
     const existingIdx = mergedAthletes.findIndex((existing) => {
-      const existingEvent = String(existing.event || existing.event_id || '').trim().toLowerCase();
-      // Scenario 1 Disambiguation: If both records specify events and they differ, they represent separate events!
+      const existingEvent = String(existing.event || existing.event_id || (existing.stats as any)?.event || '').trim().toLowerCase();
+      const existingDist = String(existing.distance_m || (existing.stats as any)?.distance_m || '').trim().toLowerCase();
+      const existingHeat = String(existing.heat || (existing.stats as any)?.heat || '').trim().toLowerCase();
+
+      // For individual/timed sports (Swimming & Track, plus custom individual sports):
+      // Each event/distance result is separate and must not be collapsed by player name!
+      if (isIndividualSport) {
+        if (incomingEvent && existingEvent && incomingEvent !== existingEvent) {
+          return false;
+        }
+        if (incomingDist && existingDist && incomingDist !== existingDist) {
+          return false;
+        }
+        if (incomingHeat && existingHeat && incomingHeat !== existingHeat) {
+          return false;
+        }
+
+        const nameMatches =
+          incoming.player_name &&
+          existing.player_name &&
+          incoming.player_name !== 'EXTRACTED ATHLETE' &&
+          incoming.player_name.trim().toLowerCase() === existing.player_name.trim().toLowerCase();
+
+        // Only merge if it is verified to be the exact same event & distance & heat
+        if (nameMatches && incomingEvent && existingEvent && incomingEvent === existingEvent) {
+          return true;
+        }
+
+        // Even if name is the same, if events/distances differ or are distinct race entries, keep them separate!
+        return false;
+      }
+
+      // Team sports (Basketball, Volleyball, Soccer)
       if (incomingEvent && existingEvent && incomingEvent !== existingEvent) {
         return false;
       }
@@ -484,10 +558,15 @@ const mergeContinuationRosters = (base: RawOCRDetectedData, continuation: RawOCR
         },
       };
     } else {
+      const uniqueAthleteId =
+        isIndividualSport && mergedAthletes.some((a) => a.athlete_id === incoming.athlete_id)
+          ? `${incoming.athlete_id || 'ath'}_${mergedAthletes.length + 1}`
+          : (incoming.athlete_id || `ath_${mergedAthletes.length + 1}`);
+
       mergedAthletes.push({
         ...incoming,
-        athlete_id: incoming.athlete_id || `ath_${mergedAthletes.length + 1}`,
-        row_uid: incoming.row_uid || `${incoming.athlete_id || 'ath'}_${mergedAthletes.length + 1}`,
+        athlete_id: uniqueAthleteId,
+        row_uid: incoming.row_uid || `${uniqueAthleteId}_${mergedAthletes.length + 1}`,
       });
     }
   });
@@ -513,11 +592,13 @@ const mergeContinuationRosters = (base: RawOCRDetectedData, continuation: RawOCR
     scoresheetUrl: combinedScoresheetUrl,
     rosterAthletes: Array.from(new Set([...(base.rosterAthletes || []), ...(continuation.rosterAthletes || []), ...homeAthletes])),
     awayRosterAthletes: Array.from(new Set([...(base.awayRosterAthletes || []), ...(continuation.awayRosterAthletes || []), ...awayAthletes])),
-    team_scores: [
-      { team: base.team_name || 'HOME TEAM', score: hSum },
-      { team: base.opponent_team_name || 'OPPONENT TEAM', score: aSum },
-    ],
-    final_score: `${hSum} - ${aSum}`,
+    team_scores: (isIndividualSport && hSum === 0 && aSum === 0 && base.team_scores && base.team_scores.length > 0)
+      ? base.team_scores
+      : [
+          { team: base.team_name || 'HOME TEAM', score: hSum },
+          { team: base.opponent_team_name || 'OPPONENT TEAM', score: aSum },
+        ],
+    final_score: (isIndividualSport && hSum === 0 && aSum === 0 && base.final_score) ? base.final_score : `${hSum} - ${aSum}`,
     game_result: hSum >= aSum ? 'WIN' : 'LOSS',
   };
 };

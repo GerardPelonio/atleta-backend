@@ -8,6 +8,7 @@ import {
   getMe,
   getOfficialSchedules,
   isMatchCreatedByOfficial,
+  isMatchDeleted,
   extractTeamString,
   getCoachNameById,
 } from '../../api/client';
@@ -437,6 +438,8 @@ export const SchedulePage: React.FC = () => {
   // Strictly filter for current official's matches AND deduplicate by canonical match ID
   const safeSchedules = React.useMemo(() => {
     const rawList = (Array.isArray(schedules) ? schedules : []).filter((s) => {
+      const matchId = String(s.match_id || (s as any).raw_match?.match_id || s.schedule_id || '').replace(/^#/, '').replace(/^sched_/, '').trim();
+      if (isMatchDeleted(matchId)) return false;
       return isMatchCreatedByOfficial(s as any, user);
     });
 

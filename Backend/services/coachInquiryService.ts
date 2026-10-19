@@ -6,6 +6,7 @@ import {
 } from '../models/inquiryModel';
 import { eventBus, EVENTS } from '../utils/eventBus';
 import { createNotification } from './notificationService';
+import { sendRecruitmentInquiryEmailService } from './emailService';
 
 export class ServiceError extends Error {
   statusCode: number;
@@ -352,6 +353,16 @@ export async function submitRecruitmentInquiry(
     title: 'New Recruitment Inquiry Received',
     message: `${athleteName} sent you a recruitment inquiry. Message: "${message ? message.trim() : 'No message attached'}"`,
   });
+
+  // Dispatch email notification to coach asynchronously
+  if (coachProfile.email) {
+    sendRecruitmentInquiryEmailService(
+      coachProfile.email,
+      coachProfile.full_name || coachProfile.first_name || 'Coach',
+      athleteName,
+      message ? message.trim() : undefined
+    ).catch(() => null);
+  }
 
   return inquiry;
 }

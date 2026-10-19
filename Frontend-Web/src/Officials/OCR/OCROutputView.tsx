@@ -719,16 +719,6 @@ export const OCROutputView: React.FC<OCROutputViewProps> = ({
                 <span style={{ fontSize: '10px', fontWeight: 800, color: '#B45309', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
                   ★ AUTOMATIC MATCH MVP
                 </span>
-                <span style={{
-                  fontSize: '9px',
-                  fontWeight: 800,
-                  backgroundColor: '#FDE68A',
-                  color: '#78350F',
-                  padding: '1px 6px',
-                  borderRadius: '4px',
-                }}>
-                  EFF: {typeof mvpAthlete.score === 'number' ? mvpAthlete.score.toFixed(1) : mvpAthlete.score}
-                </span>
               </div>
               <div
                 style={{

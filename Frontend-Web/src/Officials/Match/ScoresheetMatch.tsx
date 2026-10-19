@@ -33,9 +33,11 @@ import {
   createOfficialMatch,
   invalidateCache,
   getSports,
+  recordDeletedMatch,
 } from '../../api/client';
 import { scanScoresheetStandalone, scanMultipleScoresheets } from '../../api/ocr';
-import type { MatchAuditDetail, BoxScoreRow, RaceResultRow, SportConfiguration } from '../../api/types';
+import { saveScoresheetFilesToIndexedDB, getScoresheetFilesFromIndexedDB } from '../../api/scoresheetStorage';
+import type { MatchAuditDetail, BoxScoreRow, RaceResultRow, SportConfiguration, MatchSummaryItem } from '../../api/types';
 import {
   resolveSportColumns,
   getMetricValue,
@@ -46,6 +48,84 @@ import {
   type SportColumnDef,
 } from '../../api/sportSchema';
 import { styles } from './styles/ScoresheetMatch';
+
+const BentoThumbnail: React.FC<{ url: string; alt: string; fallbackText: string }> = ({ url, alt, fallbackText }) => {
+  const [hasError, setHasError] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  useEffect(() => {
+    setHasError(false);
+    setIsLoaded(false);
+  }, [url]);
+
+  if (hasError) {
+    return (
+      <div style={{ ...styles.bentoThumb, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', padding: '8px', textAlign: 'center' }}>
+        <FileText style={{ width: 28, height: 28, color: '#64748B' }} />
+        <span style={{ fontSize: '10px', fontWeight: 800, color: '#0B132B' }}>{fallbackText}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ width: '100%', height: '130px', position: 'relative', backgroundColor: '#F8FAFC', borderRadius: '2px', overflow: 'hidden' }}>
+      {!isLoaded && (
+        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Loader2 style={{ width: 20, height: 20, color: '#64748B', animation: 'spin 1s linear infinite' }} />
+        </div>
+      )}
+      <img
+        src={url}
+        alt={alt}
+        style={{ ...styles.bentoThumb, display: isLoaded ? 'block' : 'none' }}
+        onLoad={() => setIsLoaded(true)}
+        onError={() => setHasError(true)}
+      />
+    </div>
+  );
+};
+
+const SingleScoresheetThumbnail: React.FC<{ url: string; alt: string }> = ({ url, alt }) => {
+  const [hasError, setHasError] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  useEffect(() => {
+    setHasError(false);
+    setIsLoaded(false);
+  }, [url]);
+
+  if (hasError) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '6px', minHeight: '160px', padding: '16px', textAlign: 'center' }}>
+        <FileText style={{ width: 36, height: 36, color: '#64748B' }} />
+        <span style={{ fontSize: '11px', fontWeight: 800, color: '#0B132B' }}>SCORESHEET PREVIEW</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={styles.scoresheetImgWrap}>
+      {!isLoaded && (
+        <div style={{ width: '100%', height: '160px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Loader2 style={{ width: 24, height: 24, color: '#64748B', animation: 'spin 1s linear infinite' }} />
+        </div>
+      )}
+      <img
+        src={url}
+        alt={alt}
+        style={{ ...styles.scoresheetThumb, display: isLoaded ? 'block' : 'none' }}
+        onLoad={() => setIsLoaded(true)}
+        onError={() => setHasError(true)}
+      />
+      {isLoaded && (
+        <div style={styles.scoresheetEnlargeBadge}>
+          <Eye style={{ width: 13, height: 13 }} />
+          <span>CLICK TO ENLARGE PREVIEW</span>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const ScoresheetMatch: React.FC = () => {
   const { matchId } = useParams<{ matchId: string }>();
@@ -79,7 +159,23 @@ export const ScoresheetMatch: React.FC = () => {
     return typeof raw === 'string' ? raw : Array.isArray(raw) ? (raw as any[]).join('\n') : '';
   });
 
-  const [scoresheetUrl, setScoresheetUrl] = useState<string | undefined>(() => cached?.scoresheet_url);
+  const [scoresheetUrl, setScoresheetUrl] = useState<string | undefined>(() => {
+    const raw = cached?.scoresheet_url;
+    if (typeof raw === 'string' && raw.startsWith('blob:')) return undefined;
+    return raw;
+  });
+  const [scoresheetUrls, setScoresheetUrls] = useState<string[]>(() => {
+    let list: string[] = [];
+    if (Array.isArray(cached?.scoresheet_urls) && cached.scoresheet_urls.length > 0) {
+      list = cached.scoresheet_urls;
+    } else if (typeof cached?.scoresheet_url === 'string' && cached.scoresheet_url.trim().startsWith('[')) {
+      try {
+        const parsed = JSON.parse(cached.scoresheet_url);
+        if (Array.isArray(parsed) && parsed.length > 0) list = parsed;
+      } catch {}
+    }
+    return list.filter((u: any) => typeof u === 'string' && !u.startsWith('blob:'));
+  });
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
@@ -182,12 +278,13 @@ export const ScoresheetMatch: React.FC = () => {
     return { homeResult: 'UNPLAYED', awayResult: 'UNPLAYED', finalScore: '0 - 0', summary: 'UNPLAYED' };
   }, [homeScore, awayScore, homeTeamDisplayName, awayTeamDisplayName]);
 
+  const isIndividualSport = useMemo(() => {
+    const s = (matchData?.sport_type || '').toLowerCase();
+    return s.includes('swim') || s.includes('track') || s.includes('field') || s.includes('athletic') || (raceResults && raceResults.length > 0);
+  }, [matchData?.sport_type, raceResults]);
+
   const mvpPlayer = useMemo(() => {
-    const allPlayers: Array<{ row: BoxScoreRow; isHome: boolean }> = [
-      ...homeRoster.map((r) => ({ row: r, isHome: true })),
-      ...awayRoster.map((r) => ({ row: r, isHome: false })),
-    ];
-    if (allPlayers.length === 0) {
+    if (isIndividualSport) {
       if (raceResults && raceResults.length > 0) {
         const top = [...raceResults].sort((a, b) => Number(a.placement_rank || 99) - Number(b.placement_rank || 99))[0];
         if (top) {
@@ -196,7 +293,7 @@ export const ScoresheetMatch: React.FC = () => {
             jerseyNo: undefined,
             teamName: top.team_name || 'Individual',
             score: 1,
-            metricLabel: `Rank #${top.placement_rank || 1} • ${top.finish_time || 'Winner'}`,
+            metricLabel: `Rank #${top.placement_rank || 1} • ${top.finish_time && top.finish_time !== '00:00.00' ? top.finish_time : 'Winner'}`,
             pts: undefined,
             reb: undefined,
             ast: undefined,
@@ -204,6 +301,14 @@ export const ScoresheetMatch: React.FC = () => {
           };
         }
       }
+      return null;
+    }
+
+    const allPlayers: Array<{ row: BoxScoreRow; isHome: boolean }> = [
+      ...homeRoster.map((r) => ({ row: r, isHome: true })),
+      ...awayRoster.map((r) => ({ row: r, isHome: false })),
+    ];
+    if (allPlayers.length === 0) {
       return null;
     }
 
@@ -257,12 +362,7 @@ export const ScoresheetMatch: React.FC = () => {
     });
 
     return bestPlayer;
-  }, [homeRoster, awayRoster, raceResults, isVolleyball, isSoccer, homeTeamDisplayName, awayTeamDisplayName]);
-
-  const isIndividualSport = useMemo(() => {
-    const s = (matchData?.sport_type || '').toLowerCase();
-    return s.includes('swim') || s.includes('track') || s.includes('field') || s.includes('athletic') || (raceResults && raceResults.length > 0);
-  }, [matchData?.sport_type, raceResults]);
+  }, [homeRoster, awayRoster, raceResults, isIndividualSport, isVolleyball, isSoccer, homeTeamDisplayName, awayTeamDisplayName]);
 
   const loadMatchData = async (silent = Boolean(cached || matchData)) => {
     if (!cleanId) return;
@@ -278,16 +378,55 @@ export const ScoresheetMatch: React.FC = () => {
         try { draft = localStorage.getItem(`atleta_draft_note_${cleanId}`); } catch { }
         setNotes((draft !== null && !data.is_certified) ? draft : resolvedNote);
         if (data.scoresheet_url) setScoresheetUrl(data.scoresheet_url);
+        if (data.scoresheet_urls && data.scoresheet_urls.length > 0) {
+          setScoresheetUrls(data.scoresheet_urls);
+        } else if (typeof data.scoresheet_url === 'string' && data.scoresheet_url.trim().startsWith('[')) {
+          try {
+            const parsed = JSON.parse(data.scoresheet_url);
+            if (Array.isArray(parsed) && parsed.length > 0) setScoresheetUrls(parsed);
+          } catch {}
+        }
         if (data.home_team?.roster_stats?.length) setHomeRoster(sortAthletesByPrimaryMetric(data.home_team.roster_stats, data.sport_type));
         if (data.away_team?.roster_stats?.length) setAwayRoster(sortAthletesByPrimaryMetric(data.away_team.roster_stats, data.sport_type));
         if (data.race_results?.length) setRaceResults(sortRaceResultsByTime(data.race_results));
+      } else {
+        recordDeletedMatch(cleanId);
+        setMatchData(null);
       }
+
+      // Check persistent IndexedDB files so fresh live Object URLs are loaded even after refresh/idle
+      try {
+        const storedPages = await getScoresheetFilesFromIndexedDB(cleanId);
+        if (storedPages.length > 0) {
+          const freshUrls = storedPages.map((p) => p.url);
+          setScoresheetUrls(freshUrls);
+          setScoresheetUrl(freshUrls.length > 1 ? JSON.stringify(freshUrls) : freshUrls[0]);
+        }
+      } catch {}
     } catch (err) {
       console.error('Failed to load match detail:', err);
     } finally {
       setLoading(false);
     }
   };
+
+  // Immediately restore active scoresheet URLs from IndexedDB without waiting for network requests
+  useEffect(() => {
+    if (!cleanId) return;
+    let active = true;
+    getScoresheetFilesFromIndexedDB(cleanId)
+      .then((storedPages) => {
+        if (active && storedPages.length > 0) {
+          const freshUrls = storedPages.map((p) => p.url);
+          setScoresheetUrls(freshUrls);
+          setScoresheetUrl(freshUrls.length > 1 ? JSON.stringify(freshUrls) : freshUrls[0]);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [cleanId]);
 
   useEffect(() => {
     loadMatchData();
@@ -483,7 +622,11 @@ export const ScoresheetMatch: React.FC = () => {
           match_date: (matchData as any).match_date || (matchData as any).match_date_formatted || new Date().toISOString(),
           location: (matchData as any).location || (matchData as any).venue || 'Tournament Sports Complex',
           scoresheet_url: scoresheetUrl?.startsWith('data:') ? undefined : scoresheetUrl,
-          player_stats: playerStatsPayload,
+          coaches: matchData?.assigned_coaches || (matchData?.coach_name ? [matchData.coach_name] : []),
+          assigned_coaches: matchData?.assigned_coaches || (matchData?.coach_name ? [matchData.coach_name] : []),
+          player_stats: isIndividualSport ? raceResults : playerStatsPayload,
+          race_results: isIndividualSport ? raceResults : undefined,
+          sport_specific_details: isIndividualSport ? { race_results: raceResults } : undefined,
           home_score: hSum,
           away_score: aSum,
           game_result: hSum >= aSum ? 'WIN' : 'LOSE',
@@ -492,9 +635,7 @@ export const ScoresheetMatch: React.FC = () => {
         new Promise((resolve) => setTimeout(resolve, 1500)),
       ])
         .then(() => {
-          invalidateCache('official_dashboard');
           invalidateCache('official_schedules');
-          invalidateCache('all_official_matches_master');
         })
         .catch((err) => console.warn('Fast DB sync completed with local cache priority:', err))
         .finally(() => setIsSaving(false));
@@ -521,6 +662,7 @@ export const ScoresheetMatch: React.FC = () => {
     setUploadedFiles(inputFiles);
     setIsUploading(true);
     setUploadError(null);
+    saveScoresheetFilesToIndexedDB(cleanId, inputFiles).catch(() => {});
 
     try {
       // 1. Run direct Gemini OCR scan to ensure stats and team names are extracted
@@ -529,14 +671,30 @@ export const ScoresheetMatch: React.FC = () => {
 
       const [ocrRes, uploadRes] = await Promise.all([ocrPromise, uploadPromise]);
       const res = ocrRes || uploadRes;
-      const finalScoresheetUrl = uploadRes?.scoresheet_url || res?.scoresheet_url;
-      if (finalScoresheetUrl) setScoresheetUrl(finalScoresheetUrl);
+      const subMatches = Array.isArray(res?.matches) ? res.matches : (Array.isArray(res?.pages) ? res.pages : []);
+      const multiUrls = subMatches.map((m: any) => m?.scoresheet_url).filter((u: any) => typeof u === 'string' && u.trim());
+      const finalScoresheetUrl = multiUrls.length > 1
+        ? JSON.stringify(multiUrls)
+        : (uploadRes?.scoresheet_url || res?.scoresheet_url || (multiUrls[0] || ''));
+
+      const localUrls = inputFiles.map((f) => URL.createObjectURL(f));
+      if (multiUrls.length > 1) {
+        setScoresheetUrls(multiUrls);
+      } else if (finalScoresheetUrl) {
+        setScoresheetUrls([finalScoresheetUrl]);
+      } else if (localUrls.length > 0) {
+        setScoresheetUrls(localUrls);
+      }
+
+      if (finalScoresheetUrl) {
+        setScoresheetUrl(finalScoresheetUrl);
+      } else if (localUrls.length > 0) {
+        setScoresheetUrl(localUrls.length > 1 ? JSON.stringify(localUrls) : localUrls[0]);
+      }
 
       let rawPlayers: any[] = Array.isArray(res?.player_summary)
         ? [...res.player_summary]
-        : Array.isArray(res?.parsed_tables?.player_summary) ? [...res.parsed_tables.player_summary] : [];
-
-      const subMatches = Array.isArray(res?.matches) ? res.matches : (Array.isArray(res?.pages) ? res.pages : []);
+        : (Array.isArray(res?.parsed_tables?.player_summary) ? [...res.parsed_tables.player_summary] : []);
       if (subMatches.length > 0) {
         subMatches.forEach((m: any) => {
           const mPlayers = Array.isArray(m?.player_summary)
@@ -654,6 +812,7 @@ export const ScoresheetMatch: React.FC = () => {
           const updated: MatchAuditDetail = {
             ...prev,
             scoresheet_url: finalScoresheetUrl || prev.scoresheet_url,
+            scoresheet_urls: multiUrls.length > 1 ? multiUrls : prev.scoresheet_urls,
             home_team: {
               ...prev.home_team,
               name: (ocrHomeName && ocrHomeName !== 'HOME TEAM' ? ocrHomeName : prev.home_team.name) || 'HOME TEAM',
@@ -674,7 +833,11 @@ export const ScoresheetMatch: React.FC = () => {
           return updated;
         });
       } else if (finalScoresheetUrl) {
-        setMatchData((prev) => (prev ? { ...prev, scoresheet_url: finalScoresheetUrl } : prev));
+        setMatchData((prev) => (prev ? {
+          ...prev,
+          scoresheet_url: finalScoresheetUrl,
+          scoresheet_urls: multiUrls.length > 1 ? multiUrls : prev.scoresheet_urls,
+        } : prev));
       }
     } catch (err: any) {
       setUploadError(err?.message || 'Failed to scan and upload scoresheet.');
@@ -698,179 +861,242 @@ export const ScoresheetMatch: React.FC = () => {
     setRaceResults(updated);
   };
 
+  const assignedList = useMemo(() => {
+    if (Array.isArray(matchData?.assigned_coaches) && matchData.assigned_coaches.length > 0) {
+      return matchData.assigned_coaches;
+    }
+    if (matchData?.coach_name) {
+      return [matchData.coach_name];
+    }
+    try {
+      const directCache = getCachedData<MatchAuditDetail>(`match_audit_detail_${cleanId}`);
+      if (Array.isArray(directCache?.assigned_coaches) && directCache.assigned_coaches.length > 0) {
+        return directCache.assigned_coaches;
+      }
+      if (directCache?.coach_name) return [directCache.coach_name];
+      const local = JSON.parse(localStorage.getItem(`atleta_match_detail_${cleanId}`) || '{}');
+      if (Array.isArray(local?.assigned_coaches) && local.assigned_coaches.length > 0) {
+        return local.assigned_coaches;
+      }
+      if (local?.coach_name) return [local.coach_name];
+    } catch {}
+    return [];
+  }, [matchData?.assigned_coaches, matchData?.coach_name, cleanId]);
+
+  const coachDisplay = assignedList.length > 0 ? assignedList.join(', ') : null;
+
+  const hasScoresheet = Boolean(
+    (scoresheetUrl && scoresheetUrl.trim()) ||
+    (scoresheetUrls && scoresheetUrls.length > 0) ||
+    (uploadedFiles && uploadedFiles.length > 0) ||
+    ((matchData as any)?.scoresheet_urls && (matchData as any).scoresheet_urls.length > 0) ||
+    matchData?.scoresheet_url
+  );
+
   const handleCertify = async () => {
     if (!matchData) return;
-    if (!scoresheetUrl || !scoresheetUrl.trim()) {
+    if (!hasScoresheet) {
       setActiveModal('NO_SCORESHEET');
       return;
     }
+
+    const resolvedUrl = (scoresheetUrl && scoresheetUrl.trim())
+      ? scoresheetUrl
+      : (scoresheetUrls.length > 0
+          ? (scoresheetUrls.length > 1 ? JSON.stringify(scoresheetUrls) : scoresheetUrls[0])
+          : ((matchData as any)?.scoresheet_urls?.[0] || matchData?.scoresheet_url || ''));
+
+    if (!scoresheetUrl && resolvedUrl) {
+      setScoresheetUrl(resolvedUrl);
+    }
+
     setActionLoading(true);
     setActionError(null);
     try {
       const finalNotes = typeof notes === 'string' ? notes : Array.isArray(notes) ? (notes as any[]).join('\n') : '';
-      const resolvedScoresheetUrl = scoresheetUrl?.startsWith('data:') ? undefined : scoresheetUrl;
-      const homeRosterIds = homeRoster.map((p, idx) => p.athlete_id || `ath_home_${idx + 1}`);
-      const awayRosterIds = awayRoster.map((p, idx) => p.athlete_id || `ath_away_${idx + 1}`);
 
-      const playerStatsPayload = isIndividualSport ? raceResults : [
-        ...homeRoster.map((p, idx) => {
-          const completeStats: Record<string, any> = {
-            ...(p.stats || {}),
-          };
-          dynamicSportColumns.forEach((col) => {
-            const val = getMetricValue(p, col.key);
-            if (val !== undefined && val !== null && val !== '') {
-              completeStats[col.key] = val;
-            }
-          });
-          return {
-            athlete_id: p.athlete_id || `ath_home_${idx + 1}`,
-            player_name: p.player_name,
-            team_name: homeTeamDisplayName,
-            jersey_number: Number(p.jersey_no) || idx + 1,
-            position: p.position || 'ATH',
-            pts: parseRobustStatNum(completeStats.pts ?? completeStats.points ?? p.pts ?? 0, 'pts'),
-            ast: parseRobustStatNum(completeStats.ast ?? completeStats.assists ?? p.ast ?? 0, 'ast'),
-            reb: parseRobustStatNum(completeStats.reb ?? completeStats.rebounds ?? p.reb ?? 0, 'reb'),
-            stl: parseRobustStatNum(completeStats.stl ?? completeStats.steals ?? p.stl ?? 0, 'stl'),
-            blk: parseRobustStatNum(completeStats.blk ?? completeStats.blocks ?? p.blk ?? 0, 'blk'),
-            to: parseRobustStatNum(completeStats.to ?? completeStats.turnovers ?? p.to ?? 0, 'to'),
-            fouls: parseRobustStatNum(completeStats.fouls ?? completeStats.pf ?? p.fouls ?? p.pf ?? 0, 'fouls'),
-            pf: parseRobustStatNum(completeStats.fouls ?? completeStats.pf ?? p.fouls ?? p.pf ?? 0, 'fouls'),
-            oreb: parseRobustStatNum(completeStats.oreb ?? completeStats.offensive_rebounds ?? p.oreb ?? 0, 'oreb'),
-            dreb: parseRobustStatNum(completeStats.dreb ?? completeStats.defensive_rebounds ?? p.dreb ?? 0, 'dreb'),
-            min: parseRobustStatNum(completeStats.min ?? completeStats.minutes ?? p.minutes ?? 0, 'min'),
-            fg_made: parseRobustStatNum(completeStats.fg_made ?? p.fg_made ?? 0, 'fg_made'),
-            fg_attempted: parseRobustStatNum(completeStats.fg_attempted ?? p.fg_attempted ?? 0, 'fg_attempted'),
-            three_made: parseRobustStatNum(completeStats.three_made ?? p.three_made ?? 0, 'three_made'),
-            three_attempted: parseRobustStatNum(completeStats.three_attempted ?? p.three_attempted ?? 0, 'three_attempted'),
-            ft_made: parseRobustStatNum(completeStats.ft_made ?? p.ft_made ?? 0, 'ft_made'),
-            ft_attempted: parseRobustStatNum(completeStats.ft_attempted ?? p.ft_attempted ?? 0, 'ft_attempted'),
-            fg_pct: p.fg_pct,
-            three_p_pct: p.three_p_pct,
-            ft_pct: p.ft_pct,
-            kills: parseRobustStatNum(completeStats.kills ?? p.kills ?? 0, 'kills'),
-            attack_errors: parseRobustStatNum(completeStats.attack_errors ?? p.attack_errors ?? 0, 'attack_errors'),
-            attack_attempts: parseRobustStatNum(completeStats.attack_attempts ?? p.attack_attempts ?? 0, 'attack_attempts'),
-            hitting_pct: p.hitting_pct,
-            service_aces: parseRobustStatNum(completeStats.service_aces ?? p.service_aces ?? 0, 'service_aces'),
-            service_errors: parseRobustStatNum(completeStats.service_errors ?? p.service_errors ?? 0, 'service_errors'),
-            reception_errors: parseRobustStatNum(completeStats.reception_errors ?? p.reception_errors ?? 0, 'reception_errors'),
-            digs: parseRobustStatNum(completeStats.digs ?? p.digs ?? 0, 'digs'),
-            block_points: parseRobustStatNum(completeStats.block_points ?? p.block_points ?? 0, 'block_points'),
-            sets_played: parseRobustStatNum(completeStats.sets_played ?? p.sets_played ?? 0, 'sets_played'),
-            goals: parseRobustStatNum(completeStats.goals ?? p.goals ?? 0, 'goals'),
-            shots: parseRobustStatNum(completeStats.shots ?? p.shots ?? 0, 'shots'),
-            shots_on_target: parseRobustStatNum(completeStats.shots_on_target ?? p.shots_on_target ?? 0, 'shots_on_target'),
-            saves: parseRobustStatNum(completeStats.saves ?? p.saves ?? 0, 'saves'),
-            tackles: parseRobustStatNum(completeStats.tackles ?? p.tackles ?? 0, 'tackles'),
-            stats: completeStats,
-          };
-        }),
-        ...awayRoster.map((p, idx) => {
-          const completeStats: Record<string, any> = {
-            ...(p.stats || {}),
-          };
-          dynamicSportColumns.forEach((col) => {
-            const val = getMetricValue(p, col.key);
-            if (val !== undefined && val !== null && val !== '') {
-              completeStats[col.key] = val;
-            }
-          });
-          return {
-            athlete_id: p.athlete_id || `ath_away_${idx + 1}`,
-            player_name: p.player_name,
-            team_name: awayTeamDisplayName,
-            jersey_number: Number(p.jersey_no) || idx + 1,
-            position: p.position || 'ATH',
-            pts: parseRobustStatNum(completeStats.pts ?? completeStats.points ?? p.pts ?? 0, 'pts'),
-            ast: parseRobustStatNum(completeStats.ast ?? completeStats.assists ?? p.ast ?? 0, 'ast'),
-            reb: parseRobustStatNum(completeStats.reb ?? completeStats.rebounds ?? p.reb ?? 0, 'reb'),
-            stl: parseRobustStatNum(completeStats.stl ?? completeStats.steals ?? p.stl ?? 0, 'stl'),
-            blk: parseRobustStatNum(completeStats.blk ?? completeStats.blocks ?? p.blk ?? 0, 'blk'),
-            to: parseRobustStatNum(completeStats.to ?? completeStats.turnovers ?? p.to ?? 0, 'to'),
-            fouls: parseRobustStatNum(completeStats.fouls ?? completeStats.pf ?? p.fouls ?? p.pf ?? 0, 'fouls'),
-            pf: parseRobustStatNum(completeStats.fouls ?? completeStats.pf ?? p.fouls ?? p.pf ?? 0, 'fouls'),
-            oreb: parseRobustStatNum(completeStats.oreb ?? completeStats.offensive_rebounds ?? p.oreb ?? 0, 'oreb'),
-            dreb: parseRobustStatNum(completeStats.dreb ?? completeStats.defensive_rebounds ?? p.dreb ?? 0, 'dreb'),
-            min: parseRobustStatNum(completeStats.min ?? completeStats.minutes ?? p.minutes ?? 0, 'min'),
-            fg_made: parseRobustStatNum(completeStats.fg_made ?? p.fg_made ?? 0, 'fg_made'),
-            fg_attempted: parseRobustStatNum(completeStats.fg_attempted ?? p.fg_attempted ?? 0, 'fg_attempted'),
-            three_made: parseRobustStatNum(completeStats.three_made ?? p.three_made ?? 0, 'three_made'),
-            three_attempted: parseRobustStatNum(completeStats.three_attempted ?? p.three_attempted ?? 0, 'three_attempted'),
-            ft_made: parseRobustStatNum(completeStats.ft_made ?? p.ft_made ?? 0, 'ft_made'),
-            ft_attempted: parseRobustStatNum(completeStats.ft_attempted ?? p.ft_attempted ?? 0, 'ft_attempted'),
-            fg_pct: p.fg_pct,
-            three_p_pct: p.three_p_pct,
-            ft_pct: p.ft_pct,
-            kills: parseRobustStatNum(completeStats.kills ?? p.kills ?? 0, 'kills'),
-            attack_errors: parseRobustStatNum(completeStats.attack_errors ?? p.attack_errors ?? 0, 'attack_errors'),
-            attack_attempts: parseRobustStatNum(completeStats.attack_attempts ?? p.attack_attempts ?? 0, 'attack_attempts'),
-            hitting_pct: p.hitting_pct,
-            service_aces: parseRobustStatNum(completeStats.service_aces ?? p.service_aces ?? 0, 'service_aces'),
-            service_errors: parseRobustStatNum(completeStats.service_errors ?? p.service_errors ?? 0, 'service_errors'),
-            reception_errors: parseRobustStatNum(completeStats.reception_errors ?? p.reception_errors ?? 0, 'reception_errors'),
-            digs: parseRobustStatNum(completeStats.digs ?? p.digs ?? 0, 'digs'),
-            block_points: parseRobustStatNum(completeStats.block_points ?? p.block_points ?? 0, 'block_points'),
-            sets_played: parseRobustStatNum(completeStats.sets_played ?? p.sets_played ?? 0, 'sets_played'),
-            goals: parseRobustStatNum(completeStats.goals ?? p.goals ?? 0, 'goals'),
-            shots: parseRobustStatNum(completeStats.shots ?? p.shots ?? 0, 'shots'),
-            shots_on_target: parseRobustStatNum(completeStats.shots_on_target ?? p.shots_on_target ?? 0, 'shots_on_target'),
-            saves: parseRobustStatNum(completeStats.saves ?? p.saves ?? 0, 'saves'),
-            tackles: parseRobustStatNum(completeStats.tackles ?? p.tackles ?? 0, 'tackles'),
-            stats: completeStats,
-          };
-        }),
-      ];
-
-      // Sync latest notes and match details directly to Match_Logs
-      await createOfficialMatch({
-        match_id: cleanId,
-        team_id: homeTeamDisplayName,
-        home_team_name: homeTeamDisplayName,
-        opponent_team_name: awayTeamDisplayName,
-        sport_type: matchData.sport_type || 'Basketball',
-        match_date: (matchData as any).match_date || (matchData as any).match_date_formatted || new Date().toISOString(),
-        location: (matchData as any).location || (matchData as any).venue || 'Tournament Sports Complex',
-        scoresheet_url: resolvedScoresheetUrl,
-        scoresheetUrl: resolvedScoresheetUrl,
-        roster_athletes: homeRosterIds,
-        rosterAthletes: homeRosterIds,
-        away_roster_athletes: awayRosterIds,
-        awayRosterAthletes: awayRosterIds,
-        player_stats: playerStatsPayload,
-        playerStats: playerStatsPayload,
-        home_score: homeScore,
-        away_score: awayScore,
-        game_result: dynamicMatchResult.homeResult,
-        notes: finalNotes,
-      } as any).catch(() => {});
-
+      // Validate & certify match officially without nulling or overwriting match fields
       await certifyMatchValidation(matchData.validation_id || matchData.match_id, {
         context_notes: finalNotes,
         notes: finalNotes,
-        scoresheet_url: scoresheetUrl,
+        scoresheet_url: (resolvedUrl?.startsWith('data:') || resolvedUrl?.startsWith('blob:') || resolvedUrl?.startsWith('[')) ? undefined : resolvedUrl,
       });
+
       const currentUser = getStoredUser();
       const uId = currentUser?.uid;
+      const matchLookupId = cleanId || String(matchData.match_id || matchData.validation_id || '').replace(/^#/, '');
+
       if (cleanId) {
         markMatchAsCertified(cleanId);
         if (uId) recordOfficialCreatedMatchId(cleanId, uId);
       }
+      if (matchData.match_id) {
+        const mId = String(matchData.match_id).replace(/^#/, '');
+        markMatchAsCertified(mId);
+        if (uId) recordOfficialCreatedMatchId(mId, uId);
+      }
+      if (matchData.validation_id) {
+        const vId = String(matchData.validation_id).replace(/^#/, '');
+        markMatchAsCertified(vId);
+        if (uId) recordOfficialCreatedMatchId(vId, uId);
+      }
+
+      const finalScoresheetUrls = scoresheetUrls.length > 0
+        ? scoresheetUrls
+        : (matchData?.scoresheet_urls && matchData.scoresheet_urls.length > 0)
+          ? matchData.scoresheet_urls
+          : displayPages.length > 1
+            ? displayPages.map((p) => p.url)
+            : undefined;
+
       const updatedDetail: MatchAuditDetail = {
         ...matchData,
         is_certified: true,
+        is_locked: true,
         audit_context_notes: finalNotes,
         scoresheet_url: scoresheetUrl,
+        scoresheet_urls: finalScoresheetUrls,
+        race_results: (raceResults && raceResults.length > 0) ? raceResults : matchData.race_results,
+        assigned_coaches: (assignedList && assignedList.length > 0) ? assignedList : matchData.assigned_coaches,
+        coach_name: coachDisplay || matchData.coach_name,
       };
+
       setMatchData(updatedDetail);
       setCachedData(`match_audit_detail_${cleanId}`, updatedDetail);
+      if (matchLookupId && matchLookupId !== cleanId) {
+        setCachedData(`match_audit_detail_${matchLookupId}`, updatedDetail);
+      }
       try {
         localStorage.removeItem(`atleta_draft_note_${cleanId}`);
         localStorage.setItem(`atleta_match_detail_${cleanId}`, JSON.stringify(updatedDetail));
+        if (matchLookupId && matchLookupId !== cleanId) {
+          localStorage.setItem(`atleta_match_detail_${matchLookupId}`, JSON.stringify(updatedDetail));
+        }
       } catch { }
+
+      // Optimistically update all_official_matches_master cache so Home page updates instantly (matching createMatch pattern)
+      try {
+        let prevMaster = getCachedData<MatchSummaryItem[]>('all_official_matches_master');
+        if (!prevMaster || !Array.isArray(prevMaster) || prevMaster.length === 0) {
+          const raw = localStorage.getItem('atleta_cached_official_matches_master');
+          prevMaster = raw ? JSON.parse(raw) : [];
+        }
+
+        const homeName = homeTeamDisplayName || 'Home Team';
+        const awayName = awayTeamDisplayName || 'Away Team';
+        const matchTitle = (
+          (matchData as any)?.game_name ||
+          (matchData as any)?.match_class ||
+          (matchData as any)?.matchName ||
+          (isIndividualSport ? `${homeName} • ${matchData.sport_type}` : `${homeName} vs. ${awayName}`)
+        ).trim();
+        const displaySport = matchData.sport_type || 'Basketball';
+        const coachStr = coachDisplay || (matchData.assigned_coaches && matchData.assigned_coaches.length > 0 ? matchData.assigned_coaches.join(', ') : (matchData.coach_name ? `Coach ${matchData.coach_name}` : 'Assigned Coach'));
+        const dateStr = (matchData as any)?.match_date || (matchData as any)?.created_at || new Date().toISOString();
+
+        let found = false;
+        let nextMaster = (prevMaster || []).map((m) => {
+          const mClean = String(m.match_id || '').replace(/^#/, '');
+          const vClean = String(m.validation_id || '').replace(/^#/, '');
+          if (mClean === matchLookupId || vClean === matchLookupId || (cleanId && (mClean === cleanId || vClean === cleanId))) {
+            found = true;
+            return {
+              ...m,
+              status: 'AUDITED' as const,
+              coaches: coachStr || m.coaches,
+              raw_match: {
+                ...(m.raw_match || {}),
+                ...updatedDetail,
+                is_certified: true,
+                is_locked: true,
+                status: 'AUDITED',
+                certified_at: new Date().toISOString(),
+                official_id: uId || m.raw_match?.official_id || '',
+              },
+            };
+          }
+          return m;
+        });
+
+        if (!found) {
+          const newCertifiedItem: MatchSummaryItem = {
+            match_id: `#${matchLookupId}`,
+            validation_id: matchData.validation_id || matchLookupId,
+            matchName: matchTitle,
+            match_name: matchTitle,
+            match_class: matchTitle,
+            sport: displaySport,
+            coaches: coachStr,
+            date_time: dateStr,
+            status: 'AUDITED',
+            raw_match: {
+              ...updatedDetail,
+              match_id: matchLookupId,
+              is_certified: true,
+              is_locked: true,
+              status: 'AUDITED',
+              official_id: uId || '',
+              certified_at: new Date().toISOString(),
+              created_at: dateStr,
+            },
+          };
+          nextMaster = [newCertifiedItem, ...nextMaster];
+        }
+
+        setCachedData('all_official_matches_master', nextMaster);
+        localStorage.setItem('atleta_cached_official_matches_master', JSON.stringify(nextMaster));
+      } catch (e) {
+        console.warn('Error updating master matches cache on certify:', e);
+      }
+
+      // Optimistically update official_dashboard cache & localStorage so KPIs update instantly (matching createMatch pattern)
+      try {
+        let prevDash = getCachedData<any>('official_dashboard');
+        if (!prevDash) {
+          const raw = localStorage.getItem('atleta_cached_official_dashboard');
+          prevDash = raw ? JSON.parse(raw) : null;
+        }
+
+        const nextDash = prevDash ? {
+          ...prevDash,
+          total_matches: Math.max(1, prevDash.total_matches || 1),
+          pending_audits: Math.max(0, (prevDash.pending_audits !== undefined ? prevDash.pending_audits : 1) - 1),
+          completed_audits: (prevDash.completed_audits || 0) + 1,
+          audit_queue: Array.isArray(prevDash.audit_queue)
+            ? prevDash.audit_queue.map((item: any) => {
+                const itemMatchId = String(item.match_id || item.audit_id || item.match_details?.match_id || '').replace(/^#/, '');
+                if (itemMatchId === matchLookupId || (cleanId && itemMatchId === cleanId)) {
+                  return {
+                    ...item,
+                    status: 'Audited',
+                    is_certified: true,
+                    match_details: {
+                      ...(item.match_details || {}),
+                      is_certified: true,
+                      is_locked: true,
+                      status: 'AUDITED',
+                    },
+                  };
+                }
+                return item;
+              })
+            : [],
+        } : {
+          total_matches: 1,
+          pending_audits: 0,
+          completed_audits: 1,
+          audit_queue: [],
+          upcoming_schedules: [],
+          recent_matches: [],
+        };
+
+        setCachedData('official_dashboard', nextDash);
+        localStorage.setItem('atleta_cached_official_dashboard', JSON.stringify(nextDash));
+      } catch (e) {
+        console.warn('Error updating dashboard cache on certify:', e);
+      }
+
       setActiveModal(null);
-      await loadMatchData(true);
     } catch (err: any) {
       setActionError(err?.message || 'Certification failed.');
     } finally {
@@ -884,6 +1110,67 @@ export const ScoresheetMatch: React.FC = () => {
     if (isDownloading) return;
     setIsDownloading(true);
     try {
+      if (displayPages.length > 1) {
+        for (let i = 0; i < displayPages.length; i++) {
+          const page = displayPages[i];
+          const pageUrl = page.url;
+          if (!pageUrl) continue;
+          let ext = page.isPdf ? 'pdf' : 'jpg';
+          const lower = pageUrl.toLowerCase();
+          if (lower.startsWith('data:image/png') || lower.includes('.png')) {
+            ext = 'png';
+          } else if (lower.startsWith('data:image/jpeg') || lower.startsWith('data:image/jpg') || lower.includes('.jpg') || lower.includes('.jpeg')) {
+            ext = 'jpg';
+          } else if (lower.startsWith('data:application/pdf') || lower.includes('.pdf')) {
+            ext = 'pdf';
+          }
+
+          const filename = `scoresheet_match_${cleanId || 'record'}_page_${i + 1}.${ext}`;
+
+          if (pageUrl.startsWith('data:') || pageUrl.startsWith('blob:')) {
+            const a = document.createElement('a');
+            a.href = pageUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          } else {
+            try {
+              const res = await fetch(pageUrl);
+              if (res.ok) {
+                const blob = await res.blob();
+                const blobUrl = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(blobUrl);
+              } else {
+                const a = document.createElement('a');
+                a.href = pageUrl;
+                a.download = filename;
+                a.target = '_blank';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+              }
+            } catch {
+              const a = document.createElement('a');
+              a.href = pageUrl;
+              a.download = filename;
+              a.target = '_blank';
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+            }
+          }
+          await new Promise((r) => setTimeout(r, 250));
+        }
+        return;
+      }
+
       if (scoresheetUrl) {
         let ext = 'pdf';
         const lower = scoresheetUrl.toLowerCase();
@@ -946,11 +1233,6 @@ export const ScoresheetMatch: React.FC = () => {
     deleteOfficialMatch(cleanId).catch((err) => console.error('Delete match error:', err));
     setActiveModal('REMOVE_SUCCESS');
   };
-
-  const assignedList = Array.isArray(matchData?.assigned_coaches) && matchData.assigned_coaches.length > 0
-    ? matchData.assigned_coaches
-    : matchData?.coach_name ? [matchData.coach_name] : [];
-  const coachDisplay = assignedList.length > 0 ? assignedList.join(', ') : null;
 
   // Render Table for Team Basketball Stats with live sums
   const renderTeamStatsTable = (teamName: string, roster: BoxScoreRow[], teamType: 'home' | 'away') => {
@@ -1295,28 +1577,40 @@ export const ScoresheetMatch: React.FC = () => {
         index: idx,
       }));
     }
-    if (!scoresheetUrl) return [];
+    if (!scoresheetUrl && !scoresheetUrls.length && !(matchData as any)?.scoresheet_urls?.length) return [];
 
     // Safely resolve multi-urls without corrupting base64 data URLs
     let rawUrls: string[] = [];
-    if (Array.isArray((matchData as any)?.scoresheet_urls)) {
+    if (scoresheetUrls && scoresheetUrls.length > 0) {
+      rawUrls = scoresheetUrls;
+    } else if (Array.isArray((matchData as any)?.scoresheet_urls) && (matchData as any).scoresheet_urls.length > 0) {
       rawUrls = (matchData as any).scoresheet_urls;
     } else if (typeof scoresheetUrl === 'string' && scoresheetUrl.trim().startsWith('[')) {
-      try { rawUrls = JSON.parse(scoresheetUrl); } catch { rawUrls = [scoresheetUrl]; }
-    } else {
+      try {
+        const parsed = JSON.parse(scoresheetUrl);
+        if (Array.isArray(parsed) && parsed.length > 0) rawUrls = parsed;
+        else rawUrls = [scoresheetUrl];
+      } catch {
+        rawUrls = [scoresheetUrl];
+      }
+    } else if (typeof scoresheetUrl === 'string' && scoresheetUrl.includes('|||')) {
+      rawUrls = scoresheetUrl.split('|||').map((s) => s.trim()).filter(Boolean);
+    } else if (typeof scoresheetUrl === 'string' && scoresheetUrl.includes(',') && !scoresheetUrl.startsWith('data:')) {
+      rawUrls = scoresheetUrl.split(',').map((s) => s.trim()).filter(Boolean);
+    } else if (scoresheetUrl) {
       rawUrls = [scoresheetUrl];
     }
 
     return rawUrls.map((url, idx) => ({
       key: `url-${idx}`,
       badge: rawUrls.length > 1 ? `PAGE ${idx + 1}` : 'OFFICIAL SCORESHEET',
-      name: `Page ${idx + 1}`,
+      name: `Scoresheet Page ${idx + 1}`,
       url,
       isPdf: url.toLowerCase().includes('.pdf') || url.startsWith('data:application/pdf'),
       isUploaded: false,
       index: idx,
     }));
-  }, [uploadedFiles, scoresheetUrl, matchData]);
+  }, [uploadedFiles, scoresheetUrl, scoresheetUrls, matchData]);
 
   return (
     <div style={styles.shell}>
@@ -1463,16 +1757,6 @@ export const ScoresheetMatch: React.FC = () => {
                       <span style={{ fontSize: '10px', fontWeight: 800, color: '#B45309', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
                         ★ MATCH MVP / TOP PERFORMER
                       </span>
-                      <span style={{
-                        fontSize: '9px',
-                        fontWeight: 800,
-                        backgroundColor: '#FDE68A',
-                        color: '#78350F',
-                        padding: '1px 6px',
-                        borderRadius: '4px',
-                      }}>
-                        EFF: {typeof mvpPlayer.score === 'number' ? mvpPlayer.score.toFixed(1) : mvpPlayer.score}
-                      </span>
                     </div>
                     <div
                       style={{
@@ -1504,7 +1788,7 @@ export const ScoresheetMatch: React.FC = () => {
             {/* Bottom Grid: Scoresheet Dropzone & Notes */}
             <div style={styles.bottomGrid}>
               <div style={styles.boxContainer}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: '20px' }}>
                   <span style={styles.boxLabel}>MATCH OFFICIAL SCORESHEET</span>
                   {displayPages.length >= 2 && (
                     <span style={{
@@ -1559,14 +1843,15 @@ export const ScoresheetMatch: React.FC = () => {
                     <span style={styles.dropzoneSubtext}>EXTRACTING ROSTER & STATISTICS AUTOMATICALLY</span>
                   </div>
                 ) : displayPages.length > 1 ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', width: '100%', flex: 1, height: '100%' }}>
                     {/* Bento Grid for Multi-page scoresheets */}
                     <div style={styles.bentoGrid}>
                       {displayPages.map((page, idx) => (
                         <div
-                          key={page.key}
+                          key={`${page.key}-${page.url}`}
                           style={{ ...styles.bentoCard, cursor: 'pointer' }}
                           onClick={() => {
+                            setPreviewPageIndex(idx);
                             setPreviewUrl(page.url);
                             setActiveModal('PREVIEW');
                           }}
@@ -1574,54 +1859,27 @@ export const ScoresheetMatch: React.FC = () => {
                         >
                           <div style={styles.bentoHeader}>
                             <span style={styles.bentoBadge}>{page.badge}</span>
-                            {!isCertified && (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (page.isUploaded) {
-                                    processScoresheetFiles(uploadedFiles.filter((_, i) => i !== page.index));
-                                  } else {
-                                    processScoresheetFiles([]);
-                                  }
-                                }}
-                                style={styles.bentoDeleteBtn}
-                                title="Remove page"
-                              >
-                                <Trash2 style={{ width: 11, height: 11 }} />
-                                <span>DELETE</span>
-                              </button>
-                            )}
                           </div>
                           {page.isPdf ? (
-                            <iframe src={page.url} title={`Page ${idx + 1}`} style={styles.bentoThumb} />
+                            <div style={{ ...styles.bentoThumb, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                              <FileText style={{ width: 32, height: 32, color: '#0B132B' }} />
+                              <span style={{ fontSize: '10px', fontWeight: 800, color: '#0B132B' }}>PDF SCORESHEET</span>
+                              <span style={{ fontSize: '9px', color: '#64748B' }}>CLICK TO ENLARGE</span>
+                            </div>
                           ) : (
-                            <img src={page.url} alt={`Page ${idx + 1}`} style={styles.bentoThumb} />
+                            <BentoThumbnail
+                              url={page.url}
+                              alt={`Page ${idx + 1}`}
+                              fallbackText={`SCORESHEET PAGE ${idx + 1}`}
+                            />
                           )}
                           <span style={styles.bentoFileName}>{page.name}</span>
                         </div>
                       ))}
                     </div>
-
-                    {!isCertified && (
-                      <div style={styles.actionToolbar}>
-                        <button type="button" onClick={() => appendFileInputRef.current?.click()} className="hover-btn-outline" style={styles.actionBtnPrimary}>
-                          <Plus style={{ width: 13, height: 13 }} />
-                          <span>ADD ANOTHER PAGE</span>
-                        </button>
-                        <button type="button" onClick={() => fileInputRef.current?.click()} className="hover-btn-outline" style={styles.actionBtnOutline}>
-                          <Upload style={{ width: 13, height: 13 }} />
-                          <span>REPLACE ALL</span>
-                        </button>
-                        <button type="button" onClick={() => processScoresheetFiles([])} className="hover-btn-outline" style={styles.actionBtnDanger}>
-                          <Trash2 style={{ width: 13, height: 13 }} />
-                          <span>REMOVE ALL</span>
-                        </button>
-                      </div>
-                    )}
                   </div>
                 ) : displayPages.length === 1 ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', width: '100%', flex: 1, height: '100%' }}>
                     <div
                       className="hover-dropzone"
                       style={styles.scoresheetPreviewTile}
@@ -1642,32 +1900,12 @@ export const ScoresheetMatch: React.FC = () => {
                           </span>
                         </div>
                       ) : (
-                        <div style={styles.scoresheetImgWrap}>
-                          <img src={displayPages[0].url} alt="Official Scoresheet" style={styles.scoresheetThumb} />
-                          <div style={styles.scoresheetEnlargeBadge}>
-                            <Eye style={{ width: 13, height: 13 }} />
-                            <span>CLICK TO ENLARGE PREVIEW</span>
-                          </div>
-                        </div>
+                        <SingleScoresheetThumbnail
+                          url={displayPages[0].url}
+                          alt="Official Scoresheet"
+                        />
                       )}
                     </div>
-
-                    {!isCertified && (
-                      <div style={styles.actionToolbar}>
-                        <button type="button" onClick={() => appendFileInputRef.current?.click()} className="hover-btn-outline" style={styles.actionBtnPrimary}>
-                          <Plus style={{ width: 13, height: 13 }} />
-                          <span>ADD ANOTHER PAGE</span>
-                        </button>
-                        <button type="button" onClick={() => fileInputRef.current?.click()} className="hover-btn-outline" style={styles.actionBtnOutline}>
-                          <Upload style={{ width: 13, height: 13 }} />
-                          <span>REPLACE ALL</span>
-                        </button>
-                        <button type="button" onClick={() => processScoresheetFiles([])} className="hover-btn-outline" style={styles.actionBtnDanger}>
-                          <Trash2 style={{ width: 13, height: 13 }} />
-                          <span>REMOVE ALL</span>
-                        </button>
-                      </div>
-                    )}
                   </div>
                 ) : isCertified ? (
                   <div style={styles.noScoresheetCertifiedBox}>
@@ -1688,7 +1926,9 @@ export const ScoresheetMatch: React.FC = () => {
               </div>
 
               <div style={styles.boxContainer}>
-                <span style={styles.boxLabel}>AUDIT CONTEXT NOTES</span>
+                <div style={{ display: 'flex', alignItems: 'center', minHeight: '20px' }}>
+                  <span style={styles.boxLabel}>AUDIT CONTEXT NOTES</span>
+                </div>
                 <textarea
                   value={notes}
                   onChange={(e) => {
@@ -1716,7 +1956,7 @@ export const ScoresheetMatch: React.FC = () => {
                 REMOVE MATCH
               </button>
 
-              {(isCertified || Boolean(scoresheetUrl)) && (
+              {(isCertified || Boolean(scoresheetUrl) || displayPages.length > 0) && (
                 <button
                   type="button"
                   onClick={handleDownloadScoresheet}
@@ -1729,14 +1969,14 @@ export const ScoresheetMatch: React.FC = () => {
                   ) : (
                     <Download style={{ width: 14, height: 14 }} />
                   )}
-                  <span>DOWNLOAD SCORESHEET</span>
+                  <span>{displayPages.length > 1 ? `DOWNLOAD ALL SCORESHEETS (${displayPages.length})` : 'DOWNLOAD SCORESHEET'}</span>
                 </button>
               )}
 
               {!isCertified ? (
                 <button
                   type="button"
-                  onClick={() => (!scoresheetUrl || !scoresheetUrl.trim() ? setActiveModal('NO_SCORESHEET') : setActiveModal('CERTIFY'))}
+                  onClick={() => (!hasScoresheet ? setActiveModal('NO_SCORESHEET') : setActiveModal('CERTIFY'))}
                   className="hover-btn-success"
                   style={styles.certifyBtn}
                 >

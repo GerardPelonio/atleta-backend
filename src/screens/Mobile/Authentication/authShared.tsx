@@ -53,12 +53,43 @@ const configuredApi = CLOUD_PROD_API;
 const rawDevApi = `http://${hostIp}:5000`;
 const CANDIDATE_DEV_API = `${rawDevApi}/api/v1`;
 
-// Default to production cloud API
+// Default to production cloud API with local development probing
 let activeApiBase = CLOUD_PROD_API;
 export let API_BASE = CLOUD_PROD_API;
 
 let hasProbedApi = false;
 export async function getActiveApiBase(): Promise<string> {
+  if (hasProbedApi) return activeApiBase;
+
+  const candidateUrls = [
+    "http://10.0.2.2:5000/api/v1",
+    "http://localhost:5000/api/v1",
+    CANDIDATE_DEV_API,
+  ];
+
+  for (const candidate of candidateUrls) {
+    try {
+      const probeController = new AbortController();
+      const probeTimeout = setTimeout(() => probeController.abort(), 1200);
+      const res = await fetch(`${candidate}/health`, {
+        signal: probeController.signal,
+        headers: { Accept: "application/json" },
+      });
+      clearTimeout(probeTimeout);
+      if (res.ok) {
+        console.log("[API PROBE SUCCESS] Connected to:", candidate);
+        activeApiBase = candidate;
+        API_BASE = candidate;
+        hasProbedApi = true;
+        return candidate;
+      }
+    } catch (probeErr: any) {
+      console.log("[API PROBE FAILED]", candidate, probeErr?.message || probeErr);
+    }
+  }
+
+  console.log("[API PROBE FALLBACK] Using:", CLOUD_PROD_API);
+
   activeApiBase = CLOUD_PROD_API;
   API_BASE = CLOUD_PROD_API;
   return CLOUD_PROD_API;
@@ -196,7 +227,7 @@ export function sanitizeUserErrorMessage(message: string): string {
   ) {
     return "Authentication service is temporarily unavailable. Please try again later.";
   }
-  if (message.includes("Internal server error")) {
+  if (message === "Internal server error." || message === "Internal server error") {
     return "Something went wrong on our server. Please try again later.";
   }
   return message;
@@ -301,8 +332,8 @@ async function fetchApi(path: string, options: RequestInit) {
 
   if (!response.ok) {
     let serverMessage: string | undefined = typeof payload.error === "string" ? payload.error : typeof payload.message === "string" ? payload.message : undefined;
-    if (serverMessage === "Internal server error." && typeof payload.details === "string") {
-      serverMessage = `Internal server error: ${payload.details}`;
+    if (typeof payload.details === "string" && payload.details.trim().length > 0 && !payload.details.includes("node:internal") && !payload.details.includes("    at ")) {
+      serverMessage = payload.details;
     }
     if (!serverMessage && Array.isArray(payload.errors) && payload.errors.length > 0) {
       serverMessage = (payload.errors[0] as { message?: string }).message;
@@ -327,6 +358,7 @@ const MICRO_CACHE_TTL_MS = 15000; // 15s microcache to eliminate redundant dupli
 export function clearAuthMicroCache() {
   getResponseMicroCache.clear();
   inFlightGetRequests.clear();
+  hasProbedApi = false;
 }
 
 // Handles authenticated JSON requests with Authorization Bearer header
