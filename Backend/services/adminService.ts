@@ -357,26 +357,39 @@ export async function loginAdminService(
  * Returns ALL coach accounts, whether or not they submitted optional documents during sign-up.
  */
 export async function getPendingCoachQueueService(filterStatus?: string) {
-  const [profileSnap, userSnap1, userSnap2] = await Promise.all([
-    db.collection('Coach_Profiles').get(),
+  const [profileSnap, userSnap1, userSnap2, userSnap3, userPendingSnap] = await Promise.all([
+    db.collection('Coach_Profiles').get().catch(() => ({ docs: [] } as any)),
     db.collection('Users').where('role', '==', 'Coach').get().catch(() => ({ docs: [] } as any)),
     db.collection('Users').where('role', '==', 'coach').get().catch(() => ({ docs: [] } as any)),
+    db.collection('Users').where('role', '==', 'COACH').get().catch(() => ({ docs: [] } as any)),
+    db.collection('Users').where('account_status', 'in', ['Pending', 'pending', 'PENDING']).get().catch(() => ({ docs: [] } as any)),
   ]);
 
   const coachesMap = new Map<string, any>();
-  const normalizeUid = (id: string) => id.replace(/^coach_/, '');
+  const emailToUid = new Map<string, string>();
+  const normalizeUid = (id: string) => String(id || '').replace(/^coach_/, '');
 
   // 1. Process Users collection first (captures all signed up coaches)
-  const allUserDocs = [...userSnap1.docs, ...userSnap2.docs];
+  const allUserDocs = [
+    ...userSnap1.docs,
+    ...userSnap2.docs,
+    ...userSnap3.docs,
+    ...userPendingSnap.docs.filter((d: any) => {
+      const r = String(d.data()?.role || '').toLowerCase();
+      return r === 'coach' || (!r.includes('athlete') && !r.includes('official') && !r.includes('admin'));
+    }),
+  ];
+
   allUserDocs.forEach((doc: any) => {
     const data = doc.data();
     const cleanUid = normalizeUid(doc.id);
+    const emailKey = String(data.email || '').trim().toLowerCase();
     const effectiveStatus = data.account_status || data.status || 'Pending';
-    const isApproved = effectiveStatus.toLowerCase() === 'active' || effectiveStatus.toLowerCase() === 'approved';
-    const isRejected = effectiveStatus.toLowerCase() === 'rejected';
+    const isApproved = String(effectiveStatus).toLowerCase() === 'active' || String(effectiveStatus).toLowerCase() === 'approved';
+    const isRejected = String(effectiveStatus).toLowerCase() === 'rejected';
     const displayStatus = isApproved ? 'VERIFIED' : (isRejected ? 'REJECTED' : 'PENDING');
 
-    coachesMap.set(cleanUid, {
+    const item = {
       coach_id: `coach_${cleanUid}`,
       user_id: cleanUid,
       first_name: data.first_name || '',
@@ -393,7 +406,11 @@ export async function getPendingCoachQueueService(filterStatus?: string) {
       rejection_reason: data.rejection_reason || '',
       created_at: data.created_at || new Date().toISOString(),
       date_uploaded: data.date_uploaded || data.created_at || new Date().toISOString(),
-    });
+    };
+
+    const targetKey = (emailKey && emailToUid.has(emailKey)) ? emailToUid.get(emailKey)! : cleanUid;
+    coachesMap.set(targetKey, item);
+    if (emailKey) emailToUid.set(emailKey, targetKey);
   });
 
   // 2. Overlay / Merge Coach_Profiles collection
@@ -401,16 +418,24 @@ export async function getPendingCoachQueueService(filterStatus?: string) {
     const data = doc.data();
     const rawUid = data.user_id || doc.id;
     const cleanUid = normalizeUid(rawUid);
-    const existing = coachesMap.get(cleanUid) || {};
-    const effectiveStatus = data.account_status || data.status || existing.account_status || 'Pending';
-    const isApproved = effectiveStatus.toLowerCase() === 'active' || effectiveStatus.toLowerCase() === 'approved';
-    const isRejected = effectiveStatus.toLowerCase() === 'rejected';
+    const emailKey = String(data.email || '').trim().toLowerCase();
+
+    const targetKey = (emailKey && emailToUid.has(emailKey))
+      ? emailToUid.get(emailKey)!
+      : (coachesMap.has(cleanUid) ? cleanUid : (emailKey ? cleanUid : cleanUid));
+
+    const existing = coachesMap.get(targetKey) || {};
+    const effectiveStatus = (data.account_status === 'Pending' || data.status === 'pending')
+      ? 'Pending'
+      : (data.account_status || data.status || existing.account_status || 'Pending');
+    const isApproved = String(effectiveStatus).toLowerCase() === 'active' || String(effectiveStatus).toLowerCase() === 'approved';
+    const isRejected = String(effectiveStatus).toLowerCase() === 'rejected';
     const displayStatus = isApproved ? 'VERIFIED' : (isRejected ? 'REJECTED' : 'PENDING');
 
-    coachesMap.set(cleanUid, {
+    coachesMap.set(targetKey, {
       ...existing,
       coach_id: data.coach_id || existing.coach_id || (doc.id.startsWith('coach_') ? doc.id : `coach_${doc.id}`),
-      user_id: cleanUid,
+      user_id: existing.user_id || cleanUid,
       first_name: data.first_name || existing.first_name || '',
       last_name: data.last_name || existing.last_name || '',
       full_name: data.full_name || existing.full_name || `${data.first_name || existing.first_name || ''} ${data.last_name || existing.last_name || ''}`.trim(),
@@ -428,6 +453,8 @@ export async function getPendingCoachQueueService(filterStatus?: string) {
       created_at: data.created_at || existing.created_at || new Date().toISOString(),
       date_uploaded: data.date_uploaded || existing.date_uploaded || data.created_at || new Date().toISOString(),
     });
+
+    if (emailKey) emailToUid.set(emailKey, targetKey);
   });
 
   let coaches = Array.from(coachesMap.values());
@@ -630,25 +657,31 @@ export async function rejectCoachService(adminId: string, coachIdParam: string, 
  * Retrieve all registered tournament officials for admin review and approval queue.
  */
 export async function getOfficialsQueueService() {
-  const [profilesSnap, usersSnap] = await Promise.all([
-    db.collection('Official_Profiles').get(),
+  const [profilesSnap, usersSnap1, usersSnap2, usersSnap3] = await Promise.all([
+    db.collection('Official_Profiles').get().catch(() => ({ docs: [] } as any)),
     db.collection('Users').where('role', '==', 'Official').get().catch(() => ({ docs: [] } as any)),
+    db.collection('Users').where('role', '==', 'official').get().catch(() => ({ docs: [] } as any)),
+    db.collection('Users').where('role', '==', 'OFFICIAL').get().catch(() => ({ docs: [] } as any)),
   ]);
 
   const officialsMap = new Map<string, any>();
-  const normalizeUid = (id: string) => id.replace(/^off_|^official_/, '');
+  const emailToUid = new Map<string, string>();
+  const normalizeUid = (id: string) => String(id || '').replace(/^off_|^official_/, '');
 
-  usersSnap.docs.forEach((doc: any) => {
+  const allUserDocs = [...usersSnap1.docs, ...usersSnap2.docs, ...usersSnap3.docs];
+  allUserDocs.forEach((doc: any) => {
     const data = doc.data();
     const uid = doc.id;
+    const cleanUid = normalizeUid(uid);
+    const emailKey = String(data.email || '').trim().toLowerCase();
     const rawStatus = String(data.account_status || data.status || data.certification_status || 'Pending');
     const isApproved = data.is_approved === true || data.isApproved === true || rawStatus.toLowerCase() === 'active' || rawStatus.toLowerCase() === 'approved';
     const isRejected = rawStatus.toLowerCase() === 'rejected' || rawStatus.toLowerCase() === 'declined';
     const displayStatus = isApproved ? 'Approved' : (isRejected ? 'Rejected' : 'Pending');
 
-    officialsMap.set(normalizeUid(uid), {
-      official_id: `off_${uid}`,
-      user_id: uid,
+    const item = {
+      official_id: `off_${cleanUid}`,
+      user_id: cleanUid,
       first_name: data.first_name || '',
       last_name: data.last_name || '',
       full_name: data.full_name || data.full_legal_name || `${data.first_name || ''} ${data.last_name || ''}`.trim() || 'Tournament Official',
@@ -661,7 +694,11 @@ export async function getOfficialsQueueService() {
       is_approved: isApproved,
       rejection_reason: data.rejection_reason || '',
       created_at: data.created_at || new Date().toISOString(),
-    });
+    };
+
+    const targetKey = (emailKey && emailToUid.has(emailKey)) ? emailToUid.get(emailKey)! : cleanUid;
+    officialsMap.set(targetKey, item);
+    if (emailKey) emailToUid.set(emailKey, targetKey);
   });
 
   profilesSnap.docs.forEach((doc: any) => {

@@ -125,13 +125,15 @@ export const AdminHomePage: React.FC = () => {
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
   const itemsPerPage = 6;
 
-  const loadCoachQueue = async (forceRefresh = false) => {
+  const loadCoachQueue = async (forceRefresh = true) => {
     try {
-      const cached = getCachedData<AdminCoachQueueResponse>('admin_coach_queue');
-      if (cached && !forceRefresh && Array.isArray(cached.queue) && cached.queue.length > 0) {
-        setCoachQueue(cached.queue);
-        saveStoredCoaches(cached.queue);
-        return;
+      if (!forceRefresh) {
+        const cached = getCachedData<AdminCoachQueueResponse>('admin_coach_queue');
+        if (cached && Array.isArray(cached.queue) && cached.queue.length > 0) {
+          setCoachQueue(cached.queue);
+          saveStoredCoaches(cached.queue);
+          return;
+        }
       }
       const res = await getAdminCoachQueue(forceRefresh);
       const incoming = Array.isArray(res?.queue) ? res.queue : [];
@@ -176,7 +178,7 @@ export const AdminHomePage: React.FC = () => {
       navigate('/dashboard-official', { replace: true });
       return;
     }
-    loadAll();
+    loadAll(true);
   }, [navigate]);
 
   const handleUpdateCoach = (coachId: string, account_status: string, status: string) => {
