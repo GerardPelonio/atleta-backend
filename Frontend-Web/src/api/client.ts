@@ -61,8 +61,8 @@ export const storeAllReadNotificationIds = (ids: string[]): void => {
 
 // In-Memory and Session Client Cache for instant screen-to-screen navigation
 const cache = new Map<string, { data: any; timestamp: number; version?: string }>();
-const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes cache
-const CACHE_VERSION = 'v4_sched_dedup';
+const CACHE_TTL_MS = 2000; // 2 seconds micro-cache for debouncing, fresh data always
+const CACHE_VERSION = 'v5_live_fresh';
 
 export const getCachedData = <T>(key: string): T | null => {
   const item = cache.get(key);
@@ -404,6 +404,13 @@ export const getAdminProfile = async (forceRefresh = false): Promise<any> => {
 };
 
 export const getAdminCoachQueue = async (forceRefresh = false): Promise<AdminCoachQueueResponse> => {
+  if (forceRefresh) {
+    cache.delete('admin_coach_queue');
+    try {
+      sessionStorage.removeItem('atleta_cache_admin_coach_queue');
+      localStorage.removeItem('atleta_cache_admin_coach_queue');
+    } catch {}
+  }
   const cached = getCachedData<AdminCoachQueueResponse>('admin_coach_queue');
   if (cached && !forceRefresh) return cached;
 
@@ -415,8 +422,11 @@ export const getAdminCoachQueue = async (forceRefresh = false): Promise<AdminCoa
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        Pragma: 'no-cache',
+        Expires: '0',
       },
-      signal: AbortSignal.timeout(7000),
+      signal: AbortSignal.timeout(10000),
     });
     if (res.ok) {
       const data = await handleResponse<AdminCoachQueueResponse>(res);
@@ -431,8 +441,12 @@ export const getAdminCoachQueue = async (forceRefresh = false): Promise<AdminCoa
       };
       setCachedData('admin_coach_queue', filteredData);
       return filteredData;
+    } else {
+      console.warn(`[getAdminCoachQueue] Failed with status ${res.status}: ${res.statusText}`);
     }
-  } catch { }
+  } catch (err) {
+    console.error('[getAdminCoachQueue] Error fetching coach queue:', err);
+  }
 
   return cached || { total_pending: 0, queue: [] };
 };

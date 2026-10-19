@@ -7,6 +7,7 @@ import {
   ShieldCheck,
   Award,
   Users,
+  RefreshCw,
 } from 'lucide-react';
 import {
   getStoredToken,
@@ -141,9 +142,9 @@ export const AdminHomePage: React.FC = () => {
     }
   };
 
-  const loadOfficialQueue = async () => {
+  const loadOfficialQueue = async (forceRefresh = true) => {
     try {
-      const res = await getAdminOfficialQueue(true);
+      const res = await getAdminOfficialQueue(forceRefresh);
       const incoming = Array.isArray(res?.queue) ? res.queue : [];
       setOfficialQueue(incoming);
       saveStoredOfficials(incoming);
@@ -152,13 +153,13 @@ export const AdminHomePage: React.FC = () => {
     }
   };
 
-  const loadAll = async () => {
+  const loadAll = async (forceRefresh = true) => {
     const hasCoaches = coachQueue.length > 0 || getStoredCoaches().length > 0;
     if (!hasCoaches) {
       setLoading(true);
     }
     try {
-      await Promise.all([loadCoachQueue(false), loadOfficialQueue()]);
+      await Promise.all([loadCoachQueue(forceRefresh), loadOfficialQueue(forceRefresh)]);
     } finally {
       setLoading(false);
     }
@@ -459,10 +460,34 @@ export const AdminHomePage: React.FC = () => {
                 </button>
               ))}
             </div>
-            <span style={{ fontSize: '12px', color: '#64748B', fontWeight: 600 }}>
-              Showing {activeFilteredList.length} {queueType === 'COACHES' ? 'coach' : 'official'}
-              {activeFilteredList.length !== 1 ? (queueType === 'COACHES' ? 'es' : 's') : ''}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '12px', color: '#64748B', fontWeight: 600 }}>
+                Showing {activeFilteredList.length} {queueType === 'COACHES' ? 'coach' : 'official'}
+                {activeFilteredList.length !== 1 ? (queueType === 'COACHES' ? 'es' : 's') : ''}
+              </span>
+              <button
+                type="button"
+                onClick={() => loadAll(true)}
+                disabled={loading}
+                title="Refresh Queue"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '5px 10px',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  backgroundColor: '#F1F5F9',
+                  border: '1px solid #CBD5E1',
+                  borderRadius: '3px',
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                  color: '#334155',
+                }}
+              >
+                <RefreshCw style={{ width: 13, height: 13, animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+                <span>REFRESH</span>
+              </button>
+            </div>
           </div>
 
           {/* Queue Table */}
