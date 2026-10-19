@@ -1285,14 +1285,75 @@ export async function searchAthletes(queryStr?: string, sportType?: string) {
     }
   }
 
-  // Deduplicate and filter
+  // Deduplicate and filter: if a player is used again, merge and update their stats
   const seenCanonicalIds = new Set<string>();
+  const seenNames = new Map<string, RosterAthlete>();
   const allAthletes: RosterAthlete[] = [];
 
   for (const ath of resultsMap.values()) {
     const norm = String(ath.athlete_id || ath.user_id).replace(/^ath_/, '');
-    if (!seenCanonicalIds.has(norm)) {
-      seenCanonicalIds.add(norm);
+    const cleanName = (ath.full_name || `${ath.first_name || ''} ${ath.last_name || ''}`)
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+
+    const existing = (cleanName && seenNames.get(cleanName)) || (norm && seenNames.get(norm));
+
+    if (existing) {
+      // Player is used again: update stats, averages, efficiency, and team details
+      const athPpg = Number(ath.stats?.ppg ?? ath.averages?.ppg ?? 0);
+      const athRpg = Number(ath.stats?.rpg ?? ath.averages?.rpg ?? 0);
+      const athAst = Number(ath.stats?.ast ?? ath.averages?.ast ?? 0);
+      const athFg = Number(ath.stats?.fg_pct ?? ath.averages?.fg_percentage ?? 0);
+      const athPer = Number(ath.calculated_per ?? 0);
+      const athEff = Number(ath.efficiency_pct ?? 0);
+
+      const exPpg = Number(existing.stats?.ppg ?? existing.averages?.ppg ?? 0);
+      const exRpg = Number(existing.stats?.rpg ?? existing.averages?.rpg ?? 0);
+      const exAst = Number(existing.stats?.ast ?? existing.averages?.ast ?? 0);
+      const exFg = Number(existing.stats?.fg_pct ?? existing.averages?.fg_percentage ?? 0);
+
+      const mergedPpg = Math.max(exPpg, athPpg);
+      const mergedRpg = Math.max(exRpg, athRpg);
+      const mergedAst = Math.max(exAst, athAst);
+      const mergedFg = Math.max(exFg, athFg);
+      const mergedPer = Math.max(Number(existing.calculated_per || 0), athPer);
+      const mergedEff = Math.max(Number(existing.efficiency_pct || 0), athEff);
+
+      existing.stats = {
+        ...(existing.stats || {}),
+        ppg: mergedPpg,
+        rpg: mergedRpg,
+        ast: mergedAst,
+        fg_pct: mergedFg,
+      };
+      existing.averages = {
+        ...(existing.averages || {}),
+        ppg: mergedPpg,
+        rpg: mergedRpg,
+        apg: mergedAst,
+        fg_percentage: mergedFg,
+        per_score: mergedPer,
+      };
+      existing.calculated_per = mergedPer;
+      existing.efficiency_pct = mergedEff;
+
+      // Update team affiliation if incoming has one and existing doesn't
+      if ((!existing.team_name || existing.team_name === 'Team') && ath.team_name) {
+        existing.team_id = ath.team_id;
+        existing.team_name = ath.team_name;
+        existing.coach_name = ath.coach_name;
+        existing.has_coach = true;
+      }
+      if ((!existing.position || existing.position === 'Unassigned') && ath.position && ath.position !== 'Unassigned') {
+        existing.position = ath.position;
+      }
+      if (!existing.jersey_number && ath.jersey_number) {
+        existing.jersey_number = ath.jersey_number;
+      }
+    } else {
+      if (norm) seenCanonicalIds.add(norm);
+      if (cleanName) seenNames.set(cleanName, ath);
+      if (norm) seenNames.set(norm, ath);
       allAthletes.push(ath);
     }
   }

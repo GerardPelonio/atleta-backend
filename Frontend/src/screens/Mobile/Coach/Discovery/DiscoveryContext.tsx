@@ -16,7 +16,7 @@ import { requestAuthenticatedJson } from '../../Authentication/authShared';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getMatchesOfflineFirst } from '../../../../services/firebaseClient';
 
-const DISCOVERY_CACHE_KEY = 'atleta_discovery_snapshot_cache';
+const DISCOVERY_CACHE_KEY = 'atleta_discovery_snapshot_cache_v2';
 const DISCOVERY_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minute TTL
 
 let discoveryMemoryCache: {
@@ -244,15 +244,22 @@ export const DiscoveryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         });
       }
 
+      const normalizeAthleteName = (name?: string) =>
+        (name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
       const seenIds = new Set<string>();
+      const athleteByName = new Map<string, AthleteDiscoveryItem>();
+      const athleteById = new Map<string, AthleteDiscoveryItem>();
       const mappedAthletes: AthleteDiscoveryItem[] = [];
 
       if (rawAthletesList.length > 0) {
         rawAthletesList.forEach((a: any) => {
           const rawId = a.athlete_id || a.user_id || a.id || '';
           const normalizedId = rawId.replace(/^ath_/, '');
-          if (!rawId || seenIds.has(normalizedId)) return;
-          seenIds.add(normalizedId);
+          if (!rawId) return;
+
+          const fullName = a.full_name || `${a.first_name || ''} ${a.last_name || ''}`.trim() || 'Athlete';
+          const nameKey = normalizeAthleteName(fullName);
 
           // Check if athlete has coach / team affiliation
           const teamCoachInfo = athleteTeamCoachMap.get(normalizedId);
@@ -340,6 +347,46 @@ export const DiscoveryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             (ppg > 0 ? Math.min(99, Math.round(ppg * 3.5 + 20)) : 75)
           );
 
+          // Check if this player is already registered or used again
+          const existing = (nameKey && athleteByName.get(nameKey)) || (normalizedId && athleteById.get(normalizedId));
+
+          if (existing) {
+            // Player is used again: update stats, efficiency, and affiliation
+            if (ppg > 0 || rpg > 0 || ast > 0 || fgPct > 0) {
+              existing.stats = {
+                ...existing.stats,
+                ppg: Math.max(existing.stats.ppg || 0, ppg),
+                rpg: Math.max(existing.stats.rpg || 0, rpg),
+                ast: Math.max(existing.stats.ast || 0, ast),
+                fg_pct: Math.max(existing.stats.fg_pct || 0, fgPct),
+                times_50m_free: a.stats?.times_50m_free || existing.stats.times_50m_free,
+                times_100m: a.stats?.times_100m || existing.stats.times_100m,
+                times_200m: a.stats?.times_200m || existing.stats.times_200m,
+                times_400m: a.stats?.times_400m || existing.stats.times_400m,
+                spike_kills: a.stats?.spike_kills ?? existing.stats.spike_kills,
+                block_points: a.stats?.block_points ?? existing.stats.block_points,
+                service_aces: a.stats?.service_aces ?? existing.stats.service_aces,
+                points_scored: a.stats?.points_scored ?? existing.stats.points_scored,
+              };
+            }
+            if (per > 0) existing.calculated_per = Math.max(existing.calculated_per, per);
+            if (eff > 0) existing.efficiency_pct = Math.max(existing.efficiency_pct, eff);
+
+            if (assignedTeamName && (!existing.team_name || existing.team_name === 'Team')) {
+              existing.team_id = assignedTeamId;
+              existing.team_name = assignedTeamName;
+              existing.coach_name = assignedCoachName;
+              existing.has_coach = true;
+            }
+            if (isScouted) {
+              existing.is_scouted = true;
+              if (scoutStatus) existing.scout_status = scoutStatus;
+            }
+            return;
+          }
+
+          seenIds.add(normalizedId);
+
           const rawSport = (a.sport_type || a.sport_category || a.category || 'BASKETBALL').toUpperCase().trim();
           const sportCategory: SportCategoryFilter =
             rawSport.includes('SWIM') ? 'SWIMMING' : (rawSport.includes('TRACK') || rawSport.includes('FIELD')) ? 'TRACK AND FIELD' : rawSport;
@@ -348,10 +395,9 @@ export const DiscoveryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           const weightKg = a.physical_attributes?.weight_kg || a.physical_profile?.weight_kg || a.weight_kg;
           const wingspanCm = a.physical_attributes?.wingspan_cm || a.physical_profile?.wingspan_cm || a.wingspan_cm;
 
-          const fullName = a.full_name || `${a.first_name || ''} ${a.last_name || ''}`.trim() || 'Athlete';
           const positionTag = a.position || (a.sport_type ? a.sport_type : 'Player');
 
-          mappedAthletes.push({
+          const newAthleteItem: AthleteDiscoveryItem = {
             athlete_id: rawId,
             full_name: fullName,
             province: a.location || a.province || 'Camarines Sur',
@@ -394,20 +440,60 @@ export const DiscoveryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             has_coach: hasCoach,
             is_scouted: isScouted,
             scout_status: scoutStatus,
-          });
+          };
+
+          mappedAthletes.push(newAthleteItem);
+          if (nameKey) athleteByName.set(nameKey, newAthleteItem);
+          if (normalizedId) athleteById.set(normalizedId, newAthleteItem);
         });
       }
 
-      // Also merge any rostered athletes from teams who might not be in the standalone rawAthletesList
+      // Also merge any rostered athletes from teams: if player is used again, update their stats
       if (finalTeams.length > 0) {
         finalTeams.forEach((t) => {
           if (Array.isArray(t.roster)) {
             t.roster.forEach((r) => {
-              const rNormId = r.athlete_id.replace(/^ath_/, '');
-              if (!seenIds.has(rNormId)) {
-                seenIds.add(rNormId);
+              const rNormId = r.athlete_id ? r.athlete_id.replace(/^ath_/, '') : '';
+              const rNameKey = normalizeAthleteName(r.full_name);
+              const existing = (rNameKey && athleteByName.get(rNameKey)) || (rNormId && athleteById.get(rNormId));
+
+              if (existing) {
+                // Player is used again in another team or roster: update stats and affiliation
+                const rPpg = Number(r.stats?.ppg ?? 0);
+                const rRpg = Number(r.stats?.rpg ?? 0);
+                const rAst = Number(r.stats?.ast ?? 0);
+                const rFgPct = Number(r.stats?.fg_pct ?? 0);
+                const rPer = Number(r.calculated_per ?? 0);
+                const rEff = Number(r.efficiency_pct ?? 0);
+
+                if (rPpg > 0 || rRpg > 0 || rAst > 0 || rFgPct > 0) {
+                  existing.stats = {
+                    ...existing.stats,
+                    ppg: Math.max(existing.stats.ppg || 0, rPpg),
+                    rpg: Math.max(existing.stats.rpg || 0, rRpg),
+                    ast: Math.max(existing.stats.ast || 0, rAst),
+                    fg_pct: Math.max(existing.stats.fg_pct || 0, rFgPct),
+                  };
+                }
+                if (rPer > 0) existing.calculated_per = Math.max(existing.calculated_per, rPer);
+                if (rEff > 0) existing.efficiency_pct = Math.max(existing.efficiency_pct, rEff);
+
+                if ((!existing.team_name || existing.team_name === 'Team') && t.team_name) {
+                  existing.team_id = t.team_id;
+                  existing.team_name = t.team_name;
+                  existing.coach_name = t.head_coach;
+                  existing.has_coach = true;
+                }
+                if ((!existing.position_tag || existing.position_tag === 'Player' || existing.position_tag === 'Unassigned') && r.position_tag) {
+                  existing.position_tag = r.position_tag;
+                }
+                if ((!existing.jersey_number || existing.jersey_number === '0') && r.jersey_number) {
+                  existing.jersey_number = r.jersey_number;
+                }
+              } else {
+                if (rNormId) seenIds.add(rNormId);
                 const scoutInfo = scoutedAthleteMap.get(rNormId) || scoutedAthleteMap.get(r.athlete_id);
-                mappedAthletes.push({
+                const newRosterAth: AthleteDiscoveryItem = {
                   ...r,
                   team_id: t.team_id,
                   team_name: t.team_name,
@@ -415,7 +501,10 @@ export const DiscoveryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                   has_coach: true,
                   is_scouted: Boolean(scoutInfo || r.is_scouted),
                   scout_status: scoutInfo ? scoutInfo.offer_status : r.scout_status,
-                });
+                };
+                mappedAthletes.push(newRosterAth);
+                if (rNameKey) athleteByName.set(rNameKey, newRosterAth);
+                if (rNormId) athleteById.set(rNormId, newRosterAth);
               }
             });
           }

@@ -544,6 +544,20 @@ export async function submitMatchSession(
       } else if (userDoc && userDoc.exists && userDoc.data()?.role?.toLowerCase() === 'athlete') {
         registeredAthleteDoc = userDoc;
         targetAthleteRef = db.collection('Athlete_Profiles').doc(`ath_${rawUid}`);
+      } else if (pName && pName.trim().length > 0) {
+        // Fallback: match by player full name if player is used again under a different/generic ID
+        const trimmedName = pName.trim();
+        const [profileByName, userByName] = await Promise.all([
+          db.collection('Athlete_Profiles').where('full_name', '==', trimmedName).limit(1).get().catch(() => null),
+          db.collection('Users').where('full_name', '==', trimmedName).limit(1).get().catch(() => null),
+        ]);
+        if (profileByName && !profileByName.empty) {
+          registeredAthleteDoc = profileByName.docs[0];
+          targetAthleteRef = registeredAthleteDoc.ref;
+        } else if (userByName && !userByName.empty && userByName.docs[0].data()?.role?.toLowerCase() === 'athlete') {
+          registeredAthleteDoc = userByName.docs[0];
+          targetAthleteRef = db.collection('Athlete_Profiles').doc(`ath_${registeredAthleteDoc.id.replace(/^ath_/, '')}`);
+        }
       }
     }
 
