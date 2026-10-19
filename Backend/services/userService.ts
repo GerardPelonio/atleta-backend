@@ -69,6 +69,26 @@ export async function createFirebaseAuthUser(params: {
     return { uid: userRecord.uid };
   } catch (adminErr: any) {
     if (adminErr.code === 'auth/email-already-exists' || adminErr.code === 'auth/email-already-in-use') {
+      const cleanEmail = params.email.trim().toLowerCase();
+      const existingUserSnap = await db.collection('Users').where('email', '==', cleanEmail).limit(1).get().catch(() => null);
+      if (!existingUserSnap || existingUserSnap.empty) {
+        try {
+          console.log(`🧹 Detected orphaned Firebase Auth user for ${cleanEmail} (deleted in Firestore). Cleaning up and recreating.`);
+          const existingAuth = await auth.getUserByEmail(params.email).catch(() => null);
+          if (existingAuth) {
+            await auth.deleteUser(existingAuth.uid);
+            const freshUser = await auth.createUser({
+              email: params.email,
+              password: params.password,
+              displayName: params.displayName,
+            });
+            return { uid: freshUser.uid };
+          }
+        } catch (cleanupErr) {
+          console.warn('Could not re-create orphaned auth user:', cleanupErr);
+        }
+      }
+
       const err: any = new Error('Email already in use. Please log in using your existing credentials.');
       err.code = 'auth/email-already-in-use';
       err.status = 400;
@@ -94,6 +114,25 @@ export async function createFirebaseAuthUser(params: {
       const data = (await res.json()) as any;
       if (!res.ok || !data.localId) {
         if (data.error?.message?.includes('EMAIL_EXISTS')) {
+          const cleanEmail = params.email.trim().toLowerCase();
+          const existingUserSnap = await db.collection('Users').where('email', '==', cleanEmail).limit(1).get().catch(() => null);
+          if (!existingUserSnap || existingUserSnap.empty) {
+            try {
+              const existingAuth = await auth.getUserByEmail(params.email).catch(() => null);
+              if (existingAuth) {
+                await auth.deleteUser(existingAuth.uid);
+                const freshUser = await auth.createUser({
+                  email: params.email,
+                  password: params.password,
+                  displayName: params.displayName,
+                });
+                return { uid: freshUser.uid };
+              }
+            } catch (cleanupErr) {
+              console.warn('Could not re-create orphaned auth user via REST fallback:', cleanupErr);
+            }
+          }
+
           const err: any = new Error('Email already in use. Please log in using your existing credentials.');
           err.code = 'auth/email-already-in-use';
           err.status = 400;
