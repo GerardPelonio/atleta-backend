@@ -297,8 +297,14 @@ async function withRequestTimeout<T>(request: (signal: AbortSignal) => Promise<T
 async function fetchApi(path: string, options: RequestInit) {
   const url = `${CLOUD_PROD_API}${path}`;
 
+  const headers = {
+    "Cache-Control": "no-cache",
+    Pragma: "no-cache",
+    ...(options.headers || {}),
+  };
+
   const response = await withRequestTimeout((signal) =>
-    fetch(url, { ...options, signal })
+    fetch(url, { ...options, headers, signal })
   );
 
   const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
@@ -326,7 +332,7 @@ export async function getStoredAuthToken(): Promise<string | null> {
 
 const inFlightGetRequests = new Map<string, Promise<any>>();
 const getResponseMicroCache = new Map<string, { data: any; timestamp: number }>();
-const MICRO_CACHE_TTL_MS = 15000; // 15s microcache to eliminate redundant duplicate queries across screens
+const MICRO_CACHE_TTL_MS = 1500; // 1.5s snappy microcache to eliminate redundant duplicate queries across screens
 
 export function clearAuthMicroCache() {
   getResponseMicroCache.clear();
@@ -334,10 +340,19 @@ export function clearAuthMicroCache() {
 }
 
 // Handles authenticated JSON requests with Authorization Bearer header
-export async function requestAuthenticatedJson(path: string, method: string = "GET", body?: unknown) {
+export async function requestAuthenticatedJson(
+  path: string,
+  method: string = "GET",
+  body?: unknown,
+  forceRefresh: boolean = false
+) {
   const isGet = method.toUpperCase() === "GET" || method.toUpperCase() === "HEAD";
 
-  if (isGet) {
+  if (forceRefresh) {
+    getResponseMicroCache.delete(path);
+  }
+
+  if (isGet && !forceRefresh) {
     const cached = getResponseMicroCache.get(path);
     if (cached && Date.now() - cached.timestamp < MICRO_CACHE_TTL_MS) {
       return cached.data;
@@ -353,6 +368,8 @@ export async function requestAuthenticatedJson(path: string, method: string = "G
       const token = await getStoredAuthToken();
       const headers: Record<string, string> = {
         Accept: "application/json",
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
         ...(token ? { Authorization: `Bearer ${token}` } : {})
       };
       if (!isGet) {

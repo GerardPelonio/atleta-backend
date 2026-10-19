@@ -5,15 +5,17 @@ import {
   Platform,
   ScrollView,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
   ActivityIndicator,
+  Linking,
 } from "react-native";
 import styles from "./styles/CoachMainPage";
 import { StatusBar } from "expo-status-bar";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { requestAuthenticatedJson, getStoredAuthToken, API_BASE } from "../../Authentication/authShared";
+import { requestAuthenticatedJson, getStoredAuthToken, API_BASE, clearAuthMicroCache } from "../../Authentication/authShared";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Data Types & Mock Testing Data
@@ -62,6 +64,8 @@ import {
   getCoachProfileOfflineFirst,
   saveTeamOfflineFirst,
   deleteTeamOfflineFirst,
+  listenToCoachScoresheetRequests,
+  clearFirebaseClientCaches,
 } from "../../../../services/firebaseClient";
 import { calculatePlayerRating } from "../Performance/performanceUtils";
 
@@ -236,6 +240,57 @@ export function CoachMainPage({ onLogout }: CoachMainPageProps) {
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
   const [notificationsList, setNotificationsList] = useState<any[]>([]);
   const [unreadNotifCount, setUnreadNotifCount] = useState<number>(0);
+
+  // Accreditation Gate State
+  const [accountStatus, setAccountStatus] = useState<string>("Active");
+  const [rejectionReason, setRejectionReason] = useState<string>("");
+  const [reapplyDocUrl, setReapplyDocUrl] = useState<string>("");
+  const [reapplyDocList, setReapplyDocList] = useState<string[]>([]);
+  const [reapplyNotes, setReapplyNotes] = useState<string>("");
+  const [isReapplying, setIsReapplying] = useState<boolean>(false);
+  const [reapplyFeedback, setReapplyFeedback] = useState<string | null>(null);
+
+  const handleResubmitCredentials = async () => {
+    const docs = [...reapplyDocList];
+    if (reapplyDocUrl.trim() && !docs.includes(reapplyDocUrl.trim())) {
+      docs.push(reapplyDocUrl.trim());
+    }
+    if (docs.length === 0) {
+      Alert.alert("Documents Required", "Please provide at least one replacement credential document.");
+      return;
+    }
+    try {
+      setIsReapplying(true);
+      setReapplyFeedback(null);
+      const token = await getStoredAuthToken();
+      const res = await fetch(`${API_BASE}/coaches/resubmit-credentials`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          coach_id: coach.coach_id || coachProfile.coach_id,
+          user_id: coach.user_id || coachProfile.user_id,
+          email: coach.email || coachProfile.email,
+          documents: docs,
+          professional_documents: docs,
+          notes: reapplyNotes.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Resubmission failed");
+      }
+      setAccountStatus("Pending");
+      setReapplyFeedback("Replacement credentials submitted successfully. Your account is now pending admin review.");
+      Alert.alert("Credentials Submitted", "Your updated accreditation documents have been submitted to the administrator for review.");
+    } catch (err: any) {
+      Alert.alert("Submission Error", err?.message || "Failed to submit replacement credentials.");
+    } finally {
+      setIsReapplying(false);
+    }
+  };
 
 const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
   athlete_id: "",
@@ -541,8 +596,26 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
   useEffect(() => {
     let isMounted = true;
 
-    const fetchCoachDashboardData = async () => {
+    const withSyncTimeout = <T,>(p: Promise<T>, ms = 8000, fallback: T = null as any): Promise<T> => {
+      return Promise.race([
+        p,
+        new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+      ]);
+    };
+
+    const hydrationTimer = setTimeout(() => {
+      if (isMounted) {
+        setIsDashboardLoading(false);
+      }
+    }, 8500);
+
+    const fetchCoachDashboardData = async (forceFresh = false) => {
       try {
+        if (forceFresh) {
+          clearAuthMicroCache();
+          clearFirebaseClientCaches();
+          await AsyncStorage.removeItem(COACH_DASHBOARD_CACHE_KEY).catch(() => null);
+        }
         const [
           profileRes,
           teamsRes,
@@ -555,16 +628,16 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
           offlineAthletes,
           offlineProfileRes,
         ]: [any, any, any, any, any, any, any, any, any, any] = await Promise.all([
-          requestAuthenticatedJson("/coaches/profile").catch(() => null),
-          requestAuthenticatedJson("/teams").catch(() => null),
-          requestAuthenticatedJson("/sync/coach-snapshot").catch(() => null),
-          requestAuthenticatedJson("/matches").catch(() => null),
-          requestAuthenticatedJson("/coaches/athletes").catch(() => null),
-          requestAuthenticatedJson("/notifications").catch(() => null),
-          getSportsOfflineFirst().catch(() => []),
-          getMatchesOfflineFirst().catch(() => []),
-          getAthletesOfflineFirst().catch(() => []),
-          getCoachProfileOfflineFirst().catch(() => null),
+          withSyncTimeout(requestAuthenticatedJson("/coaches/profile", "GET", undefined, forceFresh).catch(() => null)),
+          withSyncTimeout(requestAuthenticatedJson("/teams", "GET", undefined, forceFresh).catch(() => null)),
+          withSyncTimeout(requestAuthenticatedJson("/sync/coach-snapshot", "GET", undefined, forceFresh).catch(() => null)),
+          withSyncTimeout(requestAuthenticatedJson("/matches", "GET", undefined, forceFresh).catch(() => null)),
+          withSyncTimeout(requestAuthenticatedJson("/coaches/athletes", "GET", undefined, forceFresh).catch(() => null)),
+          withSyncTimeout(requestAuthenticatedJson("/notifications", "GET", undefined, forceFresh).catch(() => null)),
+          withSyncTimeout(getSportsOfflineFirst(forceFresh).catch(() => []), 1500, []),
+          withSyncTimeout(getMatchesOfflineFirst(forceFresh).catch(() => []), 1500, []),
+          withSyncTimeout(getAthletesOfflineFirst(undefined, forceFresh).catch(() => []), 1500, []),
+          withSyncTimeout(getCoachProfileOfflineFirst().catch(() => null), 1500, null),
         ]);
 
         const allTeamsRes: any = null;
@@ -1029,6 +1102,12 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
             };
             updatedProfileSnapshot = updatedProfileState;
             setCoachProfile(updatedProfileState);
+
+            const currentAccStatus = String(effectiveProfile?.account_status || effectiveProfile?.status || "Active");
+            setAccountStatus(currentAccStatus);
+            if (effectiveProfile?.rejection_reason) {
+              setRejectionReason(effectiveProfile.rejection_reason);
+            }
           }
 
           const rawAthletesList: any[] = allHandledAthletes;
@@ -1120,9 +1199,65 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
 
     return () => {
       isMounted = false;
+      clearTimeout(hydrationTimer);
       clearInterval(notifInterval);
     };
   }, []);
+
+  // Real-time listener for coach's scoresheet requests (updates when tournament official fulfills and uploads)
+  useEffect(() => {
+    const coachId = coach?.coach_id || coach?.user_id;
+    if (!coachId) return;
+
+    const unsubscribe = listenToCoachScoresheetRequests(coachId, (requests) => {
+      if (!requests || requests.length === 0) return;
+
+      setNotificationsList((prevList) => {
+        const updated = [...prevList];
+
+        requests.forEach((req) => {
+          const notifId = `req_${req.id}`;
+          const isFulfilled = req.status === "fulfilled";
+          const matchTitle = req.matchName || `Match ${req.matchId}`;
+
+          const item = {
+            id: notifId,
+            notification_id: notifId,
+            type: "SCORESHEET_SHARED",
+            title: isFulfilled ? `Scoresheet Shared: ${matchTitle}` : `Scoresheet Requested: ${matchTitle}`,
+            message_body: isFulfilled
+              ? `Tournament Official has verified and uploaded the scoresheet for ${matchTitle}. Tap below to view or download.`
+              : `Your scoresheet request for ${matchTitle} has been submitted to tournament officials.`,
+            message: isFulfilled
+              ? `Tournament Official has verified and uploaded the scoresheet for ${matchTitle}. Tap below to view or download.`
+              : `Your scoresheet request for ${matchTitle} has been submitted to tournament officials.`,
+            match_id: req.matchId,
+            matchName: matchTitle,
+            scoresheet_url: req.scoresheetUrl || req.scoresheet_url,
+            scoresheetUrl: req.scoresheetUrl || req.scoresheet_url,
+            status: isFulfilled ? "FULFILLED" : "PENDING",
+            is_read: !isFulfilled,
+            created_at: req.fulfilledAt || req.createdAt || new Date().toISOString(),
+          };
+
+          const existIdx = updated.findIndex(
+            (n: any) => (n.notification_id === notifId || n.id === notifId)
+          );
+          if (existIdx >= 0) {
+            updated[existIdx] = { ...updated[existIdx], ...item };
+          } else {
+            updated.unshift(item);
+          }
+        });
+
+        const unreadCount = updated.filter((n: any) => !n.is_read && n.status !== "READ").length;
+        setUnreadNotifCount(unreadCount);
+        return updated;
+      });
+    });
+
+    return () => unsubscribe();
+  }, [coach?.coach_id, coach?.user_id]);
 
   // Current Selected Team
   const currentTeam = useMemo(
@@ -1202,6 +1337,9 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
               jersey_number: Number(p.jersey_number) || 0,
             })),
           });
+          clearAuthMicroCache();
+          clearFirebaseClientCaches();
+          AsyncStorage.removeItem(COACH_DASHBOARD_CACHE_KEY).catch(() => null);
         } catch (err) {
           console.warn("Backend update roster player error:", err);
         }
@@ -1252,6 +1390,9 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
               stroke_style: p.stroke_style,
             })),
           });
+          clearAuthMicroCache();
+          clearFirebaseClientCaches();
+          AsyncStorage.removeItem(COACH_DASHBOARD_CACHE_KEY).catch(() => null);
         } catch (err) {
           console.warn("Backend update roster details error:", err);
         }
@@ -1282,6 +1423,9 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
           jersey_number: Number(p.jersey_number) || 0,
         })),
       });
+      clearAuthMicroCache();
+      clearFirebaseClientCaches();
+      AsyncStorage.removeItem(COACH_DASHBOARD_CACHE_KEY).catch(() => null);
     } catch (err) {
       console.warn("Backend remove player error:", err);
     }
@@ -1309,6 +1453,9 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
           jersey_number: Number(p.jersey_number) || 0,
         })),
       });
+      clearAuthMicroCache();
+      clearFirebaseClientCaches();
+      AsyncStorage.removeItem(COACH_DASHBOARD_CACHE_KEY).catch(() => null);
     } catch (err) {
       console.warn("Backend add players error:", err);
     }
@@ -1386,6 +1533,9 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
           setTeams((prev) => prev.map((t) => (t.team_id === tempId ? mergedTeam : t)));
           setSelectedTeamId(newTeamId);
           await saveTeamOfflineFirst(mergedTeam);
+          clearAuthMicroCache();
+          clearFirebaseClientCaches();
+          AsyncStorage.removeItem(COACH_DASHBOARD_CACHE_KEY).catch(() => null);
         }
       } catch (err) {
         console.warn("Backend team creation sync:", err);
@@ -1659,6 +1809,101 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
     }
   }, []);
 
+  if (accountStatus.toLowerCase() === "rejected") {
+    return (
+      <View style={[styles.container, { backgroundColor: "#0B132B", justifyContent: "center", alignItems: "center", padding: 24 }]}>
+        <StatusBar style="light" />
+        <View style={{ backgroundColor: "#FFFFFF", borderRadius: 8, padding: 24, width: "100%", maxWidth: 420 }}>
+          <View style={{ alignItems: "center", marginBottom: 16 }}>
+            <Ionicons name="alert-circle" size={48} color="#DC2626" />
+            <Text style={{ fontSize: 16, fontWeight: "900", color: "#0B132B", marginTop: 8, textAlign: "center" }}>
+              ACCREDITATION APPLICATION DECLINED
+            </Text>
+          </View>
+
+          <View style={{ backgroundColor: "#FEF2F2", borderWidth: 1, borderColor: "#FCA5A5", borderRadius: 4, padding: 12, marginBottom: 16 }}>
+            <Text style={{ fontSize: 12, fontWeight: "800", color: "#DC2626", marginBottom: 4 }}>
+              REASON FOR DECLINE:
+            </Text>
+            <Text style={{ fontSize: 13, color: "#7F1D1D" }}>
+              {rejectionReason || "Verification credentials provided were invalid or unconfirmed."}
+            </Text>
+          </View>
+
+          <Text style={{ fontSize: 12, color: "#64748B", marginBottom: 16, lineHeight: 18 }}>
+            Your coach profile and user account record are preserved. Dashboard access is restricted until valid credentials are submitted and verified by the system administrator.
+          </Text>
+
+          {reapplyFeedback && (
+            <View style={{ backgroundColor: "#F0FDF4", borderWidth: 1, borderColor: "#86EFAC", borderRadius: 4, padding: 10, marginBottom: 12 }}>
+              <Text style={{ fontSize: 12, fontWeight: "700", color: "#166534" }}>{reapplyFeedback}</Text>
+            </View>
+          )}
+
+          <View style={{ marginBottom: 12 }}>
+            <Text style={{ fontSize: 11, fontWeight: "800", color: "#0B132B", marginBottom: 6 }}>
+              CREDENTIAL / CERTIFICATE LINK:
+            </Text>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <TextInput
+                value={reapplyDocUrl}
+                onChangeText={setReapplyDocUrl}
+                placeholder="https://... or certificate ID"
+                style={{ flex: 1, borderWidth: 1, borderColor: "#CBD5E1", borderRadius: 4, paddingHorizontal: 10, paddingVertical: 8, fontSize: 12 }}
+                autoCapitalize="none"
+              />
+              <TouchableOpacity
+                onPress={() => {
+                  if (reapplyDocUrl.trim()) {
+                    setReapplyDocList((prev) => [...prev, reapplyDocUrl.trim()]);
+                    setReapplyDocUrl("");
+                  }
+                }}
+                style={{ backgroundColor: "#0B132B", paddingHorizontal: 12, justifyContent: "center", borderRadius: 4 }}
+              >
+                <Text style={{ color: "#FFFFFF", fontSize: 11, fontWeight: "800" }}>ADD</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {reapplyDocList.length > 0 && (
+            <View style={{ marginBottom: 12 }}>
+              {reapplyDocList.map((d, i) => (
+                <View key={i} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 4 }}>
+                  <Text style={{ fontSize: 12, color: "#0B132B", flex: 1 }} numberOfLines={1}>{d}</Text>
+                  <TouchableOpacity onPress={() => setReapplyDocList((prev) => prev.filter((_, idx) => idx !== i))}>
+                    <Text style={{ color: "#DC2626", fontSize: 12, fontWeight: "700", marginLeft: 8 }}>Remove</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          )}
+
+          <TouchableOpacity
+            onPress={handleResubmitCredentials}
+            disabled={isReapplying}
+            style={{ backgroundColor: "#0B132B", borderRadius: 4, paddingVertical: 12, alignItems: "center", marginTop: 8 }}
+          >
+            {isReapplying ? (
+              <ActivityIndicator color="#FFFFFF" size="small" />
+            ) : (
+              <Text style={{ color: "#FFFFFF", fontWeight: "900", fontSize: 13, letterSpacing: 0.5 }}>
+                RESUBMIT CREDENTIALS FOR APPROVAL
+              </Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={onLogout}
+            style={{ marginTop: 14, alignItems: "center" }}
+          >
+            <Text style={{ color: "#64748B", fontSize: 12, fontWeight: "700" }}>Log Out</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
@@ -1732,6 +1977,10 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
         <OCRoutput
           rawOCRData={ocrPayload}
           onBack={() => setActiveView("ocr_logging")}
+          onGoHome={() => {
+            setActiveTab("Home");
+            setActiveView("dashboard");
+          }}
           onConfirmSave={async (finalData) => {
             // Accurately compute athlete points sum per team
             const homeAthleteSum = finalData.athlete_overview
@@ -1897,9 +2146,7 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
               }))
             );
 
-            // Immediately redirect straight back to Home/Dashboard view without waiting for network
-            setActiveTab("Home");
-            setActiveView("dashboard");
+            // View redirection is handled after user taps 'Go back to Home' or 3-second delay in OCRoutput modal
 
             // Asynchronous background task: Persist match and player stats to Firestore / Backend silently
             (async () => {
@@ -2157,11 +2404,11 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
                     </Text>
                   </View>
                 ) : (
-                  filteredDashboardPlayers.slice(0, 4).map((player, index) => (
+                  filteredDashboardPlayers.map((player, index) => (
                     <PlayerRowItem
                       key={player.athlete_id}
                       player={player}
-                      isLast={index === Math.min(filteredDashboardPlayers.length, 4) - 1}
+                      isLast={index === filteredDashboardPlayers.length - 1}
                       onViewStats={handleViewStats}
                     />
                   ))
@@ -2615,7 +2862,10 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
                     const isDeclined = titleLower.includes("declined") || bodyLower.includes("declined") || notif.status === "DECLINED" || notif.offer_status === "DECLINED" || notif.inquiry_status === "DECLINED";
                     const isSentByCoach = notif.is_sender === true || notif.sender_role === "Coach" || titleLower.includes("sent") || bodyLower.includes("you sent") || notif.initiated_by === coach?.coach_id || notif.initiated_by === coach?.user_id;
 
-                    const isActionableRecruitment = Boolean(inquiryId || (notif.type === "RECRUITMENT_INQUIRY" && !notif.id?.startsWith("notif_"))) && !isAccepted && !isDeclined && !isSentByCoach && notif.actionable !== false;
+                    const isScoresheetShared = notif.type === "SCORESHEET_SHARED" || Boolean(notif.scoresheet_url || notif.scoresheetUrl);
+                    const hasScoresheetUrl = Boolean(notif.scoresheet_url || notif.scoresheetUrl);
+
+                    const isActionableRecruitment = Boolean(inquiryId || (notif.type === "RECRUITMENT_INQUIRY" && !notif.id?.startsWith("notif_"))) && !isAccepted && !isDeclined && !isSentByCoach && !isScoresheetShared && notif.actionable !== false;
 
                     return (
                       <TouchableOpacity
@@ -2674,7 +2924,76 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
                               <Text style={{ color: "#38BDF8", fontSize: 10, fontWeight: "800" }}>INQUIRY SENT</Text>
                             </View>
                           )}
+                          {isScoresheetShared && (
+                            <View style={{ backgroundColor: "rgba(16, 185, 129, 0.15)", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, borderWidth: 1, borderColor: "#10B981" }}>
+                              <Text style={{ color: "#10B981", fontSize: 10, fontWeight: "800" }}>SCORESHEET READY ✓</Text>
+                            </View>
+                          )}
                         </View>
+
+                        {hasScoresheetUrl && (
+                          <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
+                            <TouchableOpacity
+                              style={{
+                                flex: 1,
+                                backgroundColor: "#10B981",
+                                paddingVertical: 8,
+                                borderRadius: 8,
+                                alignItems: "center",
+                                flexDirection: "row",
+                                justifyContent: "center",
+                                gap: 6,
+                              }}
+                              onPress={() => {
+                                const url = notif.scoresheet_url || notif.scoresheetUrl;
+                                if (url) {
+                                  Linking.openURL(url).catch(() => {
+                                    Alert.alert("Scoresheet", "Unable to open scoresheet link: " + url);
+                                  });
+                                }
+                              }}
+                            >
+                              <Ionicons name="document-text" size={14} color="#080F21" />
+                              <Text style={{ color: "#080F21", fontWeight: "800", fontSize: 12 }}>VIEW / DOWNLOAD</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={{
+                                flex: 1,
+                                backgroundColor: "#1E293B",
+                                borderWidth: 1,
+                                borderColor: "#334155",
+                                paddingVertical: 8,
+                                borderRadius: 8,
+                                alignItems: "center",
+                                flexDirection: "row",
+                                justifyContent: "center",
+                                gap: 6,
+                              }}
+                              onPress={async () => {
+                                try {
+                                  const matchId = notif.match_id || notif.matchId || `match_${Date.now()}`;
+                                  const matchName = notif.matchName || notif.match_name || "Official Match";
+                                  const scoresheetUrl = notif.scoresheet_url || notif.scoresheetUrl;
+                                  await saveMatchOfflineFirst({
+                                    match_id: matchId,
+                                    matchName,
+                                    game_name: matchName,
+                                    scoresheet_url: scoresheetUrl,
+                                    scoresheetUrl,
+                                    audit_status: "REQUEST GRANTED",
+                                    is_certified: true,
+                                  });
+                                  Alert.alert("Import Successful", `Official match record for "${matchName}" has been synchronized to your team records!`);
+                                } catch (e: any) {
+                                  Alert.alert("Import Notice", "Match records are synchronized.");
+                                }
+                              }}
+                            >
+                              <Ionicons name="cloud-download-outline" size={14} color="#00C8FF" />
+                              <Text style={{ color: "#00C8FF", fontWeight: "800", fontSize: 12 }}>SYNC RECORDS</Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
 
                         {isActionableRecruitment && (
                           <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>

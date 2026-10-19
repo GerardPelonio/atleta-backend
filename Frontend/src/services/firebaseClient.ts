@@ -454,8 +454,8 @@ let matchesLastFetched = 0;
 let teamsMemoryCache: any[] | null = null;
 let teamsLastFetched = 0;
 
-const MEMORY_CACHE_TTL_MS = 2 * 60 * 1000; // 2m cache validity before background revalidation
-const SPORTS_MEMORY_CACHE_TTL_MS = 10 * 60 * 1000; // 10m cache validity for sports config catalog
+const MEMORY_CACHE_TTL_MS = 3000; // 3s snappy debounce to prevent redundant in-flight queries while always staying fresh
+const SPORTS_MEMORY_CACHE_TTL_MS = 5000; // 5s cache validity for sports config catalog
 
 export function clearFirebaseClientCaches() {
   sportsMemoryCache = null;
@@ -577,34 +577,43 @@ async function revalidateTeamsInBackground(): Promise<void> {
  * Fetch athletes with offline support.
  * Cache-first (instant 0-10ms) -> background revalidation -> fast REST -> Firestore -> AsyncStorage.
  */
-export async function getAthletesOfflineFirst(sportCategory?: string): Promise<any[]> {
-  // 1. Instant Memory Cache (0ms)
-  if (athletesMemoryCache && athletesMemoryCache.length > 0) {
-    if (Date.now() - athletesLastFetched > MEMORY_CACHE_TTL_MS) {
-      revalidateAthletesInBackground().catch(() => null);
-    }
-    return athletesMemoryCache;
+export async function getAthletesOfflineFirst(sportCategory?: string, forceRefresh: boolean = false): Promise<any[]> {
+  const filterBySport = (list: any[]) => {
+    if (!sportCategory || sportCategory.toUpperCase() === 'ALL') return list;
+    const cat = sportCategory.toUpperCase().trim();
+    return list.filter((a: any) => {
+      const aSport = String(a.sport_type || a.sport_category || a.category || '').toUpperCase();
+      return aSport === cat || aSport.includes(cat) || cat.includes(aSport);
+    });
+  };
+
+  // 1. Instant Memory Cache (if not forcing refresh and memory cache is fresh)
+  if (!forceRefresh && athletesMemoryCache && athletesMemoryCache.length > 0 && Date.now() - athletesLastFetched < MEMORY_CACHE_TTL_MS) {
+    return filterBySport(athletesMemoryCache);
   }
 
   // 2. Fast Local AsyncStorage Cache (<10ms)
-  try {
-    const cached = await AsyncStorage.getItem(OFFLINE_ATHLETES_CACHE_KEY);
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        athletesMemoryCache = parsed;
-        athletesLastFetched = Date.now();
-        revalidateAthletesInBackground().catch(() => null);
-        return parsed;
+  if (!forceRefresh) {
+    try {
+      const cached = await AsyncStorage.getItem(OFFLINE_ATHLETES_CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          athletesMemoryCache = parsed;
+          athletesLastFetched = Date.now();
+          return filterBySport(parsed);
+        }
       }
-    }
-  } catch (_) {}
+    } catch (_) {}
+  }
 
-  // 3. Fast Network Fetch with Snappy Timeout (1.8s max)
+  // 3. Fast Network Fetch with Snappy Timeout (6.0s max)
   try {
     const token = await getStoredAuthToken();
     const data = await quickFetchJson(`${API_BASE}/coaches/athletes`, {
       Accept: "application/json",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     }, 6000);
 
@@ -613,7 +622,7 @@ export async function getAthletesOfflineFirst(sportCategory?: string): Promise<a
       athletesMemoryCache = list;
       athletesLastFetched = Date.now();
       AsyncStorage.setItem(OFFLINE_ATHLETES_CACHE_KEY, JSON.stringify(list)).catch(() => null);
-      return list;
+      return filterBySport(list);
     }
   } catch (_) {}
 
@@ -624,7 +633,7 @@ export async function getAthletesOfflineFirst(sportCategory?: string): Promise<a
       const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       athletesMemoryCache = list;
       athletesLastFetched = Date.now();
-      return list;
+      return filterBySport(list);
     }
   } catch (_) {
     // Client-side direct Firestore access is restricted by security rules (REST API is primary)
@@ -708,34 +717,34 @@ export async function getSportsOfflineFirst(forceRefresh: boolean = false): Prom
  * Fetch matches with offline support.
  * Cache-first (instant 0-10ms) -> background revalidation -> fast REST -> Firestore -> AsyncStorage.
  */
-export async function getMatchesOfflineFirst(): Promise<any[]> {
+export async function getMatchesOfflineFirst(forceRefresh: boolean = false): Promise<any[]> {
   // 1. Instant Memory Cache (0ms)
-  if (matchesMemoryCache && matchesMemoryCache.length > 0) {
-    if (Date.now() - matchesLastFetched > MEMORY_CACHE_TTL_MS) {
-      revalidateMatchesInBackground().catch(() => null);
-    }
+  if (!forceRefresh && matchesMemoryCache && matchesMemoryCache.length > 0 && Date.now() - matchesLastFetched < MEMORY_CACHE_TTL_MS) {
     return matchesMemoryCache;
   }
 
   // 2. Fast Local AsyncStorage Cache (<10ms)
-  try {
-    const cached = await AsyncStorage.getItem(OFFLINE_MATCHES_CACHE_KEY);
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        matchesMemoryCache = parsed;
-        matchesLastFetched = Date.now();
-        revalidateMatchesInBackground().catch(() => null);
-        return parsed;
+  if (!forceRefresh) {
+    try {
+      const cached = await AsyncStorage.getItem(OFFLINE_MATCHES_CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          matchesMemoryCache = parsed;
+          matchesLastFetched = Date.now();
+          return parsed;
+        }
       }
-    }
-  } catch (_) {}
+    } catch (_) {}
+  }
 
-  // 3. Fast Network Fetch (1.8s timeout)
+  // 3. Fast Network Fetch (6.0s timeout)
   try {
     const token = await getStoredAuthToken();
     const data = await quickFetchJson(`${API_BASE}/matches`, {
       Accept: "application/json",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     }, 6000);
 
@@ -1069,36 +1078,36 @@ export async function getCoachProfileOfflineFirst(coachIdOrUid?: string): Promis
  * Fetch teams with offline support.
  * Cache-first (instant 0-10ms) -> background revalidation -> fast REST -> direct Firestore -> AsyncStorage.
  */
-export async function getTeamsOfflineFirst(): Promise<any[]> {
+export async function getTeamsOfflineFirst(forceRefresh: boolean = false): Promise<any[]> {
   // 1. Instant Memory Cache (0ms)
-  if (teamsMemoryCache && teamsMemoryCache.length > 0) {
-    if (Date.now() - teamsLastFetched > MEMORY_CACHE_TTL_MS) {
-      revalidateTeamsInBackground().catch(() => null);
-    }
+  if (!forceRefresh && teamsMemoryCache && teamsMemoryCache.length > 0 && Date.now() - teamsLastFetched < MEMORY_CACHE_TTL_MS) {
     return teamsMemoryCache;
   }
 
   // 2. Fast Local AsyncStorage Cache (<10ms)
-  try {
-    const cached = await AsyncStorage.getItem(OFFLINE_TEAMS_CACHE_KEY);
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        teamsMemoryCache = parsed;
-        teamsLastFetched = Date.now();
-        revalidateTeamsInBackground().catch(() => null);
-        return parsed;
+  if (!forceRefresh) {
+    try {
+      const cached = await AsyncStorage.getItem(OFFLINE_TEAMS_CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          teamsMemoryCache = parsed;
+          teamsLastFetched = Date.now();
+          return parsed;
+        }
       }
-    }
-  } catch (_) {}
+    } catch (_) {}
+  }
 
-  // 3. Fast Network Fetch with Snappy Timeout (1.8s max)
+  // 3. Fast Network Fetch with Snappy Timeout (6.0s max)
   try {
     const token = await getStoredAuthToken();
     const data = await quickFetchJson(`${API_BASE}/teams?all=true`, {
       Accept: "application/json",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    }, 1800);
+    }, 6000);
 
     const list = Array.isArray(data?.teams) ? data.teams : Array.isArray(data) ? data : [];
     if (list.length > 0) {

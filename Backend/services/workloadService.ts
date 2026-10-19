@@ -7,8 +7,8 @@ import {
 import { AthleteWorkloadAnalytics } from '../models/athleteModel';
 import { eventBus, EVENTS } from '../utils/eventBus';
 
-// In-memory cache for workload analytics queries (TTL: 60 seconds)
-const CACHE_TTL_MS = 60 * 1000;
+// In-memory cache for workload analytics queries (TTL: 2 seconds)
+const CACHE_TTL_MS = 2000;
 const workloadCache = new Map<string, { data: WorkloadAnalyticsResult; cachedAt: number }>();
 
 // Listen for new sRPE logs to invalidate cache

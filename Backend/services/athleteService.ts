@@ -379,8 +379,8 @@ export async function uploadAthleteDocument(
   return getAthleteProfile(canonicalAthleteId);
 }
 
-// In-memory cache for athlete home summary (300 seconds TTL)
-const HOME_CACHE_TTL_MS = 300 * 1000;
+// In-memory cache for athlete home summary (2 seconds TTL)
+const HOME_CACHE_TTL_MS = 2000;
 const homeCache = new Map<string, { data: AthleteHomeSummary; cachedAt: number }>();
 
 // Listen for match certification and sRPE logged events to invalidate cache

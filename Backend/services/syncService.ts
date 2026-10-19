@@ -588,7 +588,7 @@ export async function getCoachOfflineSnapshotService(coachId: string): Promise<C
         ...snapshotData,
       };
     },
-    60, // 60s cache TTL
+    2, // 2s snappy cache TTL
     ['snapshot', `coach_${coachId}`, 'matches', 'teams']
   );
 }
@@ -629,7 +629,7 @@ export async function getAthleteOfflineSnapshotService(athleteId: string): Promi
         ...snapshotData,
       };
     },
-    60, // 60s cache TTL
+    2, // 2s snappy cache TTL
     ['snapshot', `athlete_${athleteId}`]
   );
 }

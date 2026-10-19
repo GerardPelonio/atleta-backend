@@ -245,7 +245,7 @@ export async function getAllSportsService(onlyActive: boolean = false): Promise<
 
       return normalizedSports;
     },
-    600, // 10 minutes cache TTL
+    5, // 5s cache TTL
     ['sports', 'catalog']
   );
 

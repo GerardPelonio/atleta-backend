@@ -70,11 +70,15 @@ export async function createFirebaseAuthUser(params: {
   } catch (adminErr: any) {
     if (adminErr.code === 'auth/email-already-exists' || adminErr.code === 'auth/email-already-in-use') {
       const cleanEmail = params.email.trim().toLowerCase();
-      const existingUserSnap = await db.collection('Users').where('email', '==', cleanEmail).limit(1).get().catch(() => null);
+      let existingUserSnap = await db.collection('Users').where('email', '==', cleanEmail).limit(1).get().catch(() => null);
+      if ((!existingUserSnap || existingUserSnap.empty) && params.email.trim() !== cleanEmail) {
+        existingUserSnap = await db.collection('Users').where('email', '==', params.email.trim()).limit(1).get().catch(() => null);
+      }
       if (!existingUserSnap || existingUserSnap.empty) {
         try {
           console.log(`🧹 Detected orphaned Firebase Auth user for ${cleanEmail} (deleted in Firestore). Cleaning up and recreating.`);
-          const existingAuth = await auth.getUserByEmail(params.email).catch(() => null);
+          const existingAuth = (await auth.getUserByEmail(params.email).catch(() => null)) ||
+                               (await auth.getUserByEmail(cleanEmail).catch(() => null));
           if (existingAuth) {
             await auth.deleteUser(existingAuth.uid);
             const freshUser = await auth.createUser({
@@ -115,10 +119,14 @@ export async function createFirebaseAuthUser(params: {
       if (!res.ok || !data.localId) {
         if (data.error?.message?.includes('EMAIL_EXISTS')) {
           const cleanEmail = params.email.trim().toLowerCase();
-          const existingUserSnap = await db.collection('Users').where('email', '==', cleanEmail).limit(1).get().catch(() => null);
+          let existingUserSnap = await db.collection('Users').where('email', '==', cleanEmail).limit(1).get().catch(() => null);
+          if ((!existingUserSnap || existingUserSnap.empty) && params.email.trim() !== cleanEmail) {
+            existingUserSnap = await db.collection('Users').where('email', '==', params.email.trim()).limit(1).get().catch(() => null);
+          }
           if (!existingUserSnap || existingUserSnap.empty) {
             try {
-              const existingAuth = await auth.getUserByEmail(params.email).catch(() => null);
+              const existingAuth = (await auth.getUserByEmail(params.email).catch(() => null)) ||
+                                   (await auth.getUserByEmail(cleanEmail).catch(() => null));
               if (existingAuth) {
                 await auth.deleteUser(existingAuth.uid);
                 const freshUser = await auth.createUser({
@@ -187,7 +195,10 @@ export async function registerUserService(
   const cleanEmail = email.trim().toLowerCase();
 
   // 1. Check if email already exists in Firestore Users collection
-  const existingUserSnap = await db.collection('Users').where('email', '==', cleanEmail).limit(1).get().catch(() => null);
+  let existingUserSnap = await db.collection('Users').where('email', '==', cleanEmail).limit(1).get().catch(() => null);
+  if ((!existingUserSnap || existingUserSnap.empty) && email !== cleanEmail) {
+    existingUserSnap = await db.collection('Users').where('email', '==', email).limit(1).get().catch(() => null);
+  }
   if (existingUserSnap && !existingUserSnap.empty) {
     const err: any = new Error('Email already in use. Please log in using your existing credentials.');
     err.code = 'auth/email-already-in-use';

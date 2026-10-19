@@ -31,10 +31,10 @@ const rosterAthleteCache = new Map<string, CachedItem<RosterAthlete>>();
 const coachTeamsCache = new Map<string, CachedItem<TeamSummary[]>>();
 const coachManagedAthletesCache = new Map<string, CachedItem<any[]>>();
 
-const TEAM_CACHE_TTL_MS = 60 * 1000; // 60 seconds
-const ATHLETE_CACHE_TTL_MS = 120 * 1000; // 120 seconds
-const COACH_TEAMS_TTL_MS = 60 * 1000; // 60 seconds
-const COACH_ATHLETES_TTL_MS = 60 * 1000; // 60 seconds
+const TEAM_CACHE_TTL_MS = 2000; // 2s snappy debounce
+const ATHLETE_CACHE_TTL_MS = 2000; // 2s snappy debounce
+const COACH_TEAMS_TTL_MS = 2000; // 2s snappy debounce
+const COACH_ATHLETES_TTL_MS = 2000; // 2s snappy debounce
 
 export function invalidateTeamCache() {
   teamDirectoryCache.clear();

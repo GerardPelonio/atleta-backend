@@ -454,8 +454,8 @@ let matchesLastFetched = 0;
 let teamsMemoryCache: any[] | null = null;
 let teamsLastFetched = 0;
 
-const MEMORY_CACHE_TTL_MS = 2 * 60 * 1000; // 2m cache validity before background revalidation
-const SPORTS_MEMORY_CACHE_TTL_MS = 10 * 60 * 1000; // 10m cache validity for sports config catalog
+const MEMORY_CACHE_TTL_MS = 3000; // 3s snappy debounce to prevent redundant in-flight queries while always staying fresh
+const SPORTS_MEMORY_CACHE_TTL_MS = 5000; // 5s cache validity for sports config catalog
 
 export function clearFirebaseClientCaches() {
   sportsMemoryCache = null;
@@ -466,7 +466,22 @@ export function clearFirebaseClientCaches() {
   matchesLastFetched = 0;
   teamsMemoryCache = null;
   teamsLastFetched = 0;
-  AsyncStorage.removeItem(OFFLINE_SPORTS_CACHE_KEY).catch(() => null);
+  AsyncStorage.multiRemove([
+    OFFLINE_SPORTS_CACHE_KEY,
+    OFFLINE_MATCHES_CACHE_KEY,
+    OFFLINE_ATHLETES_CACHE_KEY,
+    OFFLINE_TEAMS_CACHE_KEY,
+    OFFLINE_ATHLETE_PROFILE_CACHE_KEY,
+    OFFLINE_COACH_PROFILE_CACHE_KEY,
+    "atleta_coach_dashboard_cache",
+    "atleta_discovery_cache",
+    "atleta_offline_coach_profile_cache",
+    "atleta_offline_matches_cache",
+    "atleta_offline_athletes_cache",
+    "atleta_offline_teams_cache",
+    "atleta_official_matches_cache",
+    "atleta_discovery_snapshot_cache",
+  ]).catch(() => null);
 }
 
 async function quickFetchJson(url: string, headers: any, timeoutMs: number = 6000): Promise<any> {
@@ -562,34 +577,43 @@ async function revalidateTeamsInBackground(): Promise<void> {
  * Fetch athletes with offline support.
  * Cache-first (instant 0-10ms) -> background revalidation -> fast REST -> Firestore -> AsyncStorage.
  */
-export async function getAthletesOfflineFirst(sportCategory?: string): Promise<any[]> {
-  // 1. Instant Memory Cache (0ms)
-  if (athletesMemoryCache && athletesMemoryCache.length > 0) {
-    if (Date.now() - athletesLastFetched > MEMORY_CACHE_TTL_MS) {
-      revalidateAthletesInBackground().catch(() => null);
-    }
-    return athletesMemoryCache;
+export async function getAthletesOfflineFirst(sportCategory?: string, forceRefresh: boolean = false): Promise<any[]> {
+  const filterBySport = (list: any[]) => {
+    if (!sportCategory || sportCategory.toUpperCase() === 'ALL') return list;
+    const cat = sportCategory.toUpperCase().trim();
+    return list.filter((a: any) => {
+      const aSport = String(a.sport_type || a.sport_category || a.category || '').toUpperCase();
+      return aSport === cat || aSport.includes(cat) || cat.includes(aSport);
+    });
+  };
+
+  // 1. Instant Memory Cache (if not forcing refresh and memory cache is fresh)
+  if (!forceRefresh && athletesMemoryCache && athletesMemoryCache.length > 0 && Date.now() - athletesLastFetched < MEMORY_CACHE_TTL_MS) {
+    return filterBySport(athletesMemoryCache);
   }
 
   // 2. Fast Local AsyncStorage Cache (<10ms)
-  try {
-    const cached = await AsyncStorage.getItem(OFFLINE_ATHLETES_CACHE_KEY);
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        athletesMemoryCache = parsed;
-        athletesLastFetched = Date.now();
-        revalidateAthletesInBackground().catch(() => null);
-        return parsed;
+  if (!forceRefresh) {
+    try {
+      const cached = await AsyncStorage.getItem(OFFLINE_ATHLETES_CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          athletesMemoryCache = parsed;
+          athletesLastFetched = Date.now();
+          return filterBySport(parsed);
+        }
       }
-    }
-  } catch (_) {}
+    } catch (_) {}
+  }
 
-  // 3. Fast Network Fetch with Snappy Timeout (1.8s max)
+  // 3. Fast Network Fetch with Snappy Timeout (6.0s max)
   try {
     const token = await getStoredAuthToken();
     const data = await quickFetchJson(`${API_BASE}/coaches/athletes`, {
       Accept: "application/json",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     }, 6000);
 
@@ -598,7 +622,7 @@ export async function getAthletesOfflineFirst(sportCategory?: string): Promise<a
       athletesMemoryCache = list;
       athletesLastFetched = Date.now();
       AsyncStorage.setItem(OFFLINE_ATHLETES_CACHE_KEY, JSON.stringify(list)).catch(() => null);
-      return list;
+      return filterBySport(list);
     }
   } catch (_) {}
 
@@ -609,7 +633,7 @@ export async function getAthletesOfflineFirst(sportCategory?: string): Promise<a
       const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       athletesMemoryCache = list;
       athletesLastFetched = Date.now();
-      return list;
+      return filterBySport(list);
     }
   } catch (_) {
     // Client-side direct Firestore access is restricted by security rules (REST API is primary)
@@ -693,34 +717,34 @@ export async function getSportsOfflineFirst(forceRefresh: boolean = false): Prom
  * Fetch matches with offline support.
  * Cache-first (instant 0-10ms) -> background revalidation -> fast REST -> Firestore -> AsyncStorage.
  */
-export async function getMatchesOfflineFirst(): Promise<any[]> {
+export async function getMatchesOfflineFirst(forceRefresh: boolean = false): Promise<any[]> {
   // 1. Instant Memory Cache (0ms)
-  if (matchesMemoryCache && matchesMemoryCache.length > 0) {
-    if (Date.now() - matchesLastFetched > MEMORY_CACHE_TTL_MS) {
-      revalidateMatchesInBackground().catch(() => null);
-    }
+  if (!forceRefresh && matchesMemoryCache && matchesMemoryCache.length > 0 && Date.now() - matchesLastFetched < MEMORY_CACHE_TTL_MS) {
     return matchesMemoryCache;
   }
 
   // 2. Fast Local AsyncStorage Cache (<10ms)
-  try {
-    const cached = await AsyncStorage.getItem(OFFLINE_MATCHES_CACHE_KEY);
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        matchesMemoryCache = parsed;
-        matchesLastFetched = Date.now();
-        revalidateMatchesInBackground().catch(() => null);
-        return parsed;
+  if (!forceRefresh) {
+    try {
+      const cached = await AsyncStorage.getItem(OFFLINE_MATCHES_CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          matchesMemoryCache = parsed;
+          matchesLastFetched = Date.now();
+          return parsed;
+        }
       }
-    }
-  } catch (_) {}
+    } catch (_) {}
+  }
 
-  // 3. Fast Network Fetch (1.8s timeout)
+  // 3. Fast Network Fetch (6.0s timeout)
   try {
     const token = await getStoredAuthToken();
     const data = await quickFetchJson(`${API_BASE}/matches`, {
       Accept: "application/json",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     }, 6000);
 
@@ -1054,36 +1078,36 @@ export async function getCoachProfileOfflineFirst(coachIdOrUid?: string): Promis
  * Fetch teams with offline support.
  * Cache-first (instant 0-10ms) -> background revalidation -> fast REST -> direct Firestore -> AsyncStorage.
  */
-export async function getTeamsOfflineFirst(): Promise<any[]> {
+export async function getTeamsOfflineFirst(forceRefresh: boolean = false): Promise<any[]> {
   // 1. Instant Memory Cache (0ms)
-  if (teamsMemoryCache && teamsMemoryCache.length > 0) {
-    if (Date.now() - teamsLastFetched > MEMORY_CACHE_TTL_MS) {
-      revalidateTeamsInBackground().catch(() => null);
-    }
+  if (!forceRefresh && teamsMemoryCache && teamsMemoryCache.length > 0 && Date.now() - teamsLastFetched < MEMORY_CACHE_TTL_MS) {
     return teamsMemoryCache;
   }
 
   // 2. Fast Local AsyncStorage Cache (<10ms)
-  try {
-    const cached = await AsyncStorage.getItem(OFFLINE_TEAMS_CACHE_KEY);
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        teamsMemoryCache = parsed;
-        teamsLastFetched = Date.now();
-        revalidateTeamsInBackground().catch(() => null);
-        return parsed;
+  if (!forceRefresh) {
+    try {
+      const cached = await AsyncStorage.getItem(OFFLINE_TEAMS_CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          teamsMemoryCache = parsed;
+          teamsLastFetched = Date.now();
+          return parsed;
+        }
       }
-    }
-  } catch (_) {}
+    } catch (_) {}
+  }
 
-  // 3. Fast Network Fetch with Snappy Timeout (1.8s max)
+  // 3. Fast Network Fetch with Snappy Timeout (6.0s max)
   try {
     const token = await getStoredAuthToken();
     const data = await quickFetchJson(`${API_BASE}/teams?all=true`, {
       Accept: "application/json",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    }, 1800);
+    }, 6000);
 
     const list = Array.isArray(data?.teams) ? data.teams : Array.isArray(data) ? data : [];
     if (list.length > 0) {
@@ -1180,6 +1204,161 @@ export async function toggleFirestoreNetwork(online: boolean): Promise<void> {
     await enableNetwork(db);
   } else {
     await disableNetwork(db);
+  }
+}
+
+// ─── SCORESHEET REQUEST PIPELINE (FIRESTORE SYNC) ──────────────────────────
+
+export interface ScoresheetRequestRecord {
+  id: string;
+  requestId: string;
+  coachId: string;
+  coachName: string;
+  teamId: string;
+  matchId: string;
+  matchName: string;
+  sportType?: string;
+  status: 'pending' | 'fulfilled';
+  createdAt: any;
+  updatedAt?: any;
+  scoresheetUrl?: string;
+  scoresheet_url?: string;
+  fulfilledAt?: string;
+  fulfilledByOfficialName?: string;
+}
+
+/**
+ * Creates a scoresheet request directly in Firestore `scoresheetRequests` collection,
+ * and simultaneously informs the backend API.
+ */
+export async function submitScoresheetRequestOfflineFirst(payload: {
+  matchId: string;
+  matchName?: string;
+  teamId?: string;
+  coachId?: string;
+  coachName?: string;
+  sportType?: string;
+}): Promise<ScoresheetRequestRecord> {
+  const matchId = String(payload.matchId || '');
+  const coachId = String(payload.coachId || 'coach_default');
+  const coachName = String(payload.coachName || 'Coach');
+  const teamId = String(payload.teamId || 'team_default');
+  const matchName = String(payload.matchName || `Match ${matchId}`);
+  const sportType = String(payload.sportType || 'BASKETBALL');
+
+  const requestId = `req_${matchId}_${coachId.replace(/[^a-zA-Z0-9_-]/g, '')}`;
+  const now = new Date().toISOString();
+
+  const docData: ScoresheetRequestRecord = {
+    id: requestId,
+    requestId,
+    coachId,
+    coachName,
+    teamId,
+    matchId,
+    matchName,
+    sportType,
+    status: 'pending',
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  // 1. Write directly to Firestore `scoresheetRequests` collection (persists offline via persistentLocalCache)
+  try {
+    const reqDocRef = doc(db, 'scoresheetRequests', requestId);
+    await setDoc(reqDocRef, {
+      ...docData,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  } catch (fsErr) {
+    console.warn('[ScoresheetRequest] Direct Firestore write warning:', fsErr);
+  }
+
+  // 2. Also update Match_Logs doc locally / in Firestore
+  try {
+    const matchDocRef = doc(db, 'Match_Logs', matchId);
+    await setDoc(matchDocRef, {
+      audit_status: 'PENDING REQUEST',
+      verification_status: 'Pending',
+      scoresheet_request_status: 'pending',
+    }, { merge: true });
+  } catch (_) {}
+
+  // 3. Inform Backend API asynchronously
+  try {
+    const token = await getStoredAuthToken();
+    const headers = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+    await fetch(`${API_BASE}/scoresheets/request`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(docData),
+    }).catch(() => {
+      return fetch(`${API_BASE}/matches/${matchId}/audit-request`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(docData),
+      });
+    });
+  } catch (_) {}
+
+  return docData;
+}
+
+/**
+ * Real-time listener for coach's scoresheet requests. Emits updates whenever
+ * an official uploads a scoresheet and fulfills the request.
+ */
+export function listenToCoachScoresheetRequests(
+  coachId: string,
+  onUpdate: (requests: ScoresheetRequestRecord[]) => void
+): () => void {
+  if (!coachId) return () => {};
+
+  const cleanCoachId = coachId.replace(/^coach_/, '');
+  const possibleIds = [coachId, cleanCoachId, `coach_${cleanCoachId}`];
+
+  try {
+    const q = query(
+      collection(db, 'scoresheetRequests'),
+      where('coachId', 'in', possibleIds)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const results: ScoresheetRequestRecord[] = [];
+      snapshot.forEach((d) => {
+        const data = d.data();
+        results.push({
+          id: d.id,
+          requestId: d.id,
+          coachId: data.coachId,
+          coachName: data.coachName,
+          teamId: data.teamId,
+          matchId: data.matchId,
+          matchName: data.matchName,
+          sportType: data.sportType,
+          status: data.status,
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt,
+          scoresheetUrl: data.scoresheetUrl || data.scoresheet_url,
+          scoresheet_url: data.scoresheet_url || data.scoresheetUrl,
+          fulfilledAt: data.fulfilledAt,
+          fulfilledByOfficialName: data.fulfilledByOfficialName,
+        });
+      });
+      onUpdate(results);
+    }, (err) => {
+      console.warn('[ScoresheetRequests] onSnapshot error:', err);
+    });
+
+    return unsubscribe;
+  } catch (e) {
+    console.warn('[ScoresheetRequests] Setup listener failed:', e);
+    return () => {};
   }
 }
 

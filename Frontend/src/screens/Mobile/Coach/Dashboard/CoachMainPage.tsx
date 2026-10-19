@@ -15,7 +15,7 @@ import styles from "./styles/CoachMainPage";
 import { StatusBar } from "expo-status-bar";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { requestAuthenticatedJson, getStoredAuthToken, API_BASE } from "../../Authentication/authShared";
+import { requestAuthenticatedJson, getStoredAuthToken, API_BASE, clearAuthMicroCache } from "../../Authentication/authShared";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Data Types & Mock Testing Data
@@ -65,6 +65,7 @@ import {
   saveTeamOfflineFirst,
   deleteTeamOfflineFirst,
   listenToCoachScoresheetRequests,
+  clearFirebaseClientCaches,
 } from "../../../../services/firebaseClient";
 import { calculatePlayerRating } from "../Performance/performanceUtils";
 
@@ -608,8 +609,13 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
       }
     }, 8500);
 
-    const fetchCoachDashboardData = async () => {
+    const fetchCoachDashboardData = async (forceFresh = false) => {
       try {
+        if (forceFresh) {
+          clearAuthMicroCache();
+          clearFirebaseClientCaches();
+          await AsyncStorage.removeItem(COACH_DASHBOARD_CACHE_KEY).catch(() => null);
+        }
         const [
           profileRes,
           teamsRes,
@@ -622,15 +628,15 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
           offlineAthletes,
           offlineProfileRes,
         ]: [any, any, any, any, any, any, any, any, any, any] = await Promise.all([
-          withSyncTimeout(requestAuthenticatedJson("/coaches/profile").catch(() => null)),
-          withSyncTimeout(requestAuthenticatedJson("/teams").catch(() => null)),
-          withSyncTimeout(requestAuthenticatedJson("/sync/coach-snapshot").catch(() => null)),
-          withSyncTimeout(requestAuthenticatedJson("/matches").catch(() => null)),
-          withSyncTimeout(requestAuthenticatedJson("/coaches/athletes").catch(() => null)),
-          withSyncTimeout(requestAuthenticatedJson("/notifications").catch(() => null)),
-          withSyncTimeout(getSportsOfflineFirst().catch(() => []), 1500, []),
-          withSyncTimeout(getMatchesOfflineFirst().catch(() => []), 1500, []),
-          withSyncTimeout(getAthletesOfflineFirst().catch(() => []), 1500, []),
+          withSyncTimeout(requestAuthenticatedJson("/coaches/profile", "GET", undefined, forceFresh).catch(() => null)),
+          withSyncTimeout(requestAuthenticatedJson("/teams", "GET", undefined, forceFresh).catch(() => null)),
+          withSyncTimeout(requestAuthenticatedJson("/sync/coach-snapshot", "GET", undefined, forceFresh).catch(() => null)),
+          withSyncTimeout(requestAuthenticatedJson("/matches", "GET", undefined, forceFresh).catch(() => null)),
+          withSyncTimeout(requestAuthenticatedJson("/coaches/athletes", "GET", undefined, forceFresh).catch(() => null)),
+          withSyncTimeout(requestAuthenticatedJson("/notifications", "GET", undefined, forceFresh).catch(() => null)),
+          withSyncTimeout(getSportsOfflineFirst(forceFresh).catch(() => []), 1500, []),
+          withSyncTimeout(getMatchesOfflineFirst(forceFresh).catch(() => []), 1500, []),
+          withSyncTimeout(getAthletesOfflineFirst(undefined, forceFresh).catch(() => []), 1500, []),
           withSyncTimeout(getCoachProfileOfflineFirst().catch(() => null), 1500, null),
         ]);
 
@@ -1331,6 +1337,9 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
               jersey_number: Number(p.jersey_number) || 0,
             })),
           });
+          clearAuthMicroCache();
+          clearFirebaseClientCaches();
+          AsyncStorage.removeItem(COACH_DASHBOARD_CACHE_KEY).catch(() => null);
         } catch (err) {
           console.warn("Backend update roster player error:", err);
         }
@@ -1381,6 +1390,9 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
               stroke_style: p.stroke_style,
             })),
           });
+          clearAuthMicroCache();
+          clearFirebaseClientCaches();
+          AsyncStorage.removeItem(COACH_DASHBOARD_CACHE_KEY).catch(() => null);
         } catch (err) {
           console.warn("Backend update roster details error:", err);
         }
@@ -1411,6 +1423,9 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
           jersey_number: Number(p.jersey_number) || 0,
         })),
       });
+      clearAuthMicroCache();
+      clearFirebaseClientCaches();
+      AsyncStorage.removeItem(COACH_DASHBOARD_CACHE_KEY).catch(() => null);
     } catch (err) {
       console.warn("Backend remove player error:", err);
     }
@@ -1438,6 +1453,9 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
           jersey_number: Number(p.jersey_number) || 0,
         })),
       });
+      clearAuthMicroCache();
+      clearFirebaseClientCaches();
+      AsyncStorage.removeItem(COACH_DASHBOARD_CACHE_KEY).catch(() => null);
     } catch (err) {
       console.warn("Backend add players error:", err);
     }
@@ -1515,6 +1533,9 @@ const DEFAULT_EMPTY_PERF_ATHLETE: AthletePerformanceProfile = {
           setTeams((prev) => prev.map((t) => (t.team_id === tempId ? mergedTeam : t)));
           setSelectedTeamId(newTeamId);
           await saveTeamOfflineFirst(mergedTeam);
+          clearAuthMicroCache();
+          clearFirebaseClientCaches();
+          AsyncStorage.removeItem(COACH_DASHBOARD_CACHE_KEY).catch(() => null);
         }
       } catch (err) {
         console.warn("Backend team creation sync:", err);

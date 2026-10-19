@@ -49,13 +49,13 @@ export async function getPendingValidationsHandler(req: AuthRequest, res: Respon
       return;
     }
 
-    res.setHeader('Cache-Control', 'public, max-age=10, stale-while-revalidate=30');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
 
     const cacheKey = `pending_validations`;
     let pendingValidations = serverCache.get<any[]>(cacheKey);
     if (!pendingValidations) {
       pendingValidations = await getPendingValidationsService();
-      serverCache.set(cacheKey, pendingValidations, 20, ['validations', 'matches']);
+      serverCache.set(cacheKey, pendingValidations, 2, ['validations', 'matches']);
     }
 
     res.status(200).json(pendingValidations || []);

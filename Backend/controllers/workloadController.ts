@@ -78,12 +78,12 @@ export async function getWorkload(req: AuthRequest, res: Response): Promise<void
 
     if (!analytics) {
       const summary = await getAthleteWorkloadSummary(String(athleteId));
-      res.set('Cache-Control', 'private, max-age=60');
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
       res.status(200).json(summary);
       return;
     }
 
-    res.set('Cache-Control', 'private, max-age=60');
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.set('X-Response-Time-Ms', String(responseTimeMs));
     res.status(200).json(analytics);
   } catch (error: any) {

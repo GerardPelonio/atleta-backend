@@ -67,6 +67,38 @@ export const AUTH_ROLE_KEY = (
 export const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 25000;
 
+export function parseJwtPayload(token?: string): Record<string, any> | null {
+  try {
+    if (!token || typeof token !== "string" || !token.includes(".")) return null;
+    const parts = token.split(".");
+    if (parts.length < 2) return null;
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+    let jsonStr = "";
+    if (typeof (globalThis as any).atob === "function") {
+      jsonStr = (globalThis as any).atob(base64);
+    } else {
+      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+      let str = base64.replace(/=+$/, "");
+      let output = "";
+      for (let bc = 0, bs = 0, buffer: any, idx = 0; (buffer = str.charAt(idx++)); ~buffer && ((bs = bc % 4 ? bs * 64 + buffer : buffer), bc++ % 4) ? (output += String.fromCharCode(255 & (bs >> ((-2 * bc) & 6)))) : 0) {
+        buffer = chars.indexOf(buffer);
+      }
+      jsonStr = output;
+    }
+    return JSON.parse(decodeURIComponent(escape(jsonStr)));
+  } catch (_) {
+    try {
+      const parts = token!.split(".");
+      const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      const raw = (globalThis as any).atob ? (globalThis as any).atob(b64) : "";
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+}
+
 // Types
 export type BannerTone = "error" | "success" | "info";
 export type AuthRole = "athlete" | "coach";
@@ -137,7 +169,7 @@ export const coachSignupSchema = z.object({
     z.number().int().min(0, "Years of experience must be at least 0.").max(60, "Years of experience cannot exceed 60.")
   ),
   current_institution: z.string().trim().min(1, "Current institution is required.").max(255, "Current institution is too long."),
-  regional_affiliation: z.string().trim().min(1, "Regional affiliation is required.").max(255, "Regional affiliation is too long."),
+  regional_affiliation: z.string().trim().max(255, "Regional affiliation is too long.").optional().or(z.literal("")),
   national_sports_league: z.string().trim().max(255, "League name is too long.").optional().or(z.literal("")),
   eligible_documents: z
     .object({
@@ -265,8 +297,14 @@ async function withRequestTimeout<T>(request: (signal: AbortSignal) => Promise<T
 async function fetchApi(path: string, options: RequestInit) {
   const url = `${CLOUD_PROD_API}${path}`;
 
+  const headers = {
+    "Cache-Control": "no-cache",
+    Pragma: "no-cache",
+    ...(options.headers || {}),
+  };
+
   const response = await withRequestTimeout((signal) =>
-    fetch(url, { ...options, signal })
+    fetch(url, { ...options, headers, signal })
   );
 
   const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
@@ -294,7 +332,7 @@ export async function getStoredAuthToken(): Promise<string | null> {
 
 const inFlightGetRequests = new Map<string, Promise<any>>();
 const getResponseMicroCache = new Map<string, { data: any; timestamp: number }>();
-const MICRO_CACHE_TTL_MS = 15000; // 15s microcache to eliminate redundant duplicate queries across screens
+const MICRO_CACHE_TTL_MS = 1500; // 1.5s snappy microcache to eliminate redundant duplicate queries across screens
 
 export function clearAuthMicroCache() {
   getResponseMicroCache.clear();
@@ -302,10 +340,19 @@ export function clearAuthMicroCache() {
 }
 
 // Handles authenticated JSON requests with Authorization Bearer header
-export async function requestAuthenticatedJson(path: string, method: string = "GET", body?: unknown) {
+export async function requestAuthenticatedJson(
+  path: string,
+  method: string = "GET",
+  body?: unknown,
+  forceRefresh: boolean = false
+) {
   const isGet = method.toUpperCase() === "GET" || method.toUpperCase() === "HEAD";
 
-  if (isGet) {
+  if (forceRefresh) {
+    getResponseMicroCache.delete(path);
+  }
+
+  if (isGet && !forceRefresh) {
     const cached = getResponseMicroCache.get(path);
     if (cached && Date.now() - cached.timestamp < MICRO_CACHE_TTL_MS) {
       return cached.data;
@@ -321,6 +368,8 @@ export async function requestAuthenticatedJson(path: string, method: string = "G
       const token = await getStoredAuthToken();
       const headers: Record<string, string> = {
         Accept: "application/json",
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
         ...(token ? { Authorization: `Bearer ${token}` } : {})
       };
       if (!isGet) {
@@ -866,7 +915,11 @@ export async function promptFacebookOAuthAsync(): Promise<FacebookAuthResult> {
 
   const facebookAppId = (
     runtime.process?.env?.EXPO_PUBLIC_FACEBOOK_APP_ID ||
+    runtime.process?.env?.FACEBOOK_APP_ID ||
     (Constants.expoConfig as any)?.facebookAppId ||
+    (Constants.expoConfig as any)?.extra?.facebookAppId ||
+    (Constants as any).manifest2?.extra?.expoClient?.facebookAppId ||
+    (Constants as any).manifest?.facebookAppId ||
     "1478346524097898"
   ).trim();
 

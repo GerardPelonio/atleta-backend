@@ -12,12 +12,12 @@ import {
   matchesAthleteFilters,
   getDefaultMetricForSport,
 } from './discoveryTypes';
-import { requestAuthenticatedJson } from '../../Authentication/authShared';
+import { requestAuthenticatedJson, clearAuthMicroCache } from '../../Authentication/authShared';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getMatchesOfflineFirst } from '../../../../services/firebaseClient';
 
 const DISCOVERY_CACHE_KEY = 'atleta_discovery_snapshot_cache_v2';
-const DISCOVERY_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minute TTL
+const DISCOVERY_CACHE_TTL_MS = 5000; // 5s snappy TTL to prevent stale discovery views
 
 let discoveryMemoryCache: {
   athletes: AthleteDiscoveryItem[];
@@ -101,16 +101,20 @@ export const DiscoveryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return count;
   }, [advancedFilters, activeSportFilter]);
 
-  const loadDiscoveryData = useCallback(async () => {
+  const loadDiscoveryData = useCallback(async (forceRefresh: boolean = false) => {
     try {
       setIsLoading(true);
+      if (forceRefresh) {
+        clearDiscoveryMemoryCache();
+        clearAuthMicroCache();
+      }
       const [athletesRes, proposalsRes, teamsRes, coachMatchesRes, allMatchesRes, offlineMatches]: [any, any, any, any, any, any] = await Promise.all([
-        requestAuthenticatedJson('/athletes').catch(() => null),
-        requestAuthenticatedJson('/scouting/proposals/list').catch(() => null),
-        requestAuthenticatedJson('/teams?all=true').catch(() => null),
-        requestAuthenticatedJson('/matches').catch(() => null),
-        requestAuthenticatedJson('/matches?all=true').catch(() => null),
-        getMatchesOfflineFirst().catch(() => []),
+        requestAuthenticatedJson('/athletes', 'GET', undefined, forceRefresh).catch(() => null),
+        requestAuthenticatedJson('/scouting/proposals/list', 'GET', undefined, forceRefresh).catch(() => null),
+        requestAuthenticatedJson('/teams?all=true', 'GET', undefined, forceRefresh).catch(() => null),
+        requestAuthenticatedJson('/matches', 'GET', undefined, forceRefresh).catch(() => null),
+        requestAuthenticatedJson('/matches?all=true', 'GET', undefined, forceRefresh).catch(() => null),
+        getMatchesOfflineFirst(forceRefresh).catch(() => []),
       ]);
 
       let finalAthletes: AthleteDiscoveryItem[] = [];
@@ -814,7 +818,7 @@ export const DiscoveryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         sortRecruits,
         setSortRecruits,
         isLoading,
-        refreshDiscovery: loadDiscoveryData,
+        refreshDiscovery: () => loadDiscoveryData(true),
         advancedFilters,
         setAdvancedFilters,
         resetAdvancedFilters,

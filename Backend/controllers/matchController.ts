@@ -18,7 +18,7 @@ export async function getAllMatchesHandler(req: AuthRequest, res: Response): Pro
     const coachId = req.user?.uid || (typeof req.query.coach_id === 'string' ? req.query.coach_id : undefined);
     const showAll = req.query.all === 'true';
 
-    res.setHeader('Cache-Control', 'public, max-age=10, stale-while-revalidate=30');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
 
     // Check fast server cache for all matches
     const cacheKey = `all_matches_raw`;
@@ -31,7 +31,7 @@ export async function getAllMatchesHandler(req: AuthRequest, res: Response): Pro
         match_id: doc.id,
         ...doc.data(),
       }));
-      serverCache.set(cacheKey, allMatches, 30, ['matches']);
+      serverCache.set(cacheKey, allMatches, 2, ['matches']);
     }
 
     let matches = allMatches;
@@ -43,7 +43,7 @@ export async function getAllMatchesHandler(req: AuthRequest, res: Response): Pro
       if (!coachTeamIds) {
         const teamsSnap = await db.collection('Teams').where('coach_id', 'in', possibleCoachIds).get();
         coachTeamIds = new Set(teamsSnap.docs.map((d) => d.id));
-        serverCache.set(teamsCacheKey, coachTeamIds, 60, ['teams']);
+        serverCache.set(teamsCacheKey, coachTeamIds, 2, ['teams']);
       }
 
       const coachMatches = allMatches.filter((m: any) => {
@@ -337,13 +337,13 @@ export async function getBoxscore(req: AuthRequest, res: Response): Promise<void
       return;
     }
 
-    res.setHeader('Cache-Control', 'public, max-age=15, stale-while-revalidate=60');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
 
     const cacheKey = `boxscore_${matchId}`;
     let boxscore = serverCache.get<any>(cacheKey);
     if (!boxscore) {
       boxscore = await getMatchBoxscore(matchId);
-      serverCache.set(cacheKey, boxscore, 60, ['matches', `match_${matchId}`]);
+      serverCache.set(cacheKey, boxscore, 2, ['matches', `match_${matchId}`]);
     }
 
     res.status(200).json(boxscore);
@@ -366,13 +366,13 @@ export async function getMatchDetailsHandler(req: AuthRequest, res: Response): P
       return;
     }
 
-    res.setHeader('Cache-Control', 'public, max-age=15, stale-while-revalidate=60');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
 
     const cacheKey = `details_${matchId}`;
     let details = serverCache.get<any>(cacheKey);
     if (!details) {
       details = await getMatchResultDetails(matchId);
-      serverCache.set(cacheKey, details, 60, ['matches', `match_${matchId}`]);
+      serverCache.set(cacheKey, details, 2, ['matches', `match_${matchId}`]);
     }
 
     res.status(200).json(details);

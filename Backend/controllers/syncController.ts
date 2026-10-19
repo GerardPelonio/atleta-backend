@@ -94,7 +94,7 @@ export async function getCoachOfflineSnapshotHandler(req: AuthRequest, res: Resp
     }
 
     res.set('ETag', snapshot.etag);
-    res.set('Cache-Control', 'private, max-age=300');
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.set('X-Offline-Cache-Version', snapshot.cache_version);
     res.status(200).json(snapshot);
   } catch (error: any) {
@@ -116,7 +116,7 @@ export async function getAthleteOfflineSnapshotHandler(req: AuthRequest, res: Re
     }
 
     res.set('ETag', snapshot.etag);
-    res.set('Cache-Control', 'private, max-age=300');
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.set('X-Offline-Cache-Version', snapshot.cache_version);
     res.status(200).json(snapshot);
   } catch (error: any) {

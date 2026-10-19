@@ -40,7 +40,7 @@ export async function getAthleteHome(req: AuthRequest, res: Response): Promise<v
       return;
     }
 
-    res.set('Cache-Control', 'private, max-age=300');
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.status(200).json(homeData);
   } catch (error: any) {
     console.error('getAthleteHome error:', error);
