@@ -23,6 +23,12 @@ class FastCache {
   }
 
   set<T>(key: string, data: T, ttlSeconds = 30, tags: string[] = []): void {
+    // Evict oldest entries if store exceeds 2000 keys to prevent memory growth
+    if (this.store.size >= 2000) {
+      const firstKey = this.store.keys().next().value;
+      if (firstKey) this.store.delete(firstKey);
+    }
+
     this.store.set(key, {
       data,
       expiresAt: Date.now() + ttlSeconds * 1000,
@@ -68,6 +74,7 @@ class FastCache {
   }
 
   invalidateTags(tags: string[]): void {
+    if (!tags || tags.length === 0) return;
     const tagSet = new Set(tags);
     for (const [key, entry] of this.store.entries()) {
       if (entry.tags.some((t) => tagSet.has(t))) {
@@ -77,9 +84,22 @@ class FastCache {
     }
   }
 
+  invalidatePrefix(prefix: string): void {
+    for (const key of this.store.keys()) {
+      if (key.startsWith(prefix)) {
+        this.store.delete(key);
+        this.inFlight.delete(key);
+      }
+    }
+  }
+
   clear(): void {
     this.store.clear();
     this.inFlight.clear();
+  }
+
+  size(): number {
+    return this.store.size;
   }
 }
 

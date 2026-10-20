@@ -55,7 +55,7 @@ export async function getPendingValidationsHandler(req: AuthRequest, res: Respon
     let pendingValidations = serverCache.get<any[]>(cacheKey);
     if (!pendingValidations) {
       pendingValidations = await getPendingValidationsService();
-      serverCache.set(cacheKey, pendingValidations, 2, ['validations', 'matches']);
+      serverCache.set(cacheKey, pendingValidations, 45, ['validations', 'matches']);
     }
 
     res.status(200).json(pendingValidations || []);

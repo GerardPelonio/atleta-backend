@@ -124,7 +124,7 @@ export async function getOfficialDashboardMetrics(officialId: string) {
     audit_queue: auditQueue
   };
 
-  serverCache.set(cacheKey, result, 2, ['dashboard', 'matches', 'validations']);
+  serverCache.set(cacheKey, result, 45, ['dashboard', 'matches', 'validations']);
   return result;
 }
 

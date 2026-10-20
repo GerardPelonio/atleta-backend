@@ -31,7 +31,7 @@ export async function getAllMatchesHandler(req: AuthRequest, res: Response): Pro
         match_id: doc.id,
         ...doc.data(),
       }));
-      serverCache.set(cacheKey, allMatches, 2, ['matches']);
+      serverCache.set(cacheKey, allMatches, 60, ['matches']);
     }
 
     let matches = allMatches;
@@ -43,7 +43,7 @@ export async function getAllMatchesHandler(req: AuthRequest, res: Response): Pro
       if (!coachTeamIds) {
         const teamsSnap = await db.collection('Teams').where('coach_id', 'in', possibleCoachIds).get();
         coachTeamIds = new Set(teamsSnap.docs.map((d) => d.id));
-        serverCache.set(teamsCacheKey, coachTeamIds, 2, ['teams']);
+        serverCache.set(teamsCacheKey, coachTeamIds, 60, ['teams']);
       }
 
       const coachMatches = allMatches.filter((m: any) => {
@@ -343,7 +343,7 @@ export async function getBoxscore(req: AuthRequest, res: Response): Promise<void
     let boxscore = serverCache.get<any>(cacheKey);
     if (!boxscore) {
       boxscore = await getMatchBoxscore(matchId);
-      serverCache.set(cacheKey, boxscore, 2, ['matches', `match_${matchId}`]);
+      serverCache.set(cacheKey, boxscore, 60, ['matches', `match_${matchId}`]);
     }
 
     res.status(200).json(boxscore);
@@ -372,7 +372,7 @@ export async function getMatchDetailsHandler(req: AuthRequest, res: Response): P
     let details = serverCache.get<any>(cacheKey);
     if (!details) {
       details = await getMatchResultDetails(matchId);
-      serverCache.set(cacheKey, details, 2, ['matches', `match_${matchId}`]);
+      serverCache.set(cacheKey, details, 60, ['matches', `match_${matchId}`]);
     }
 
     res.status(200).json(details);

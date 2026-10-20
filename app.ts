@@ -13,11 +13,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Idempotency-Key, If-None-Match, Cache-Control, Pragma, Expires, Accept, X-Requested-With, x-gemini-key, x-api-key, gemini-key');
-  res.header('Access-Control-Expose-Headers', 'X-Response-Time-Ms, ETag, Idempotency-Key');
-  // Prevent Vercel edge CDN and HTTP clients from caching dynamic API responses
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
+  res.header('Access-Control-Expose-Headers', 'X-Response-Time-Ms, ETag, Idempotency-Key, X-Cache');
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
@@ -41,7 +37,7 @@ app.use(cors({
     'x-api-key',
     'gemini-key',
   ],
-  exposedHeaders: ['X-Response-Time-Ms', 'ETag', 'Idempotency-Key'],
+  exposedHeaders: ['X-Response-Time-Ms', 'ETag', 'Idempotency-Key', 'X-Cache'],
 }));
 
 app.use(express.json({ limit: '25mb' }));

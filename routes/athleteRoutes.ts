@@ -23,13 +23,15 @@ const upload = multer({
   limits: { fileSize: 25 * 1024 * 1024 },
 });
 
+import { cacheMiddleware, invalidateCacheMiddleware } from '../middlewares/cacheMiddleware';
+
 // Registration & Search (Named and Root Routes)
-router.post('/register-athlete', upload.single('eligible_documents'), registerAthlete);
-router.post('/register', upload.single('eligible_documents'), registerAthlete);
-router.post('/', upload.single('eligible_documents'), registerAthlete);
-router.get('/search', optionalAuth, searchAthletesHandler);
-router.get('/list', optionalAuth, searchAthletesHandler);
-router.get('/', optionalAuth, searchAthletesHandler);
+router.post('/register-athlete', upload.single('eligible_documents'), invalidateCacheMiddleware(['athletes']), registerAthlete);
+router.post('/register', upload.single('eligible_documents'), invalidateCacheMiddleware(['athletes']), registerAthlete);
+router.post('/', upload.single('eligible_documents'), invalidateCacheMiddleware(['athletes']), registerAthlete);
+router.get('/search', optionalAuth, cacheMiddleware({ ttlSeconds: 60, tags: ['athletes'] }), searchAthletesHandler);
+router.get('/list', optionalAuth, cacheMiddleware({ ttlSeconds: 60, tags: ['athletes'] }), searchAthletesHandler);
+router.get('/', optionalAuth, cacheMiddleware({ ttlSeconds: 60, tags: ['athletes'] }), searchAthletesHandler);
 
 // Clean Token-Based Routes (No Athlete ID required in URL)
 router.get('/home', authenticate, getAthleteHome);
