@@ -7,6 +7,7 @@ import {
 import { eventBus, EVENTS } from '../utils/eventBus';
 import { createNotification } from './notificationService';
 import { sendRecruitmentInquiryEmailService } from './emailService';
+import { invalidateTeamCache } from './teamService';
 
 export class ServiceError extends Error {
   statusCode: number;
@@ -33,6 +34,9 @@ export function invalidateCoachCache(coachId?: string) {
   } else {
     coachProfileCache.clear();
   }
+  try {
+    invalidateTeamCache();
+  } catch (_) {}
 }
 
 /**

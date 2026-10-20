@@ -445,7 +445,7 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
     db.collection('Coach_Profiles').doc(`coach_${cleanId}`).get().catch(() => null),
     db.collection('Coach_Profiles').doc(cleanId).get().catch(() => null),
     db.collection('Teams').where('coach_id', 'in', possibleCoachIds).get().catch(() => null),
-    db.collection('Scouting_Registry').where('coach_scout_id', 'in', possibleCoachIds).where('offer_status', '==', 'Accepted').get().catch(() => null),
+    db.collection('Scouting_Registry').where('coach_scout_id', 'in', possibleCoachIds).get().catch(() => null),
     db.collection('Athlete_Profiles').where('coach_id', 'in', possibleCoachIds).get().catch(() => null),
   ]);
 
@@ -498,12 +498,17 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
     }
   }
 
-  // 3. From Accepted Scouting Proposals / Inquiries
+  const scoutedAthleteMap = new Map<string, any>();
+  // 3. From Scouting Proposals / Inquiries (Active proposals: Sent, Pending, Accepted)
   if (acceptedOffersSnapshot && !acceptedOffersSnapshot.empty) {
     for (const doc of acceptedOffersSnapshot.docs) {
       const inq = doc.data();
+      const status = String(inq.offer_status || inq.status || '').toLowerCase();
+      if (status === 'declined' || status === 'rejected' || status === 'revoked') continue;
       if (inq.athlete_id) {
         athleteIdSet.add(inq.athlete_id);
+        scoutedAthleteMap.set(inq.athlete_id, inq);
+        scoutedAthleteMap.set(String(inq.athlete_id).replace(/^ath_/, ''), inq);
       }
     }
   }
@@ -568,9 +573,14 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
     const ppg = Number(stats.ppg ?? stats.points_per_game ?? 0);
     const dynamicRating = per > 0 ? Math.min(99, Math.max(65, Math.round(per * 2.8))) : (ppg > 0 ? Math.min(99, Math.max(65, Math.round(ppg * 3.5))) : (profileData.rating_score || 0));
 
+    const scoutInfo = scoutedAthleteMap.get(aId) || scoutedAthleteMap.get(canonicalAthleteId) || scoutedAthleteMap.get(rawUid);
+    const isScouted = Boolean(scoutInfo || profileData.is_scouted);
+
     return {
       athlete_id: canonicalAthleteId,
       user_id: rawUid,
+      coach_id: coachId,
+      coach_scout_id: coachId,
       first_name: firstName,
       last_name: lastName,
       full_name: fullName,
@@ -587,7 +597,9 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
       province: profileData.province || userData.province || undefined,
       location: profileData.province || userData.province || undefined,
       avatar_url: profileData.avatar_url || userData.avatar_url || undefined,
-      recruitment_status: profileData.recruitment_status || 'Active Roster',
+      is_scouted: isScouted,
+      scout_status: scoutInfo?.offer_status || (isScouted ? 'Pending' : undefined),
+      recruitment_status: scoutInfo?.offer_status === 'Accepted' ? 'Active Roster' : (scoutInfo ? `Scouted (${scoutInfo.offer_status || 'Pending'})` : (profileData.recruitment_status || 'Active Roster')),
       rating_score: dynamicRating,
       is_eligibility_verified: docs.length > 0 || profileData.eligibility_documents?.psa_verified === true,
       physical_attributes: {

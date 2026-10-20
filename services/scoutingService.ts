@@ -3,6 +3,7 @@ import { ServiceError } from '../validators/matchValidator';
 import { eventBus, EVENTS } from '../utils/eventBus';
 import { createNotification } from './notificationService';
 import { serverCache } from '../utils/cache';
+import { invalidateTeamCache } from './teamService';
 import crypto from 'crypto';
 
 export interface RegionalAthleteSearchResult {
@@ -489,6 +490,8 @@ export async function dispatchRecruitmentProposal(
       message: offerDetails || null,
     },
   });
+
+  invalidateTeamCache();
 
   return {
     ...proposalData,
