@@ -453,7 +453,8 @@ export async function updateSportService(
 
   // Invalidate in-memory sports catalog cache
   try {
-    serverCache.invalidateTags(['sports', 'catalog']);
+    serverCache.delete('sports_configurations_catalog_all');
+    serverCache.invalidateTags(['sports', 'catalog', 'snapshot']);
   } catch {}
 
   // Log administrative audit entry
@@ -581,7 +582,8 @@ export async function deleteSportService(
 
   // Invalidate server cache
   try {
-    serverCache.invalidateTags(['sports', 'catalog']);
+    serverCache.delete('sports_configurations_catalog_all');
+    serverCache.invalidateTags(['sports', 'catalog', 'snapshot']);
   } catch {}
 
   // Log administrative audit entry
