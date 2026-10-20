@@ -78,6 +78,11 @@ export async function submitAuditRequest(
     verification_status: 'Pending',
   });
 
+  const matchTitle = matchData.matchName || matchData.game_name || `${matchData.home_team_name || 'Home'} vs ${matchData.away_team_name || 'Away'}`;
+  const reqDocId = `req_${matchId}_${coachId.replace(/[^a-zA-Z0-9_-]/g, '')}`;
+  const coachName = fallbackMatchData?.coach_name || fallbackMatchData?.coachName || 'Coach';
+  const sportType = matchData.sport_type || 'BASKETBALL';
+
   // Dispatch real-time notification to tournament officials
   const notifId = `notif_${crypto.randomUUID()}`;
   batch.set(db.collection('Official_Notifications').doc(notifId), {
@@ -87,14 +92,16 @@ export async function submitAuditRequest(
     type: 'AUDIT_REQUEST',
     match_id: matchId,
     audit_id: auditId,
+    request_id: reqDocId,
+    requested_by_coach: coachName,
+    match_context: matchTitle,
+    sport_discipline: sportType,
     is_read: false,
     created_at: now,
     timestamp: now,
   });
 
   // Synchronize scoresheetRequests collection
-  const matchTitle = matchData.matchName || matchData.game_name || `${matchData.home_team_name || 'Home'} vs ${matchData.away_team_name || 'Away'}`;
-  const reqDocId = `req_${matchId}_${coachId.replace(/[^a-zA-Z0-9_-]/g, '')}`;
   batch.set(db.collection('scoresheetRequests').doc(reqDocId), {
     id: reqDocId,
     requestId: reqDocId,

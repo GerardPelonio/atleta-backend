@@ -196,6 +196,10 @@ export async function getOfficialNotifications(officialId: string): Promise<Offi
     if (seenIds.has(doc.id)) return;
     seenIds.add(doc.id);
     const data = doc.data();
+    if (data.request_id) {
+      seenIds.add(`req_${data.request_id}`);
+      seenIds.add(data.request_id);
+    }
     notifications.push({
       notification_id: data.notification_id || doc.id,
       official_id: data.official_id || data.recipient_id || officialId,
@@ -205,9 +209,12 @@ export async function getOfficialNotifications(officialId: string): Promise<Offi
       reference_id: data.reference_id || data.request_id || data.match_id || null,
       request_id: data.request_id || null,
       match_id: data.match_id || null,
+      match_name: data.match_name || data.match_context || undefined,
       requested_by_coach: data.requested_by_coach || data.coach_name || undefined,
       match_context: data.match_context || data.match_name || undefined,
       sport_discipline: data.sport_discipline || data.sport || undefined,
+      status: data.status || 'pending',
+      scoresheet_url: data.scoresheetUrl || data.scoresheet_url || null,
       is_read: Boolean(data.is_read),
       created_at: data.created_at || data.timestamp || new Date().toISOString(),
     });
@@ -221,10 +228,11 @@ export async function getOfficialNotifications(officialId: string): Promise<Offi
   // Surface scoresheetRequests documents into notifications
   snapScoresheetRequests.forEach((doc: any) => {
     const data = doc.data();
-    const reqId = data.id || doc.id;
+    const reqId = data.id || data.requestId || doc.id;
     const notifKey = `req_${reqId}`;
-    if (seenIds.has(notifKey)) return;
+    if (seenIds.has(notifKey) || seenIds.has(reqId) || seenIds.has(doc.id) || seenIds.has(`notif_${notifKey}`)) return;
     seenIds.add(notifKey);
+    seenIds.add(reqId);
 
     const isFulfilled = data.status === 'fulfilled';
     notifications.push({
