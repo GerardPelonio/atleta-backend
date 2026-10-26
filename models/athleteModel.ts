@@ -120,6 +120,13 @@ export interface AthleteFullProfile {
     proof_of_residency: AthleteDocument | null;
   };
   achievements: AthleteAchievement[];
+  player_status?: 'Active' | 'Injured' | 'Prone to Injury' | 'Recovering' | 'Day-to-Day' | string;
+  playerStatus?: 'Active' | 'Injured' | 'Prone to Injury' | 'Recovering' | 'Day-to-Day' | string;
+  injury_notes?: string;
+  injuryNotes?: string;
+  excel_tags?: string[];
+  excelTags?: string[];
+  specialties?: string[];
   created_at?: Date;
   updated_at?: Date;
 }

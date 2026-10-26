@@ -74,6 +74,13 @@ export interface AthleteProfile {
   workload_analytics?: any;
   workload?: any;
   workload_target?: any;
+  player_status?: 'Active' | 'Injured' | 'Prone to Injury' | 'Recovering' | 'Day-to-Day' | string;
+  playerStatus?: 'Active' | 'Injured' | 'Prone to Injury' | 'Recovering' | 'Day-to-Day' | string;
+  injury_notes?: string;
+  injuryNotes?: string;
+  excel_tags?: string[];
+  excelTags?: string[];
+  specialties?: string[];
   created_at: Date | string;
   updated_at: Date | string;
   [key: string]: any;

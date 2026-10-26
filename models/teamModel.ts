@@ -84,6 +84,13 @@ export interface RosterAthlete {
   team_name?: string;
   coach_name?: string;
   has_coach?: boolean;
+  player_status?: 'Active' | 'Injured' | 'Prone to Injury' | 'Recovering' | 'Day-to-Day' | string;
+  playerStatus?: 'Active' | 'Injured' | 'Prone to Injury' | 'Recovering' | 'Day-to-Day' | string;
+  injury_notes?: string;
+  injuryNotes?: string;
+  excel_tags?: string[];
+  excelTags?: string[];
+  specialties?: string[];
 }
 
 // ─── API DTOs & Response Types ──────────────────────────────────────────────

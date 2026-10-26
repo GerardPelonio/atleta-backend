@@ -183,6 +183,10 @@ async function enrichRoster(rosterList: (string | TeamRosterMember)[]): Promise<
         ? eligDocs.psa_verified === true
         : Array.isArray(eligDocs) && eligDocs.length > 0;
 
+    const statusVal = profileData.player_status || profileData.playerStatus || userData.player_status || userData.playerStatus || 'Active';
+    const notesVal = profileData.injury_notes || profileData.injuryNotes || userData.injury_notes || userData.injuryNotes || '';
+    const tagsVal = profileData.excel_tags || profileData.excelTags || profileData.specialties || userData.excel_tags || userData.excelTags || userData.specialties || [];
+
     const athResult: RosterAthlete = {
       athlete_id: canonicalAthleteId,
       user_id: profileData.user_id || cleanId,
@@ -195,6 +199,13 @@ async function enrichRoster(rosterList: (string | TeamRosterMember)[]): Promise<
       avatar_url: profileData.avatar_url || undefined,
       eligibility_documents: eligDocs || [],
       is_eligibility_verified: isVerified,
+      player_status: statusVal,
+      playerStatus: statusVal,
+      injury_notes: notesVal,
+      injuryNotes: notesVal,
+      excel_tags: tagsVal,
+      excelTags: tagsVal,
+      specialties: tagsVal,
     };
 
     rosterAthleteCache.set(canonicalAthleteId, { data: athResult, cachedAt: Date.now() });
@@ -1166,6 +1177,13 @@ export async function searchAthletes(queryStr?: string, sportType?: string) {
         averages,
         calculated_per: per,
         efficiency_pct: eff,
+        player_status: p.player_status || p.playerStatus || uData.player_status || uData.playerStatus || 'Active',
+        playerStatus: p.player_status || p.playerStatus || uData.player_status || uData.playerStatus || 'Active',
+        injury_notes: p.injury_notes || p.injuryNotes || uData.injury_notes || uData.injuryNotes || '',
+        injuryNotes: p.injury_notes || p.injuryNotes || uData.injury_notes || uData.injuryNotes || '',
+        excel_tags: p.excel_tags || p.excelTags || p.specialties || uData.excel_tags || uData.excelTags || uData.specialties || [],
+        excelTags: p.excel_tags || p.excelTags || p.specialties || uData.excel_tags || uData.excelTags || uData.specialties || [],
+        specialties: p.excel_tags || p.excelTags || p.specialties || uData.excel_tags || uData.excelTags || uData.specialties || [],
       };
 
       const searchHaystack = `${fullName} ${athleteObj.position} ${athleteId} ${rawUid} ${uData.email || ''}`.toLowerCase();
@@ -1226,6 +1244,13 @@ export async function searchAthletes(queryStr?: string, sportType?: string) {
         averages,
         calculated_per: per,
         efficiency_pct: eff,
+        player_status: p.player_status || p.playerStatus || u.player_status || u.playerStatus || 'Active',
+        playerStatus: p.player_status || p.playerStatus || u.player_status || u.playerStatus || 'Active',
+        injury_notes: p.injury_notes || p.injuryNotes || u.injury_notes || u.injuryNotes || '',
+        injuryNotes: p.injury_notes || p.injuryNotes || u.injury_notes || u.injuryNotes || '',
+        excel_tags: p.excel_tags || p.excelTags || p.specialties || u.excel_tags || u.excelTags || u.specialties || [],
+        excelTags: p.excel_tags || p.excelTags || p.specialties || u.excel_tags || u.excelTags || u.specialties || [],
+        specialties: p.excel_tags || p.excelTags || p.specialties || u.excel_tags || u.excelTags || u.specialties || [],
       };
 
       const searchHaystack = `${firstName} ${lastName} ${athleteObj.position} ${athleteId}`.toLowerCase();

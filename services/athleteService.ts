@@ -125,6 +125,13 @@ export async function getAthleteProfile(athleteId: string): Promise<AthleteFullP
     eligible_documents: profileData.eligible_documents || (Array.isArray(profileData.documents) ? profileData.documents : []),
 
     achievements: profileData.achievements || [],
+    player_status: profileData.player_status || profileData.playerStatus || userData.player_status || userData.playerStatus || 'Active',
+    playerStatus: profileData.player_status || profileData.playerStatus || userData.player_status || userData.playerStatus || 'Active',
+    injury_notes: profileData.injury_notes || profileData.injuryNotes || userData.injury_notes || userData.injuryNotes || '',
+    injuryNotes: profileData.injury_notes || profileData.injuryNotes || userData.injury_notes || userData.injuryNotes || '',
+    excel_tags: profileData.excel_tags || profileData.excelTags || profileData.specialties || userData.excel_tags || userData.excelTags || userData.specialties || [],
+    excelTags: profileData.excel_tags || profileData.excelTags || profileData.specialties || userData.excel_tags || userData.excelTags || userData.specialties || [],
+    specialties: profileData.excel_tags || profileData.excelTags || profileData.specialties || userData.excel_tags || userData.excelTags || userData.specialties || [],
     workload_analytics: mergedWorkload,
     workload: mergedWorkload,
     workload_target: coachTarget || undefined,
@@ -225,6 +232,44 @@ export async function updateAthleteProfile(
   if (updateData.eligible_documents) {
     payload.eligible_documents = updateData.eligible_documents;
     payload.documents = updateData.eligible_documents;
+  }
+
+  // Player status enum validation & sync
+  const rawStatus = updateData.player_status || updateData.playerStatus;
+  if (rawStatus !== undefined) {
+    const validStatuses = ['Active', 'Injured', 'Prone to Injury', 'Recovering', 'Day-to-Day'];
+    const statusStr = String(rawStatus).trim();
+    const normalizedStatus = validStatuses.find(s => s.toLowerCase() === statusStr.toLowerCase()) || statusStr;
+    payload.player_status = normalizedStatus;
+    payload.playerStatus = normalizedStatus;
+    userPayload.player_status = normalizedStatus;
+    userPayload.playerStatus = normalizedStatus;
+  }
+
+  // Injury notes sync
+  const rawNotes = updateData.injury_notes !== undefined ? updateData.injury_notes : updateData.injuryNotes;
+  if (rawNotes !== undefined) {
+    const notesStr = String(rawNotes ?? '').trim();
+    payload.injury_notes = notesStr;
+    payload.injuryNotes = notesStr;
+    userPayload.injury_notes = notesStr;
+    userPayload.injuryNotes = notesStr;
+  }
+
+  // Playstyle / excel tags / specialties sync
+  const rawTags = updateData.excel_tags || updateData.excelTags || updateData.specialties;
+  if (rawTags !== undefined) {
+    const tagsArr = Array.isArray(rawTags)
+      ? rawTags.map(t => String(t).trim()).filter(Boolean)
+      : typeof rawTags === 'string'
+      ? rawTags.split(',').map(t => t.trim()).filter(Boolean)
+      : [];
+    payload.excel_tags = tagsArr;
+    payload.excelTags = tagsArr;
+    payload.specialties = tagsArr;
+    userPayload.excel_tags = tagsArr;
+    userPayload.excelTags = tagsArr;
+    userPayload.specialties = tagsArr;
   }
 
   // Auto-package physical attributes and recompute sports science metrics (BMI & Ape Index)
