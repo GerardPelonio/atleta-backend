@@ -56,6 +56,20 @@ export function validateRegisterCoach(data: Record<string, unknown>, hasFile: bo
     errors.push({ field: 'current_institution', message: 'Current institution is required.' });
   }
 
+  // certification_license_num / coach_license_number (Required, Max 100)
+  const licenseNum = typeof data.certification_license_num === 'string'
+    ? data.certification_license_num.trim()
+    : typeof data.coach_license_number === 'string'
+    ? data.coach_license_number.trim()
+    : typeof data.license_number === 'string'
+    ? data.license_number.trim()
+    : '';
+  if (!licenseNum) {
+    errors.push({ field: 'certification_license_num', message: 'Coach license number is required.' });
+  } else if (licenseNum.length > 100) {
+    errors.push({ field: 'certification_license_num', message: 'Coach license number must not exceed 100 characters.' });
+  }
+
   // regional_affiliation (Optional / string max 255)
   const regionalAffiliation = typeof data.regional_affiliation === 'string' ? data.regional_affiliation.trim() : '';
   if (regionalAffiliation.length > 255) {

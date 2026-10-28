@@ -373,12 +373,16 @@ export async function registerUserService(
     profDocs = Array.from(new Set(profDocs));
     const athletesManaged = Array.isArray(data.athlete_managed) ? data.athlete_managed : [];
 
+    const certLicense = String(data.certification_license_num || data.coach_license_number || data.license_number || '').trim();
+
     // Complete info on Users table
     userData.sport_type = sportType;
     userData.years_of_experience = yearsExperience;
     userData.current_institution = institution;
     userData.regional_affiliation = regionalAffiliation;
     userData.national_sports_league = nationalLeague;
+    userData.certification_license_num = certLicense || null;
+    userData.coach_license_number = certLicense || null;
     userData.quote = quote;
     userData.professional_documents = profDocs;
     userData.athlete_managed = athletesManaged;
@@ -395,6 +399,8 @@ export async function registerUserService(
     profileData.current_institution = institution;
     profileData.regional_affiliation = regionalAffiliation;
     profileData.national_sports_league = nationalLeague;
+    profileData.certification_license_num = certLicense || null;
+    profileData.coach_license_number = certLicense || null;
     profileData.team_id = (data.team_id as string) || null;
     profileData.teams_managed = Array.isArray(data.teams_managed) ? data.teams_managed : [];
     profileData.athletes_managed = Array.isArray(data.athletes_managed) ? data.athletes_managed : [];

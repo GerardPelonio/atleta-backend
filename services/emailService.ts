@@ -134,10 +134,21 @@ export async function sendCoachStatusEmailService(
 ): Promise<{ sent: boolean; message: string }> {
   const transporter = createTransporter();
   const isApproved = status === 'APPROVED';
-  const title = isApproved ? 'Coach Accreditation Approved' : 'Coach Application Update';
-  const heading = isApproved ? 'Congratulations! Accreditation Approved' : 'Application Status Update';
+  const isResubmit = status === 'RESUBMISSION';
+  const title = isApproved
+    ? 'Coach Accreditation Approved'
+    : isResubmit
+    ? 'Coach Accreditation Documents Resubmission Required'
+    : 'Coach Application Update';
+  const heading = isApproved
+    ? 'Congratulations! Accreditation Approved'
+    : isResubmit
+    ? 'Accreditation Resubmission Required'
+    : 'Application Status Update';
   const detail = isApproved
-    ? 'Your coach accreditation application and professional certifications have been verified and approved. You now have full access to team management, rosters, and live match logging.'
+    ? 'Your coach accreditation application and professional certifications have been verified and approved by the system administrator. You now have full access to team management, rosters, and live match logging.'
+    : isResubmit
+    ? `Your coach accreditation documents require resubmission.${reason ? ` Note: ${reason}` : ''}`
     : `Your coach accreditation application was not approved at this time.${reason ? ` Reason: ${reason}` : ''}`;
 
   const mailOptions = {
@@ -154,6 +165,18 @@ export async function sendCoachStatusEmailService(
           <h2 style="margin: 0 0 16px; color: #141c3a; font-size: 20px;">${heading}</h2>
           <p style="margin: 0 0 12px; color: #374151; font-size: 15px; line-height: 1.6;">Dear Coach ${coachName || 'Coach'},</p>
           <p style="margin: 0 0 16px; color: #374151; font-size: 15px; line-height: 1.6;">${detail}</p>
+          ${isApproved ? `
+          <div style="margin: 24px 0; padding: 16px 20px; background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 6px;">
+            <p style="margin: 0 0 8px; color: #065f46; font-weight: 600; font-size: 14px;">Next Steps:</p>
+            <p style="margin: 0; color: #047857; font-size: 13px; line-height: 1.5;">
+              You can now launch the Atleta Mobile Application and log in with your registered email (<strong>${toEmail}</strong>) and password to manage your athletic team.
+            </p>
+          </div>
+          ` : `
+          <div style="margin: 20px 0; padding: 14px; background-color: #fef2f2; border-left: 4px solid #ef4444; color: #991b1b; font-size: 14px; border-radius: 4px;">
+            <strong>Advisory:</strong> You may submit updated certification documents or contact the system administrator if you have questions regarding this decision.
+          </div>
+          `}
         </div>
         <div style="background-color: #f3f4f6; padding: 20px 40px; border-top: 1px solid #e5e7eb;">
           <p style="margin: 0; color: #9ca3af; font-size: 11px; text-align: center;">&copy; ${new Date().getFullYear()} Atleta. All rights reserved.</p>
@@ -173,6 +196,77 @@ export async function sendCoachStatusEmailService(
 
   console.log(`[NODEMAILER DEV MODE] Coach ${status} Email dispatched to ${toEmail}`);
   return { sent: false, message: `Dev Mode: Coach ${status} status email logged for ${toEmail}.` };
+}
+
+/**
+ * Send tournament official accreditation/account verification status update email (Approved / Declined).
+ */
+export async function sendOfficialStatusEmailService(
+  toEmail: string,
+  officialName: string,
+  status: 'APPROVED' | 'REJECTED',
+  reason?: string
+): Promise<{ sent: boolean; message: string }> {
+  const transporter = createTransporter();
+  const isApproved = status === 'APPROVED';
+  const title = isApproved ? 'Official Account Approved' : 'Official Application Status Update';
+  const heading = isApproved ? 'Congratulations! Official Account Verified' : 'Application Status Update';
+  const detail = isApproved
+    ? 'Your tournament official application and credentials have been verified and approved by the system administrator. You now have full access to log in to the official portal, manage match rosters, schedule brackets, and certify match outcomes.'
+    : `Your tournament official account application was not approved at this time.${reason ? ` Reason: ${reason}` : ''}`;
+
+  const webLoginUrl = process.env.FRONTEND_WEB_URL || 'https://atleta.vercel.app';
+
+  const mailOptions = {
+    from: process.env.EMAIL_USER || '"Atleta Platform" <noreply@atleta.com>',
+    to: toEmail,
+    subject: `${title} — Atleta`,
+    html: `
+      <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 620px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
+        <div style="background-color: #141c3a; padding: 28px 40px;">
+          <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 700;">ATLETA</h1>
+          <p style="margin: 4px 0 0; color: #a0aec0; font-size: 12px; text-transform: uppercase;">Official Accreditation & Tournament Operations</p>
+        </div>
+        <div style="padding: 40px 40px 32px;">
+          <h2 style="margin: 0 0 16px; color: #141c3a; font-size: 20px;">${heading}</h2>
+          <p style="margin: 0 0 12px; color: #374151; font-size: 15px; line-height: 1.6;">Dear Official ${officialName || 'Official'},</p>
+          <p style="margin: 0 0 16px; color: #374151; font-size: 15px; line-height: 1.6;">${detail}</p>
+          ${isApproved ? `
+          <div style="margin: 24px 0; text-align: center;">
+            <a href="${webLoginUrl}/login" style="background-color: #10b981; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: 700; font-size: 14px; display: inline-block; letter-spacing: 0.05em;">
+              LOG IN TO OFFICIAL PORTAL
+            </a>
+          </div>
+          <div style="margin: 16px 0; padding: 14px 18px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;">
+            <p style="margin: 0; color: #64748b; font-size: 12px; line-height: 1.5;">
+              Account Email: <strong>${toEmail}</strong><br/>
+              Portal: <a href="${webLoginUrl}" style="color: #3b82f6;">${webLoginUrl}</a>
+            </p>
+          </div>
+          ` : `
+          <div style="margin: 20px 0; padding: 14px; background-color: #fef2f2; border-left: 4px solid #ef4444; color: #991b1b; font-size: 14px; border-radius: 4px;">
+            <strong>Advisory:</strong> If you believe this decision was made in error or would like to submit updated certification documents, please contact support at support@atleta.com.
+          </div>
+          `}
+        </div>
+        <div style="background-color: #f3f4f6; padding: 20px 40px; border-top: 1px solid #e5e7eb;">
+          <p style="margin: 0; color: #9ca3af; font-size: 11px; text-align: center;">&copy; ${new Date().getFullYear()} Atleta. All rights reserved.</p>
+        </div>
+      </div>
+    `,
+  };
+
+  if (transporter) {
+    try {
+      await transporter.sendMail(mailOptions);
+      return { sent: true, message: `Status email sent to ${toEmail}.` };
+    } catch (err: any) {
+      console.warn('sendOfficialStatusEmailService send error:', err?.message || err);
+    }
+  }
+
+  console.log(`[NODEMAILER DEV MODE] Official ${status} Email dispatched to ${toEmail}`);
+  return { sent: false, message: `Dev Mode: Official ${status} status email logged for ${toEmail}.` };
 }
 
 /**
