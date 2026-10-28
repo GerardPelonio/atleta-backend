@@ -8,8 +8,8 @@ import nodemailer from 'nodemailer';
  * Falls back gracefully to Dev Console logging if credentials are missing.
  */
 function createTransporter() {
-  const user = process.env.EMAIL_USER;
-  const pass = process.env.EMAIL_PASS;
+  const user = process.env.EMAIL_USER || 'gerardpelonio30@gmail.com';
+  const pass = process.env.EMAIL_PASS || 'vhrrtqayhzdepvuy';
   const host = process.env.EMAIL_HOST;
   const port = process.env.EMAIL_PORT;
   const service = process.env.EMAIL_SERVICE;
@@ -151,8 +151,10 @@ export async function sendCoachStatusEmailService(
     ? `Your coach accreditation documents require resubmission.${reason ? ` Note: ${reason}` : ''}`
     : `Your coach accreditation application was not approved at this time.${reason ? ` Reason: ${reason}` : ''}`;
 
+  const sender = process.env.EMAIL_USER ? `"Atleta Platform" <${process.env.EMAIL_USER}>` : '"Atleta Platform" <gerardpelonio30@gmail.com>';
+
   const mailOptions = {
-    from: process.env.EMAIL_USER || '"Atleta Platform" <noreply@atleta.com>',
+    from: sender,
     to: toEmail,
     subject: `${title} — Atleta`,
     html: `
@@ -216,9 +218,10 @@ export async function sendOfficialStatusEmailService(
     : `Your tournament official account application was not approved at this time.${reason ? ` Reason: ${reason}` : ''}`;
 
   const webLoginUrl = process.env.FRONTEND_WEB_URL || 'https://atleta.vercel.app';
+  const sender = process.env.EMAIL_USER ? `"Atleta Platform" <${process.env.EMAIL_USER}>` : '"Atleta Platform" <gerardpelonio30@gmail.com>';
 
   const mailOptions = {
-    from: process.env.EMAIL_USER || '"Atleta Platform" <noreply@atleta.com>',
+    from: sender,
     to: toEmail,
     subject: `${title} — Atleta`,
     html: `

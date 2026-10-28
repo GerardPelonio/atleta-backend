@@ -541,35 +541,33 @@ export async function approveCoachService(adminId: string, coachIdParam: string)
     message: 'Your coach accreditation application and professional certificates have been verified and approved. Your account is now active with full platform access.',
   }).catch((err) => console.error('Failed to send coach approval notification:', err));
 
-  // Dispatch confirmation email to applicant coach
-  (async () => {
-    try {
-      let coachEmail: string | undefined;
-      let coachName: string | undefined;
+  // Dispatch confirmation email to applicant coach (awaited for serverless delivery completion)
+  try {
+    let coachEmail: string | undefined;
+    let coachName: string | undefined;
 
-      const uSnap = await userRef.get();
-      if (uSnap.exists) {
-        const uData = uSnap.data();
-        coachEmail = uData?.email;
-        coachName = uData?.full_name || `${uData?.first_name || ''} ${uData?.last_name || ''}`.trim();
-      }
-
-      if (!coachEmail) {
-        const cSnap = await coachRef.get();
-        if (cSnap.exists) {
-          const cData = cSnap.data();
-          coachEmail = cData?.email;
-          coachName = coachName || cData?.full_name || `${cData?.first_name || ''} ${cData?.last_name || ''}`.trim();
-        }
-      }
-
-      if (coachEmail) {
-        await sendCoachStatusEmailService(coachEmail, coachName || 'Coach', 'APPROVED');
-      }
-    } catch (err) {
-      console.warn('Failed to dispatch coach approval status email:', err);
+    const uSnap = await userRef.get();
+    if (uSnap.exists) {
+      const uData = uSnap.data();
+      coachEmail = uData?.email;
+      coachName = uData?.full_name || `${uData?.first_name || ''} ${uData?.last_name || ''}`.trim();
     }
-  })();
+
+    if (!coachEmail) {
+      const cSnap = await coachRef.get();
+      if (cSnap.exists) {
+        const cData = cSnap.data();
+        coachEmail = cData?.email;
+        coachName = coachName || cData?.full_name || `${cData?.first_name || ''} ${cData?.last_name || ''}`.trim();
+      }
+    }
+
+    if (coachEmail) {
+      await sendCoachStatusEmailService(coachEmail, coachName || 'Coach', 'APPROVED');
+    }
+  } catch (err) {
+    console.warn('Failed to dispatch coach approval status email:', err);
+  }
 
   return {
     message: 'Coach account approved and activated successfully.',
@@ -654,35 +652,33 @@ export async function rejectCoachService(adminId: string, coachIdParam: string, 
     message: `Your coach accreditation application was declined. Reason: ${reason}. You may upload updated verification documents to re-apply.`,
   }).catch((err) => console.error('Failed to send coach rejection notification:', err));
 
-  // Dispatch rejection email to applicant coach
-  (async () => {
-    try {
-      let coachEmail: string | undefined;
-      let coachName: string | undefined;
+  // Dispatch rejection email to applicant coach (awaited for serverless delivery completion)
+  try {
+    let coachEmail: string | undefined;
+    let coachName: string | undefined;
 
-      const uSnap = await userRef.get();
-      if (uSnap.exists) {
-        const uData = uSnap.data();
-        coachEmail = uData?.email;
-        coachName = uData?.full_name || `${uData?.first_name || ''} ${uData?.last_name || ''}`.trim();
-      }
-
-      if (!coachEmail) {
-        const cSnap = await coachRef.get();
-        if (cSnap.exists) {
-          const cData = cSnap.data();
-          coachEmail = cData?.email;
-          coachName = coachName || cData?.full_name || `${cData?.first_name || ''} ${cData?.last_name || ''}`.trim();
-        }
-      }
-
-      if (coachEmail) {
-        await sendCoachStatusEmailService(coachEmail, coachName || 'Coach', 'REJECTED', reason);
-      }
-    } catch (err) {
-      console.warn('Failed to dispatch coach rejection status email:', err);
+    const uSnap = await userRef.get();
+    if (uSnap.exists) {
+      const uData = uSnap.data();
+      coachEmail = uData?.email;
+      coachName = uData?.full_name || `${uData?.first_name || ''} ${uData?.last_name || ''}`.trim();
     }
-  })();
+
+    if (!coachEmail) {
+      const cSnap = await coachRef.get();
+      if (cSnap.exists) {
+        const cData = cSnap.data();
+        coachEmail = cData?.email;
+        coachName = coachName || cData?.full_name || `${cData?.first_name || ''} ${cData?.last_name || ''}`.trim();
+      }
+    }
+
+    if (coachEmail) {
+      await sendCoachStatusEmailService(coachEmail, coachName || 'Coach', 'REJECTED', reason);
+    }
+  } catch (err) {
+    console.warn('Failed to dispatch coach rejection status email:', err);
+  }
 
   return {
     message: 'Coach application declined.',
@@ -833,44 +829,42 @@ export async function approveOfficialService(adminId: string, officialIdParam: s
     message: 'Your official account has been approved by the system administrator. You may now log in to the tournament platform.',
   }).catch(() => null);
 
-  // Dispatch confirmation email directly to the official's email address
-  (async () => {
-    try {
-      let officialEmail: string | undefined;
-      let officialName: string | undefined;
+  // Dispatch confirmation email directly to the official's email address (awaited for serverless delivery completion)
+  try {
+    let officialEmail: string | undefined;
+    let officialName: string | undefined;
 
-      const uSnap = await userRef.get();
-      if (uSnap.exists) {
-        const uData = uSnap.data();
-        officialEmail = uData?.email;
-        officialName = uData?.full_name || uData?.full_legal_name || `${uData?.first_name || ''} ${uData?.last_name || ''}`.trim();
-      }
-
-      if (!officialEmail) {
-        const offSnap = await offProfileRef.get();
-        if (offSnap.exists) {
-          const offData = offSnap.data();
-          officialEmail = offData?.email;
-          officialName = officialName || offData?.full_name || offData?.full_legal_name || `${offData?.first_name || ''} ${offData?.last_name || ''}`.trim();
-        }
-      }
-
-      if (!officialEmail) {
-        const rawSnap = await rawProfileRef.get();
-        if (rawSnap.exists) {
-          const rawData = rawSnap.data();
-          officialEmail = rawData?.email;
-          officialName = officialName || rawData?.full_name || rawData?.full_legal_name || `${rawData?.first_name || ''} ${rawData?.last_name || ''}`.trim();
-        }
-      }
-
-      if (officialEmail) {
-        await sendOfficialStatusEmailService(officialEmail, officialName || 'Official', 'APPROVED');
-      }
-    } catch (emailErr) {
-      console.warn('Failed to dispatch official approval status email:', emailErr);
+    const uSnap = await userRef.get();
+    if (uSnap.exists) {
+      const uData = uSnap.data();
+      officialEmail = uData?.email;
+      officialName = uData?.full_name || uData?.full_legal_name || `${uData?.first_name || ''} ${uData?.last_name || ''}`.trim();
     }
-  })();
+
+    if (!officialEmail) {
+      const offSnap = await offProfileRef.get();
+      if (offSnap.exists) {
+        const offData = offSnap.data();
+        officialEmail = offData?.email;
+        officialName = officialName || offData?.full_name || offData?.full_legal_name || `${offData?.first_name || ''} ${offData?.last_name || ''}`.trim();
+      }
+    }
+
+    if (!officialEmail) {
+      const rawSnap = await rawProfileRef.get();
+      if (rawSnap.exists) {
+        const rawData = rawSnap.data();
+        officialEmail = rawData?.email;
+        officialName = officialName || rawData?.full_name || rawData?.full_legal_name || `${rawData?.first_name || ''} ${rawData?.last_name || ''}`.trim();
+      }
+    }
+
+    if (officialEmail) {
+      await sendOfficialStatusEmailService(officialEmail, officialName || 'Official', 'APPROVED');
+    }
+  } catch (emailErr) {
+    console.warn('Failed to dispatch official approval status email:', emailErr);
+  }
 
   return {
     message: 'Official account approved successfully.',
@@ -932,44 +926,42 @@ export async function rejectOfficialService(adminId: string, officialIdParam: st
     message: `Your official account application was declined by the system administrator. Reason: ${reason}`,
   }).catch(() => null);
 
-  // Dispatch rejection notification email directly to the official's email address
-  (async () => {
-    try {
-      let officialEmail: string | undefined;
-      let officialName: string | undefined;
+  // Dispatch rejection notification email directly to the official's email address (awaited for serverless delivery completion)
+  try {
+    let officialEmail: string | undefined;
+    let officialName: string | undefined;
 
-      const uSnap = await userRef.get();
-      if (uSnap.exists) {
-        const uData = uSnap.data();
-        officialEmail = uData?.email;
-        officialName = uData?.full_name || uData?.full_legal_name || `${uData?.first_name || ''} ${uData?.last_name || ''}`.trim();
-      }
-
-      if (!officialEmail) {
-        const offSnap = await offProfileRef.get();
-        if (offSnap.exists) {
-          const offData = offSnap.data();
-          officialEmail = offData?.email;
-          officialName = officialName || offData?.full_name || offData?.full_legal_name || `${offData?.first_name || ''} ${offData?.last_name || ''}`.trim();
-        }
-      }
-
-      if (!officialEmail) {
-        const rawSnap = await rawProfileRef.get();
-        if (rawSnap.exists) {
-          const rawData = rawSnap.data();
-          officialEmail = rawData?.email;
-          officialName = officialName || rawData?.full_name || rawData?.full_legal_name || `${rawData?.first_name || ''} ${rawData?.last_name || ''}`.trim();
-        }
-      }
-
-      if (officialEmail) {
-        await sendOfficialStatusEmailService(officialEmail, officialName || 'Official', 'REJECTED', reason);
-      }
-    } catch (emailErr) {
-      console.warn('Failed to dispatch official rejection status email:', emailErr);
+    const uSnap = await userRef.get();
+    if (uSnap.exists) {
+      const uData = uSnap.data();
+      officialEmail = uData?.email;
+      officialName = uData?.full_name || uData?.full_legal_name || `${uData?.first_name || ''} ${uData?.last_name || ''}`.trim();
     }
-  })();
+
+    if (!officialEmail) {
+      const offSnap = await offProfileRef.get();
+      if (offSnap.exists) {
+        const offData = offSnap.data();
+        officialEmail = offData?.email;
+        officialName = officialName || offData?.full_name || offData?.full_legal_name || `${offData?.first_name || ''} ${offData?.last_name || ''}`.trim();
+      }
+    }
+
+    if (!officialEmail) {
+      const rawSnap = await rawProfileRef.get();
+      if (rawSnap.exists) {
+        const rawData = rawSnap.data();
+        officialEmail = rawData?.email;
+        officialName = officialName || rawData?.full_name || rawData?.full_legal_name || `${rawData?.first_name || ''} ${rawData?.last_name || ''}`.trim();
+      }
+    }
+
+    if (officialEmail) {
+      await sendOfficialStatusEmailService(officialEmail, officialName || 'Official', 'REJECTED', reason);
+    }
+  } catch (emailErr) {
+    console.warn('Failed to dispatch official rejection status email:', emailErr);
+  }
 
   return {
     message: 'Official account application declined.',
