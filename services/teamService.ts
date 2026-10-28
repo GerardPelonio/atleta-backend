@@ -839,7 +839,7 @@ export async function updateTeamRoster(
           position: typeof existing !== 'string' ? (existing.position ?? 'Unassigned') : 'Unassigned',
           joined_at: (typeof existing !== 'string' && existing.added_at) ? existing.added_at : (teamData.created_at || nowIso),
           terminated_at: nowIso,
-          status: 'Terminated',
+          status: 'Suspended',
           termination_reason: 'Roster adjustment by coach',
           stats_summary: statsSummary,
         };
@@ -1676,7 +1676,9 @@ export async function calculateAthleteStatsForTeam(
   // Fallback to Match_Logs if direct Performance_Metrics had 0 matches
   if (totalGames === 0) {
     try {
-      const matchLogsSnap = await db.collection('Match_Logs').get();
+      const matchLogsSnap = teamId
+        ? await db.collection('Match_Logs').where('team_id', '==', teamId).limit(25).get()
+        : await db.collection('Match_Logs').limit(15).get();
       for (const mDoc of matchLogsSnap.docs) {
         const m = mDoc.data();
         const mTeamId = String(m.team_id || m.home_team_id || '').trim();
@@ -1785,7 +1787,6 @@ export async function calculateAthleteStatsForTeam(
 export async function getAthletePastTeams(athleteId: string): Promise<PastTeamAffiliation[]> {
   const cleanId = athleteId.replace(/^ath_/, '');
   const canonicalAthleteId = athleteId.startsWith('ath_') ? athleteId : `ath_${athleteId}`;
-  const possibleIds = [athleteId, cleanId, canonicalAthleteId];
 
   let pDoc = await db.collection('Athlete_Profiles').doc(canonicalAthleteId).get();
   if (!pDoc.exists) {
@@ -1793,49 +1794,7 @@ export async function getAthletePastTeams(athleteId: string): Promise<PastTeamAf
   }
 
   const pData = pDoc.exists ? pDoc.data()! : {};
-  let pastTeams: PastTeamAffiliation[] = Array.isArray(pData.past_teams) ? [...pData.past_teams] : [];
-
-  // Also check if any team in Teams collection has athlete in terminated_roster_list
-  try {
-    const teamsSnap = await db.collection('Teams').get();
-    const currentTeamId = pData.team_id || pData.current_affiliation?.team_id || null;
-
-    for (const tDoc of teamsSnap.docs) {
-      const tData = tDoc.data();
-      const tId = tData.team_id || tDoc.id;
-      if (tId === currentTeamId) continue;
-
-      const alreadyInPast = pastTeams.some((pt) => pt.team_id === tId);
-      if (alreadyInPast) continue;
-
-      const termList = Array.isArray(tData.terminated_roster_list) ? tData.terminated_roster_list : Array.isArray(tData.past_roster) ? tData.past_roster : [];
-      const termMember = termList.find((m: any) =>
-        typeof m === 'string' ? possibleIds.includes(m) : possibleIds.includes(m.athlete_id)
-      );
-
-      if (termMember) {
-        const statsSummary = await calculateAthleteStatsForTeam(athleteId, tId, tData.team_name);
-        pastTeams.push({
-          team_id: tId,
-          team_name: tData.team_name || 'Past Team',
-          sport_type: tData.sport_type || 'Basketball',
-          division: tData.division || 'Varsity',
-          logo_url: tData.logo_url || tData.banner_url || null,
-          coach_name: tData.coach_name || 'Head Coach',
-          coach_id: tData.coach_id || '',
-          jersey_number: typeof termMember !== 'string' ? (termMember.jersey_number ?? null) : null,
-          position: typeof termMember !== 'string' ? (termMember.position ?? 'Unassigned') : 'Unassigned',
-          joined_at: typeof termMember !== 'string' ? (termMember.added_at || tData.created_at) : (tData.created_at || new Date().toISOString()),
-          terminated_at: typeof termMember !== 'string' ? (termMember.terminated_at || new Date().toISOString()) : new Date().toISOString(),
-          status: 'Terminated',
-          stats_summary: statsSummary,
-        });
-      }
-    }
-  } catch (err) {
-    console.warn('Error fetching terminated roster list in getAthletePastTeams:', err);
-  }
-
+  const pastTeams: PastTeamAffiliation[] = Array.isArray(pData.past_teams) ? pData.past_teams : [];
   return pastTeams;
 }
 
@@ -1846,7 +1805,8 @@ export async function terminateAthleteFromTeam(
   coachId: string,
   teamId: string,
   athleteId: string,
-  reason: string = 'Terminated from squad roster',
+  reason: string = 'Suspended from squad roster',
+  status: 'Suspended' | 'Terminated' = 'Suspended',
 ) {
   const teamDoc = await db.collection('Teams').doc(teamId).get();
   if (!teamDoc.exists) {
@@ -1860,7 +1820,7 @@ export async function terminateAthleteFromTeam(
     teamData.coach_id.replace('coach_', '') === coachId;
 
   if (!isOwner) {
-    throw new ServiceError('Unauthorized. Coaches may only terminate players from teams they manage.', 403);
+    throw new ServiceError('Unauthorized. Coaches may only terminate or suspend players from teams they manage.', 403);
   }
 
   const cleanAthId = athleteId.replace(/^ath_/, '');
@@ -1895,7 +1855,7 @@ export async function terminateAthleteFromTeam(
     position: typeof removedMember !== 'string' ? (removedMember.position ?? 'Unassigned') : 'Unassigned',
     joined_at: typeof removedMember !== 'string' && removedMember.added_at ? removedMember.added_at : (teamData.created_at || nowIso),
     terminated_at: nowIso,
-    status: 'Terminated',
+    status: status,
     termination_reason: reason,
     stats_summary: statsSummary,
   };
@@ -1940,6 +1900,7 @@ export async function terminateAthleteFromTeam(
       athlete_id: typeof removedMember === 'string' ? removedMember : removedMember.athlete_id,
       user_id: typeof removedMember === 'string' ? removedMember : (removedMember.user_id || cleanAthId),
       terminated_at: nowIso,
+      status: status,
       jersey_number: typeof removedMember !== 'string' ? removedMember.jersey_number : null,
       position: typeof removedMember !== 'string' ? removedMember.position : 'Unassigned',
       reason,
@@ -1957,19 +1918,30 @@ export async function terminateAthleteFromTeam(
   createNotification({
     recipient_id: cleanAthId,
     title: `Roster Status Update: ${teamData.team_name}`,
-    message: `You have been released from ${teamData.team_name}. Your entire performance stats and achievements while playing with this team have been preserved in your past teams career portfolio.`,
+    message: status === 'Suspended'
+      ? `You have been placed on suspended status from ${teamData.team_name}. Your stats and achievements with this team are preserved in your past teams career history.`
+      : `You have been released from ${teamData.team_name}. Your entire performance stats and achievements while playing with this team have been preserved in your past teams career portfolio.`,
     type: 'SYSTEM',
     metadata: {
       team_id: teamId,
       team_name: teamData.team_name,
-      status: 'Terminated',
+      status: status,
     },
-  }).catch((notifErr) => console.warn('Could not send termination notification:', notifErr));
+  }).catch((notifErr) => console.warn('Could not send roster status notification:', notifErr));
 
   invalidateTeamCache();
   return {
-    message: `Player successfully terminated from ${teamData.team_name}. Past team stats archived.`,
+    message: `Player successfully ${status.toLowerCase()} from ${teamData.team_name}. Past team stats archived.`,
     team: await getTeamDetails(teamId),
     past_team_record: pastRecord,
   };
+}
+
+export async function suspendAthleteFromTeam(
+  coachId: string,
+  teamId: string,
+  athleteId: string,
+  reason: string = 'Suspended from squad roster',
+) {
+  return terminateAthleteFromTeam(coachId, teamId, athleteId, reason, 'Suspended');
 }

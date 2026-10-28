@@ -204,14 +204,16 @@ export async function terminateRosterMemberHandler(req: AuthRequest, res: Respon
     const coachId = req.user!.uid;
     const teamId = Array.isArray(req.params.teamId) ? req.params.teamId[0] : req.params.teamId;
     const athleteId = Array.isArray(req.params.athleteId) ? req.params.athleteId[0] : req.params.athleteId;
-    const reason = req.body?.reason || req.body?.termination_reason || 'Terminated from squad roster';
+    const isSuspension = req.path.includes('suspend') || req.body?.status === 'Suspended' || req.body?.action === 'suspend';
+    const status = isSuspension ? 'Suspended' : 'Terminated';
+    const reason = req.body?.reason || req.body?.termination_reason || (isSuspension ? 'Suspended from squad roster' : 'Terminated from squad roster');
 
     if (!teamId || !athleteId) {
       res.status(400).json({ error: 'Team ID and Athlete ID are required.' });
       return;
     }
 
-    const result = await terminateAthleteFromTeam(coachId, teamId, athleteId, reason);
+    const result = await terminateAthleteFromTeam(coachId, teamId, athleteId, reason, status);
     res.status(200).json(result);
   } catch (error: any) {
     if (error instanceof ServiceError) {
@@ -222,3 +224,9 @@ export async function terminateRosterMemberHandler(req: AuthRequest, res: Respon
     res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
   }
 }
+
+export async function suspendRosterMemberHandler(req: AuthRequest, res: Response): Promise<void> {
+  req.body = { ...req.body, status: 'Suspended' };
+  return terminateRosterMemberHandler(req, res);
+}
+

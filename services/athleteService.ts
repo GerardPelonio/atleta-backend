@@ -141,7 +141,7 @@ export async function getAthleteProfile(athleteId: string): Promise<AthleteFullP
     excel_tags: profileData.excel_tags || profileData.excelTags || profileData.specialties || userData.excel_tags || userData.excelTags || userData.specialties || [],
     excelTags: profileData.excel_tags || profileData.excelTags || profileData.specialties || userData.excel_tags || userData.excelTags || userData.specialties || [],
     specialties: profileData.excel_tags || profileData.excelTags || profileData.specialties || userData.excel_tags || userData.excelTags || userData.specialties || [],
-    past_teams: profileData.past_teams || (await getAthletePastTeams(canonicalAthleteId).catch(() => [])),
+    past_teams: Array.isArray(profileData.past_teams) ? profileData.past_teams : (await getAthletePastTeams(canonicalAthleteId).catch(() => [])),
     workload_analytics: mergedWorkload,
     workload: mergedWorkload,
     workload_target: coachTarget || undefined,
@@ -763,7 +763,7 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
     last_5_games_scores: derivedScores,
     current_team_summary: currentTeamSummary,
     workload_summary: workloadSummary,
-    past_teams: profileData.past_teams || (await getAthletePastTeams(canonicalAthleteId).catch(() => [])),
+    past_teams: Array.isArray(profileData.past_teams) ? profileData.past_teams : (await getAthletePastTeams(canonicalAthleteId).catch(() => [])),
   } as any;
 
   // Cache response for 60 seconds

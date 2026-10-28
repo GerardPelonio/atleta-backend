@@ -28,12 +28,15 @@ router.post('/create', authenticate, teamInvalidate, createTeamHandler);
 router.post('/register', authenticate, teamInvalidate, createTeamHandler);
 router.post('/', authenticate, teamInvalidate, createTeamHandler);
 
-// Roster Management & Termination
+// Roster Management, Suspension & Termination
 router.patch('/:teamId/roster', authenticate, teamInvalidate, updateRosterHandler);
 router.post('/:teamId/roster', authenticate, teamInvalidate, updateRosterHandler);
 router.post('/:teamId/terminate/:athleteId', authenticate, teamInvalidate, terminateRosterMemberHandler);
 router.post('/:teamId/roster/:athleteId/terminate', authenticate, teamInvalidate, terminateRosterMemberHandler);
 router.delete('/:teamId/roster/:athleteId', authenticate, teamInvalidate, terminateRosterMemberHandler);
+router.post('/:teamId/suspend/:athleteId', authenticate, teamInvalidate, terminateRosterMemberHandler);
+router.post('/:teamId/roster/:athleteId/suspend', authenticate, teamInvalidate, terminateRosterMemberHandler);
+router.patch('/:teamId/roster/:athleteId/suspend', authenticate, teamInvalidate, terminateRosterMemberHandler);
 
 // Team Profile Details & Updates
 router.get('/details/:teamId', optionalAuth, teamCache, getTeam);

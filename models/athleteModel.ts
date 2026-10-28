@@ -177,7 +177,7 @@ export interface PastTeamAffiliation {
   position?: string;
   joined_at?: string;
   terminated_at?: string;
-  status: 'Terminated' | 'Former' | 'Released';
+  status: 'Terminated' | 'Former' | 'Released' | 'Suspended';
   termination_reason?: string;
   stats_summary: PastTeamStatsSummary;
 }
