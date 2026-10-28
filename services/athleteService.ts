@@ -1,9 +1,9 @@
 import { db, auth } from '../utils/firebaseAdmin';
-import { AthleteFullProfile, AthleteDocument } from '../models/athleteModel';
+import { AthleteFullProfile, AthleteDocument, PastTeamAffiliation } from '../models/athleteModel';
 import { AthleteHomeSummary } from '../models/notificationModel';
 import { eventBus, EVENTS } from '../utils/eventBus';
 import { getAthleteWorkloadSummary } from './workloadService';
-import { getAthleteTeam } from './teamService';
+import { getAthleteTeam, getAthletePastTeams } from './teamService';
 
 /**
  * Calculate BMI = weight (kg) / height (m)²
@@ -51,7 +51,8 @@ export async function getAthleteProfile(athleteId: string): Promise<AthleteFullP
   const heightCm = Number(phys.height_cm || profileData.height_cm || profileData.physical_attributes?.height_cm || 0);
   const weightKg = Number(phys.weight_kg || profileData.weight_kg || profileData.physical_attributes?.weight_kg || 0);
   const wingspanCm = Number(phys.wingspan_cm || profileData.wingspan_cm || profileData.physical_attributes?.wingspan_cm || 0);
-  const verticalCm = Number(phys.vertical_cm || profileData.vertical_cm || profileData.physical_attributes?.vertical_cm || 0);
+  const verticalCm = Number(phys.vertical_cm || profileData.vertical_cm || profileData.physical_attributes?.vertical_cm || profileData.vertical_jump_cm || profileData.vertical || 0);
+  const verticalInches = verticalCm > 0 ? Math.round(verticalCm / 2.54) : 0;
 
   const bmi = calculateBMI(weightKg, heightCm);
   const apeIndex = calculateApeIndex(wingspanCm, heightCm);
@@ -85,7 +86,15 @@ export async function getAthleteProfile(athleteId: string): Promise<AthleteFullP
       weight_kg: weightKg,
       wingspan_cm: wingspanCm,
       vertical_cm: verticalCm,
+      vertical_jump_cm: verticalCm || null,
+      vertical_leap_in: verticalInches || null,
     },
+    height_cm: heightCm || null,
+    weight_kg: weightKg || null,
+    wingspan_cm: wingspanCm || null,
+    vertical_cm: verticalCm || null,
+    vertical_jump_cm: verticalCm || null,
+    vertical_leap_in: verticalInches || null,
 
     computed_metrics: {
       bmi,
@@ -132,6 +141,7 @@ export async function getAthleteProfile(athleteId: string): Promise<AthleteFullP
     excel_tags: profileData.excel_tags || profileData.excelTags || profileData.specialties || userData.excel_tags || userData.excelTags || userData.specialties || [],
     excelTags: profileData.excel_tags || profileData.excelTags || profileData.specialties || userData.excel_tags || userData.excelTags || userData.specialties || [],
     specialties: profileData.excel_tags || profileData.excelTags || profileData.specialties || userData.excel_tags || userData.excelTags || userData.specialties || [],
+    past_teams: profileData.past_teams || (await getAthletePastTeams(canonicalAthleteId).catch(() => [])),
     workload_analytics: mergedWorkload,
     workload: mergedWorkload,
     workload_target: coachTarget || undefined,
@@ -753,6 +763,7 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
     last_5_games_scores: derivedScores,
     current_team_summary: currentTeamSummary,
     workload_summary: workloadSummary,
+    past_teams: profileData.past_teams || (await getAthletePastTeams(canonicalAthleteId).catch(() => [])),
   } as any;
 
   // Cache response for 60 seconds

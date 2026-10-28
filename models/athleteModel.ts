@@ -3,6 +3,8 @@ export interface PhysicalAttributes {
   weight_kg: number;
   wingspan_cm: number;
   vertical_cm: number;
+  vertical_jump_cm?: number | null;
+  vertical_leap_in?: number | null;
 }
 
 export interface AthleteStats {
@@ -105,6 +107,12 @@ export interface AthleteFullProfile {
   eligible_documents?: any[];
   sport_type: string;
   physical_attributes: PhysicalAttributes;
+  height_cm?: number | null;
+  weight_kg?: number | null;
+  wingspan_cm?: number | null;
+  vertical_cm?: number | null;
+  vertical_jump_cm?: number | null;
+  vertical_leap_in?: number | null;
   computed_metrics: {
     bmi: number; // weight (kg) / height (m)²
     ape_index: number; // wingspan (cm) / height (cm)
@@ -127,6 +135,49 @@ export interface AthleteFullProfile {
   excel_tags?: string[];
   excelTags?: string[];
   specialties?: string[];
+  past_teams?: PastTeamAffiliation[];
   created_at?: Date;
   updated_at?: Date;
+}
+
+export interface PastTeamStatsSummary {
+  matches_played: number;
+  total_points: number;
+  ppg: number;
+  total_rebounds: number;
+  rpg: number;
+  total_assists: number;
+  apg: number;
+  total_steals: number;
+  spg: number;
+  total_blocks: number;
+  bpg: number;
+  total_turnovers: number;
+  total_fouls: number;
+  fg_pct: number;
+  three_pct: number;
+  ft_pct: number;
+  efficiency_rating: number;
+  wins: number;
+  losses: number;
+  best_time?: string | number;
+  top_sprint_time?: string | number;
+  events_participated?: number;
+}
+
+export interface PastTeamAffiliation {
+  team_id: string;
+  team_name: string;
+  sport_type: string;
+  division?: string;
+  logo_url?: string;
+  coach_name?: string;
+  coach_id?: string;
+  jersey_number?: number | string | null;
+  position?: string;
+  joined_at?: string;
+  terminated_at?: string;
+  status: 'Terminated' | 'Former' | 'Released';
+  termination_reason?: string;
+  stats_summary: PastTeamStatsSummary;
 }

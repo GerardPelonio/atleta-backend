@@ -1181,6 +1181,16 @@ Return the extraction in this exact JSON structure:
       "distance_m": 100,
       "rank": 1
     }
+  ],
+  "injuries": [
+    {
+      "player_name": "Player Full Name",
+      "team": "Team Name",
+      "quarter_or_set": "Q2 / Set 3",
+      "injury_type": "Ankle Sprain / Hamstring Strain / Knee / Cramps / Concussion",
+      "status": "Out / Sidelined / Day-to-Day",
+      "notes": "Left match in 2nd quarter"
+    }
   ]
 }
 
@@ -1192,7 +1202,8 @@ CRITICAL RULES:
 5. PRESERVE REAL NAMES & NUMBERS: Extract exact jersey numbers and names as written.
 6. NUMERICAL ACCURACY & MULTI-DIGIT PRESERVATION: NEVER drop or truncate digits (e.g., '14' must never be truncated to '4', '28' must not become '8', '102' must not become '10'). For split formats like '5/12' or '3-8', extract made and attempted counts separately.
 7. SECONDARY STATISTICS PERSISTENCE: Guarantee all secondary box-score columns are explicitly mapped and populated rather than defaulting to 0 or null.
-8. RETURN ONLY VALID JSON OBJECT. No markdown backticks, no explanatory text.`;
+8. INJURIES & SIDELINED ATHLETES: If the document notes, remarks, foul column, or player table indicates any injured, sidelined, medical withdrawal, or DNP-injury players, extract them into the "injuries" array. If none are written, return an empty array [].
+9. RETURN ONLY VALID JSON OBJECT. No markdown backticks, no explanatory text.`;
 
 function isTesseractAvailable(): boolean {
   try {
@@ -2009,9 +2020,11 @@ export async function scanScoresheetStandalone(file?: Express.Multer.File, custo
       player_summary: enrichedPlayers,
       player_stats: enrichedPlayers,
       playerStats: enrichedPlayers,
+      injuries: Array.isArray(parsedData.injuries) ? parsedData.injuries : [],
       parsed_tables: {
         team_scores: teamScores,
         player_summary: enrichedPlayers,
+        injuries: Array.isArray(parsedData.injuries) ? parsedData.injuries : [],
       },
     };
   } catch (aiErr: any) {
@@ -2299,6 +2312,16 @@ export async function scanMultipleScoresheetsStandalone(
     ? `${homeScoreItem.score || 0} - ${awayScoreItem.score || 0}`
     : primaryMatch?.match_info?.final_score || '';
 
+  const allInjuriesRaw = parsedMatches.flatMap((m) => m.injuries || m.parsed_tables?.injuries || []);
+  const mergedInjuriesMap = new Map<string, any>();
+  for (const inj of allInjuriesRaw) {
+    const key = String(inj.player_name || inj.name || '').trim().toLowerCase();
+    if (key && !mergedInjuriesMap.has(key)) {
+      mergedInjuriesMap.set(key, inj);
+    }
+  }
+  const mergedInjuries = Array.from(mergedInjuriesMap.values());
+
   return {
     batch_mode: true,
     is_continuation: isContinuation,
@@ -2316,10 +2339,12 @@ export async function scanMultipleScoresheetsStandalone(
     team_scores: mergedTeamScores.length > 0 ? mergedTeamScores : primaryMatch?.team_scores || [],
     player_summary: mergedPlayers.length > 0 ? mergedPlayers : primaryMatch?.player_summary || [],
     race_results: mergedRaceResults.length > 0 ? mergedRaceResults : (primaryMatch?.race_results || primaryMatch?.parsed_tables?.race_results || []),
+    injuries: mergedInjuries.length > 0 ? mergedInjuries : (primaryMatch?.injuries || []),
     parsed_tables: {
       team_scores: mergedTeamScores,
       player_summary: mergedPlayers,
       race_results: mergedRaceResults.length > 0 ? mergedRaceResults : (primaryMatch?.race_results || primaryMatch?.parsed_tables?.race_results || []),
+      injuries: mergedInjuries.length > 0 ? mergedInjuries : (primaryMatch?.injuries || []),
     },
   };
 }

@@ -37,6 +37,7 @@ export interface CreateOfficialMatchDto {
   awayRosterAthletes?: string[];
   scoresheet_data?: any;
   parsed_tables?: any;
+  injuries?: any[];
 }
 
 export interface CertifyValidationDto {
@@ -158,6 +159,7 @@ export async function createOfficialMatchService(
     official_id: officialId || uid,
     is_certified: false,
     is_locked: false,
+    injuries: Array.isArray(rawData.injuries) ? rawData.injuries : [],
     timestamp: now,
     created_at: now,
     updated_at: now,

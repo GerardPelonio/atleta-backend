@@ -8,7 +8,7 @@ import {
   getAthleteExpandedCareerStats,
   getAthleteDateGroupedMatches,
 } from '../services/athleteService';
-import { searchAthletes } from '../services/teamService';
+import { searchAthletes, getAthletePastTeams } from '../services/teamService';
 import { registerUserService } from '../services/userService';
 import { validateRegisterUser } from '../validators/userValidator';
 import { ServiceError } from '../validators/matchValidator';
@@ -204,6 +204,26 @@ export async function getAthleteMatchHistoryHandler(req: Request, res: Response)
       return;
     }
     console.error('getAthleteMatchHistoryHandler error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function getAthletePastTeamsHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const rawParam = req.params.athleteId;
+    const athleteId = (Array.isArray(rawParam) ? rawParam[0] : rawParam) || (req as any).user?.uid;
+    if (!athleteId) {
+      res.status(400).json({ error: 'Athlete ID is required.' });
+      return;
+    }
+
+    const pastTeams = await getAthletePastTeams(athleteId);
+    res.status(200).json({
+      athlete_id: athleteId,
+      past_teams: pastTeams,
+    });
+  } catch (error: any) {
+    console.error('getAthletePastTeamsHandler error:', error);
     res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
   }
 }

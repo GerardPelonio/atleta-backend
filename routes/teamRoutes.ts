@@ -6,6 +6,7 @@ import {
   createTeamHandler,
   updateTeamHandler,
   updateRosterHandler,
+  terminateRosterMemberHandler,
 } from '../controllers/teamController';
 
 import { cacheMiddleware, invalidateCacheMiddleware } from '../middlewares/cacheMiddleware';
@@ -27,9 +28,12 @@ router.post('/create', authenticate, teamInvalidate, createTeamHandler);
 router.post('/register', authenticate, teamInvalidate, createTeamHandler);
 router.post('/', authenticate, teamInvalidate, createTeamHandler);
 
-// Roster Management
+// Roster Management & Termination
 router.patch('/:teamId/roster', authenticate, teamInvalidate, updateRosterHandler);
 router.post('/:teamId/roster', authenticate, teamInvalidate, updateRosterHandler);
+router.post('/:teamId/terminate/:athleteId', authenticate, teamInvalidate, terminateRosterMemberHandler);
+router.post('/:teamId/roster/:athleteId/terminate', authenticate, teamInvalidate, terminateRosterMemberHandler);
+router.delete('/:teamId/roster/:athleteId', authenticate, teamInvalidate, terminateRosterMemberHandler);
 
 // Team Profile Details & Updates
 router.get('/details/:teamId', optionalAuth, teamCache, getTeam);

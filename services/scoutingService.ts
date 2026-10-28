@@ -627,7 +627,8 @@ export async function getFullScoutingAthleteProfile(athleteId: string): Promise<
   const heightCm = Number(phys.height_cm ?? profileData.height_cm ?? 0);
   const weightKg = Number(phys.weight_kg ?? profileData.weight_kg ?? 0);
   const wingspanCm = Number(phys.wingspan_cm ?? profileData.wingspan_cm ?? 0);
-  const verticalCm = Number(phys.vertical_cm ?? profileData.vertical_cm ?? 0);
+  const verticalCm = Number(phys.vertical_cm ?? profileData.vertical_cm ?? profileData.vertical_jump_cm ?? profileData.vertical ?? 0);
+  const verticalInches = verticalCm > 0 ? Math.round(verticalCm / 2.54) : 0;
 
   const heightM = heightCm > 0 ? heightCm / 100 : 0;
   const bmi = heightM > 0 && weightKg > 0 ? Math.round((weightKg / (heightM * heightM)) * 10) / 10 : 0;
@@ -763,7 +764,12 @@ export async function getFullScoutingAthleteProfile(athleteId: string): Promise<
       weight_kg: weightKg,
       wingspan_cm: wingspanCm,
       vertical_cm: verticalCm,
+      vertical_jump_cm: verticalCm,
+      vertical_leap_in: verticalInches,
     },
+    vertical_cm: verticalCm,
+    vertical_jump_cm: verticalCm,
+    vertical_leap_in: verticalInches,
 
     computed_metrics: {
       bmi,

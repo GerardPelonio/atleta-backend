@@ -7,6 +7,7 @@ import {
   createTeam,
   updateTeam,
   updateTeamRoster,
+  terminateAthleteFromTeam,
   ServiceError,
 } from '../services/teamService';
 import { validateCreateTeam, validateUpdateRoster } from '../validators/teamValidator';
@@ -194,6 +195,30 @@ export async function getAthleteTeamHandler(req: AuthRequest, res: Response): Pr
     res.status(200).json(result);
   } catch (error: any) {
     console.error('getAthleteTeamHandler error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function terminateRosterMemberHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const coachId = req.user!.uid;
+    const teamId = Array.isArray(req.params.teamId) ? req.params.teamId[0] : req.params.teamId;
+    const athleteId = Array.isArray(req.params.athleteId) ? req.params.athleteId[0] : req.params.athleteId;
+    const reason = req.body?.reason || req.body?.termination_reason || 'Terminated from squad roster';
+
+    if (!teamId || !athleteId) {
+      res.status(400).json({ error: 'Team ID and Athlete ID are required.' });
+      return;
+    }
+
+    const result = await terminateAthleteFromTeam(coachId, teamId, athleteId, reason);
+    res.status(200).json(result);
+  } catch (error: any) {
+    if (error instanceof ServiceError) {
+      res.status(error.statusCode).json({ error: error.message });
+      return;
+    }
+    console.error('terminateRosterMemberHandler error:', error);
     res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
   }
 }

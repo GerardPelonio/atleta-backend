@@ -5,6 +5,18 @@ export type SportType = 'Basketball' | 'Swimming' | 'Track & Field' | (string & 
 export type GameResult = 'WIN' | 'LOSS' | 'TBD';
 export type ValidationStatus = 'Pending' | 'Approved' | 'Rejected';
 
+export interface MatchInjury {
+  player_name: string;
+  athlete_id?: string;
+  team: string; // 'Home' | 'Away' or specific team name
+  injury_type: string; // e.g. "Ankle Sprain", "Hamstring Strain", "Knee Contusion", "Cramps", "Concussion"
+  quarter_or_set?: string; // e.g. "Q1", "Q2", "Q3", "Q4", "Set 1", "Set 2", "1st Half", "2nd Half"
+  severity?: 'Minor' | 'Moderate' | 'Severe';
+  status: 'Out' | 'Day-to-Day' | 'Sidelined' | 'Questionable';
+  notes?: string;
+  is_ocr_detected?: boolean;
+}
+
 export interface MatchLog {
   match_id: string;               // Primary Key, Required
   matchName?: string;             // User-defined custom match name
@@ -38,6 +50,7 @@ export interface MatchLog {
   awayRosterAthletes?: string[];  // Array of away team registered athlete UIDs (operational alias)
   player_stats?: any[];           // Detailed array of player stats from both teams
   playerStats?: any[];            // Individual player match stats line mapping (operational alias)
+  injuries?: MatchInjury[];       // Injuries and sidelined players logged during the match
   notes?: string;                 // Text, Optional
   idempotency_key?: string;       // Optional idempotency key string
   is_invalidated?: boolean;       // Optional flag for disputed match records

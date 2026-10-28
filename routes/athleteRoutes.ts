@@ -10,6 +10,7 @@ import {
   registerAthlete,
   getAthleteAllStatsHandler,
   getAthleteMatchHistoryHandler,
+  getAthletePastTeamsHandler,
 } from '../controllers/athleteController';
 import { uploadAvatarHandler } from '../controllers/userController';
 import { getAthleteTeamHandler } from '../controllers/teamController';
@@ -36,6 +37,7 @@ router.get('/', optionalAuth, cacheMiddleware({ ttlSeconds: 60, tags: ['athletes
 // Clean Token-Based Routes (No Athlete ID required in URL)
 router.get('/home', authenticate, getAthleteHome);
 router.get('/team', authenticate, getAthleteTeamHandler);
+router.get('/past-teams', authenticate, getAthletePastTeamsHandler);
 router.get('/stats/all', authenticate, getAthleteAllStatsHandler);
 router.get('/stats', authenticate, getAthleteAllStatsHandler);
 router.get('/matches', authenticate, getAthleteMatchHistoryHandler);
@@ -56,6 +58,7 @@ router.post('/documents', authenticate, upload.any(), uploadDocument);
 // Parameterized Routes (Backward-compatible and for Coach/Scouting queries)
 router.get('/:athleteId/home', authenticate, getAthleteHome);
 router.get('/:athleteId/team', authenticate, getAthleteTeamHandler);
+router.get('/:athleteId/past-teams', authenticate, getAthletePastTeamsHandler);
 router.get('/:athleteId/stats/all', authenticate, getAthleteAllStatsHandler);
 router.get('/:athleteId/stats', authenticate, getAthleteAllStatsHandler);
 router.get('/:athleteId/matches', authenticate, getAthleteMatchHistoryHandler);

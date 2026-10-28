@@ -64,7 +64,13 @@ export interface AthleteProfile {
     height_cm: number;
     weight_kg: number;
     wingspan_cm: number;
+    vertical_cm?: number;
+    vertical_jump_cm?: number;
+    vertical_leap_in?: number;
   } | null;
+  vertical_cm?: number | null;
+  vertical_jump_cm?: number | null;
+  vertical_leap_in?: number | null;
   eligibility_documents?: AthleteEligibilityDocuments | null;
   achievements?: AthleteAchievementItem[] | null;
   computed_metrics?: {

@@ -10,6 +10,8 @@ import {
   CreateTeamDto,
   UpdateRosterItem,
 } from '../models/teamModel';
+import { PastTeamAffiliation, PastTeamStatsSummary } from '../models/athleteModel';
+import { createNotification } from './notificationService';
 
 export class ServiceError extends Error {
   statusCode: number;
@@ -571,7 +573,8 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
     const heightCm = Number(phys.height_cm ?? profileData.height_cm ?? 0);
     const weightKg = Number(phys.weight_kg ?? profileData.weight_kg ?? 0);
     const wingspanCm = Number(phys.wingspan_cm ?? profileData.wingspan_cm ?? 0);
-    const verticalCm = Number(phys.vertical_cm ?? profileData.vertical_cm ?? 0);
+    const verticalCm = Number(phys.vertical_cm ?? profileData.vertical_cm ?? profileData.vertical_jump_cm ?? profileData.vertical ?? 0);
+    const verticalInches = verticalCm > 0 ? Math.round(verticalCm / 2.54) : 0;
 
     const docs = Array.isArray(profileData.eligibility_documents)
       ? profileData.eligibility_documents
@@ -618,7 +621,12 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
         weight_kg: weightKg,
         wingspan_cm: wingspanCm,
         vertical_cm: verticalCm,
+        vertical_jump_cm: verticalCm,
+        vertical_leap_in: verticalInches,
       },
+      vertical_cm: verticalCm,
+      vertical_jump_cm: verticalCm,
+      vertical_leap_in: verticalInches,
       stats: {
         ppg: Number(stats.ppg ?? stats.points_per_game ?? 0),
         rpg: Number(stats.rpg ?? stats.rebounds_per_game ?? 0),
@@ -771,8 +779,8 @@ export async function updateTeamRoster(
       unverifiedAthletes.push(`${firstName} ${lastName}`.trim() || athleteId);
     }
 
-    // Update position and jersey_number on Athlete_Profiles
-    const athleteUpdates: Record<string, any> = { updated_at: new Date() };
+    // Update position and jersey_number on Athlete_Profiles, and set active team_id
+    const athleteUpdates: Record<string, any> = { updated_at: new Date(), team_id: teamId };
     if (item.position) athleteUpdates.position = item.position.trim();
     if (item.jersey_number !== undefined) athleteUpdates.jersey_number = Number(item.jersey_number);
 
@@ -803,10 +811,96 @@ export async function updateTeamRoster(
     );
   }
 
-  const rosterUpdates = {
+  // Detect removed / terminated athletes from current roster
+  const existingRoster: (string | TeamRosterMember)[] = Array.isArray(teamData.roster_list) ? teamData.roster_list : [];
+  const incomingAthleteIds = new Set(rosterItems.map((r) => r.athlete_id));
+  const newTerminatedRecords: any[] = [];
+
+  for (const existing of existingRoster) {
+    const existingId = typeof existing === 'string' ? existing : existing.athlete_id;
+    if (existingId && !incomingAthleteIds.has(existingId)) {
+      try {
+        const canonicalAthId = existingId.startsWith('ath_') ? existingId : `ath_${existingId}`;
+        const rawAthUid = existingId.replace(/^ath_/, '');
+
+        // Calculate player's stats earned while with this team
+        const statsSummary = await calculateAthleteStatsForTeam(existingId, teamId, teamData.team_name);
+        const nowIso = new Date().toISOString();
+
+        const terminatedRecord: PastTeamAffiliation = {
+          team_id: teamId,
+          team_name: teamData.team_name,
+          sport_type: teamData.sport_type,
+          division: teamData.division || 'Varsity',
+          logo_url: (teamData as any).logo_url || (teamData as any).banner_url || null,
+          coach_name: teamData.coach_name || 'Coach',
+          coach_id: teamData.coach_id,
+          jersey_number: typeof existing !== 'string' ? (existing.jersey_number ?? null) : null,
+          position: typeof existing !== 'string' ? (existing.position ?? 'Unassigned') : 'Unassigned',
+          joined_at: (typeof existing !== 'string' && existing.added_at) ? existing.added_at : (teamData.created_at || nowIso),
+          terminated_at: nowIso,
+          status: 'Terminated',
+          termination_reason: 'Roster adjustment by coach',
+          stats_summary: statsSummary,
+        };
+
+        // Archive into Athlete_Profiles
+        const athDocRef = db.collection('Athlete_Profiles').doc(canonicalAthId);
+        const athDoc = await athDocRef.get();
+        const currentData = athDoc.exists ? (athDoc.data() || {}) : {};
+        const existingPast: PastTeamAffiliation[] = Array.isArray(currentData.past_teams) ? currentData.past_teams : [];
+
+        const filteredPast = [
+          terminatedRecord,
+          ...existingPast.filter((pt) => pt.team_id !== teamId),
+        ];
+
+        const athUpdates: Record<string, any> = {
+          past_teams: filteredPast,
+          updated_at: new Date().toISOString(),
+        };
+
+        if (currentData.team_id === teamId) {
+          athUpdates.team_id = null;
+        }
+        if (currentData.current_affiliation?.team_id === teamId) {
+          athUpdates.current_affiliation = null;
+        }
+
+        await athDocRef.set(athUpdates, { merge: true });
+        await db.collection('Athlete_Profiles').doc(rawAthUid).set(athUpdates, { merge: true }).catch(() => null);
+
+        newTerminatedRecords.push({
+          athlete_id: existingId,
+          terminated_at: nowIso,
+          jersey_number: typeof existing !== 'string' ? existing.jersey_number : null,
+          position: typeof existing !== 'string' ? existing.position : 'Unassigned',
+          stats_summary: statsSummary,
+        });
+
+        createNotification({
+          recipient_id: rawAthUid,
+          title: `Roster Update: ${teamData.team_name}`,
+          message: `You are no longer on the active roster for ${teamData.team_name}. Your entire performance stats and achievements while playing with this team have been preserved in your past teams career portfolio.`,
+          type: 'SYSTEM',
+          metadata: { team_id: teamId, team_name: teamData.team_name, status: 'Terminated' },
+        }).catch(() => null);
+      } catch (termErr) {
+        console.warn(`[ROSTER ARCHIVE] Error archiving past team stats for athlete ${existingId}:`, termErr);
+      }
+    }
+  }
+
+  const existingTerminatedList = Array.isArray((teamData as any).terminated_roster_list) ? (teamData as any).terminated_roster_list : [];
+  const mergedTerminatedList = [...newTerminatedRecords, ...existingTerminatedList.filter((m: any) => !newTerminatedRecords.some(n => n.athlete_id === (m.athlete_id || m)))];
+
+  const rosterUpdates: Record<string, any> = {
     roster_list: updatedRosterMembers,
     timestamp: new Date().toISOString(),
   };
+  if (mergedTerminatedList.length > 0) {
+    rosterUpdates.terminated_roster_list = mergedTerminatedList;
+  }
 
   // Update roster_list in Firestore Teams document with full athlete details
   await db.collection('Teams').doc(teamId).set(rosterUpdates, { merge: true });
@@ -1484,5 +1578,398 @@ export async function getAthleteTeam(athleteId: string): Promise<AthleteTeamResp
       quote: coach.quote || 'Dedicated to driving team excellence and athlete development.',
     },
     roster,
+  };
+}
+
+/**
+ * Calculate the complete performance statistics summary for an athlete earned while on a specific team.
+ */
+export async function calculateAthleteStatsForTeam(
+  athleteId: string,
+  teamId: string,
+  teamName?: string,
+): Promise<PastTeamStatsSummary> {
+  const cleanId = athleteId.replace(/^ath_/, '');
+  const canonicalAthleteId = athleteId.startsWith('ath_') ? athleteId : `ath_${athleteId}`;
+  const possibleIds = [athleteId, cleanId, canonicalAthleteId];
+
+  const [metricsSnapshot, profileDoc] = await Promise.all([
+    db.collection('Performance_Metrics')
+      .where('athlete_id', 'in', possibleIds)
+      .get()
+      .catch(() => ({ docs: [] } as any)),
+    db.collection('Athlete_Profiles').doc(canonicalAthleteId).get().then(async (doc) => {
+      if (doc.exists) return doc;
+      return db.collection('Athlete_Profiles').doc(cleanId).get();
+    }).catch(() => null),
+  ]);
+
+  const pData = profileDoc && profileDoc.exists ? (profileDoc.data() as any) : {};
+  const rawStats = pData.stats || {};
+  const rawAverages = pData.averages || {};
+  const rawShooting = pData.shooting_efficiency || pData.shooting_accuracy_percentages || {};
+
+  let totalGames = 0;
+  let totalPts = 0;
+  let totalReb = 0;
+  let totalAst = 0;
+  let totalStl = 0;
+  let totalBlk = 0;
+  let totalTo = 0;
+  let totalFouls = 0;
+  let totalFgm = 0;
+  let totalFga = 0;
+  let totalFtm = 0;
+  let totalFta = 0;
+  let total3pm = 0;
+  let efficiencySum = 0;
+  let wins = 0;
+  let losses = 0;
+
+  const cleanTeamName = (teamName || '').trim().toLowerCase();
+
+  for (const doc of metricsSnapshot.docs) {
+    const m = doc.data();
+    const metricTeamId = String(m.team_id || m.home_team_id || m.away_team_id || '').trim();
+    const metricTeamName = String(m.team_name || m.team || '').trim().toLowerCase();
+
+    const matchesTeam =
+      (teamId && metricTeamId === teamId) ||
+      (cleanTeamName && (metricTeamName === cleanTeamName || metricTeamName.includes(cleanTeamName) || cleanTeamName.includes(metricTeamName)));
+
+    if (matchesTeam) {
+      totalGames++;
+      const s = m.sport_stats || {};
+      const pts = Number(s.points ?? s.pts ?? 0);
+      const reb = Number((s.offensive_rebounds || 0) + (s.defensive_rebounds || 0) || s.rebounds || s.reb || 0);
+      const ast = Number(s.assists ?? s.ast ?? 0);
+      const stl = Number(s.steals ?? s.stl ?? 0);
+      const blk = Number(s.blocks ?? s.blk ?? 0);
+      const to = Number(s.turnovers ?? s.to ?? 0);
+      const fouls = Number(s.fouls ?? s.pf ?? 0);
+      const fgm = Number(s.fg_made || 0);
+      const fga = Number(s.fg_attempted || 0);
+      const ftm = Number(s.ft_made || 0);
+      const fta = Number(s.ft_attempted || 0);
+      const three = Number(s.three_made || 0);
+      const eff = Number(m.calculated_player_efficiency || s.efficiency || 0);
+
+      totalPts += pts;
+      totalReb += reb;
+      totalAst += ast;
+      totalStl += stl;
+      totalBlk += blk;
+      totalTo += to;
+      totalFouls += fouls;
+      totalFgm += fgm;
+      totalFga += fga;
+      totalFtm += ftm;
+      totalFta += fta;
+      total3pm += three;
+      efficiencySum += eff;
+
+      if (m.game_result === 'WIN' || m.result === 'Win') wins++;
+      if (m.game_result === 'LOSS' || m.result === 'Lose') losses++;
+    }
+  }
+
+  // Fallback to Match_Logs if direct Performance_Metrics had 0 matches
+  if (totalGames === 0) {
+    try {
+      const matchLogsSnap = await db.collection('Match_Logs').get();
+      for (const mDoc of matchLogsSnap.docs) {
+        const m = mDoc.data();
+        const mTeamId = String(m.team_id || m.home_team_id || '').trim();
+        const mTeamName = String(m.home_team_name || m.team_name || '').trim().toLowerCase();
+        const matchesThisTeam = (teamId && mTeamId === teamId) || (cleanTeamName && mTeamName.includes(cleanTeamName));
+
+        if (matchesThisTeam) {
+          const pStats = Array.isArray(m.player_stats) ? m.player_stats : Array.isArray(m.playerStats) ? m.playerStats : [];
+          const found = pStats.find((ps: any) => possibleIds.includes(ps.athlete_id || ps.user_id));
+          if (found) {
+            totalGames++;
+            const pts = Number(found.points ?? found.pts ?? 0);
+            const reb = Number(found.rebounds ?? found.reb ?? 0);
+            const ast = Number(found.assists ?? found.ast ?? 0);
+            const stl = Number(found.steals ?? found.stl ?? 0);
+            const blk = Number(found.blocks ?? found.blk ?? 0);
+            const to = Number(found.turnovers ?? found.to ?? 0);
+            const fouls = Number(found.fouls ?? found.pf ?? 0);
+            const fgm = Number(found.fg_made || 0);
+            const fga = Number(found.fg_attempted || 0);
+            const ftm = Number(found.ft_made || 0);
+            const fta = Number(found.ft_attempted || 0);
+
+            totalPts += pts;
+            totalReb += reb;
+            totalAst += ast;
+            totalStl += stl;
+            totalBlk += blk;
+            totalTo += to;
+            totalFouls += fouls;
+            totalFgm += fgm;
+            totalFga += fga;
+            totalFtm += ftm;
+            totalFta += fta;
+
+            if (m.game_result === 'WIN' || m.result === 'Win') wins++;
+            if (m.game_result === 'LOSS' || m.result === 'Lose') losses++;
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  // Fallback to athlete profile career stats if player played for this team and had stats recorded
+  if (totalGames === 0 && Number(rawStats.games_played || rawAverages.games_played || 0) > 0) {
+    totalGames = Number(rawStats.games_played || rawAverages.games_played || 1);
+    const ppg = Number(rawStats.ppg ?? rawAverages.ppg ?? 0);
+    const rpg = Number(rawStats.rpg ?? rawAverages.rpg ?? 0);
+    const apg = Number(rawStats.apg ?? rawAverages.apg ?? 0);
+    const bpg = Number(rawStats.bpg ?? rawAverages.bpg ?? 0);
+    totalPts = Math.round(ppg * totalGames);
+    totalReb = Math.round(rpg * totalGames);
+    totalAst = Math.round(apg * totalGames);
+    totalBlk = Math.round(bpg * totalGames);
+    totalStl = Math.round(Number(rawStats.spg || 0) * totalGames);
+    wins = Number(rawStats.wins || 0);
+    losses = Number(rawStats.losses || 0);
+  }
+
+  const ppg = totalGames > 0 ? parseFloat((totalPts / totalGames).toFixed(1)) : Number(rawStats.ppg ?? rawAverages.ppg ?? 0);
+  const rpg = totalGames > 0 ? parseFloat((totalReb / totalGames).toFixed(1)) : Number(rawStats.rpg ?? rawAverages.rpg ?? 0);
+  const apg = totalGames > 0 ? parseFloat((totalAst / totalGames).toFixed(1)) : Number(rawStats.apg ?? rawAverages.apg ?? 0);
+  const spg = totalGames > 0 ? parseFloat((totalStl / totalGames).toFixed(1)) : 0;
+  const bpg = totalGames > 0 ? parseFloat((totalBlk / totalGames).toFixed(1)) : Number(rawStats.bpg ?? 0);
+
+  const fgPct = totalFga > 0
+    ? parseFloat(((totalFgm / totalFga) * 100).toFixed(1))
+    : Number(rawShooting.fg_pct ?? rawStats.fg_pct ?? rawAverages.fg_percentage ?? 45.0);
+
+  const threePct = Number(rawShooting.three_pct ?? rawStats.three_pct ?? rawAverages.three_pt_percentage ?? 33.3);
+
+  const ftPct = totalFta > 0
+    ? parseFloat(((totalFtm / totalFta) * 100).toFixed(1))
+    : Number(rawShooting.ft_pct ?? rawStats.ft_pct ?? rawAverages.ft_percentage ?? 75.0);
+
+  const avgEfficiency = totalGames > 0
+    ? parseFloat((efficiencySum / totalGames).toFixed(1))
+    : Number(rawStats.efficiency_rating ?? rawAverages.efficiency_rating ?? 15.0);
+
+  return {
+    matches_played: totalGames,
+    total_points: totalPts,
+    ppg,
+    total_rebounds: totalReb,
+    rpg,
+    total_assists: totalAst,
+    apg,
+    total_steals: totalStl,
+    spg,
+    total_blocks: totalBlk,
+    bpg,
+    total_turnovers: totalTo,
+    total_fouls: totalFouls,
+    fg_pct: fgPct,
+    three_pct: threePct,
+    ft_pct: ftPct,
+    efficiency_rating: avgEfficiency,
+    wins,
+    losses,
+  };
+}
+
+/**
+ * Fetch an athlete's past teams affiliations along with the complete stats summary for each team.
+ */
+export async function getAthletePastTeams(athleteId: string): Promise<PastTeamAffiliation[]> {
+  const cleanId = athleteId.replace(/^ath_/, '');
+  const canonicalAthleteId = athleteId.startsWith('ath_') ? athleteId : `ath_${athleteId}`;
+  const possibleIds = [athleteId, cleanId, canonicalAthleteId];
+
+  let pDoc = await db.collection('Athlete_Profiles').doc(canonicalAthleteId).get();
+  if (!pDoc.exists) {
+    pDoc = await db.collection('Athlete_Profiles').doc(cleanId).get();
+  }
+
+  const pData = pDoc.exists ? pDoc.data()! : {};
+  let pastTeams: PastTeamAffiliation[] = Array.isArray(pData.past_teams) ? [...pData.past_teams] : [];
+
+  // Also check if any team in Teams collection has athlete in terminated_roster_list
+  try {
+    const teamsSnap = await db.collection('Teams').get();
+    const currentTeamId = pData.team_id || pData.current_affiliation?.team_id || null;
+
+    for (const tDoc of teamsSnap.docs) {
+      const tData = tDoc.data();
+      const tId = tData.team_id || tDoc.id;
+      if (tId === currentTeamId) continue;
+
+      const alreadyInPast = pastTeams.some((pt) => pt.team_id === tId);
+      if (alreadyInPast) continue;
+
+      const termList = Array.isArray(tData.terminated_roster_list) ? tData.terminated_roster_list : Array.isArray(tData.past_roster) ? tData.past_roster : [];
+      const termMember = termList.find((m: any) =>
+        typeof m === 'string' ? possibleIds.includes(m) : possibleIds.includes(m.athlete_id)
+      );
+
+      if (termMember) {
+        const statsSummary = await calculateAthleteStatsForTeam(athleteId, tId, tData.team_name);
+        pastTeams.push({
+          team_id: tId,
+          team_name: tData.team_name || 'Past Team',
+          sport_type: tData.sport_type || 'Basketball',
+          division: tData.division || 'Varsity',
+          logo_url: tData.logo_url || tData.banner_url || null,
+          coach_name: tData.coach_name || 'Head Coach',
+          coach_id: tData.coach_id || '',
+          jersey_number: typeof termMember !== 'string' ? (termMember.jersey_number ?? null) : null,
+          position: typeof termMember !== 'string' ? (termMember.position ?? 'Unassigned') : 'Unassigned',
+          joined_at: typeof termMember !== 'string' ? (termMember.added_at || tData.created_at) : (tData.created_at || new Date().toISOString()),
+          terminated_at: typeof termMember !== 'string' ? (termMember.terminated_at || new Date().toISOString()) : new Date().toISOString(),
+          status: 'Terminated',
+          stats_summary: statsSummary,
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('Error fetching terminated roster list in getAthletePastTeams:', err);
+  }
+
+  return pastTeams;
+}
+
+/**
+ * Explicitly terminate an athlete from a team roster and archive their historical stats.
+ */
+export async function terminateAthleteFromTeam(
+  coachId: string,
+  teamId: string,
+  athleteId: string,
+  reason: string = 'Terminated from squad roster',
+) {
+  const teamDoc = await db.collection('Teams').doc(teamId).get();
+  if (!teamDoc.exists) {
+    throw new ServiceError(`Team with ID '${teamId}' not found.`, 404);
+  }
+
+  const teamData = teamDoc.data() as Team;
+  const isOwner =
+    teamData.coach_id === coachId ||
+    teamData.coach_id === `coach_${coachId}` ||
+    teamData.coach_id.replace('coach_', '') === coachId;
+
+  if (!isOwner) {
+    throw new ServiceError('Unauthorized. Coaches may only terminate players from teams they manage.', 403);
+  }
+
+  const cleanAthId = athleteId.replace(/^ath_/, '');
+  const possibleAthIds = [athleteId, cleanAthId, `ath_${cleanAthId}`];
+
+  const currentRoster: (string | TeamRosterMember)[] = Array.isArray(teamData.roster_list) ? teamData.roster_list : [];
+  const memberIndex = currentRoster.findIndex((m) => {
+    const id = typeof m === 'string' ? m : m.athlete_id;
+    return possibleAthIds.includes(id);
+  });
+
+  if (memberIndex === -1) {
+    throw new ServiceError(`Athlete '${athleteId}' is not an active member of this team roster.`, 404);
+  }
+
+  const removedMember = currentRoster[memberIndex];
+  const newRoster = currentRoster.filter((_, idx) => idx !== memberIndex);
+
+  // Calculate full stats of the player in that team
+  const statsSummary = await calculateAthleteStatsForTeam(athleteId, teamId, teamData.team_name);
+
+  const nowIso = new Date().toISOString();
+  const pastRecord: PastTeamAffiliation = {
+    team_id: teamId,
+    team_name: teamData.team_name,
+    sport_type: teamData.sport_type,
+    division: teamData.division || 'Varsity',
+    logo_url: (teamData as any).logo_url || (teamData as any).banner_url || null,
+    coach_name: teamData.coach_name || 'Coach',
+    coach_id: teamData.coach_id,
+    jersey_number: typeof removedMember !== 'string' ? (removedMember.jersey_number ?? null) : null,
+    position: typeof removedMember !== 'string' ? (removedMember.position ?? 'Unassigned') : 'Unassigned',
+    joined_at: typeof removedMember !== 'string' && removedMember.added_at ? removedMember.added_at : (teamData.created_at || nowIso),
+    terminated_at: nowIso,
+    status: 'Terminated',
+    termination_reason: reason,
+    stats_summary: statsSummary,
+  };
+
+  // 1. Update Athlete_Profiles
+  const canonicalAthId = `ath_${cleanAthId}`;
+  const [pDoc1, pDoc2] = await Promise.all([
+    db.collection('Athlete_Profiles').doc(canonicalAthId).get().catch(() => null),
+    db.collection('Athlete_Profiles').doc(cleanAthId).get().catch(() => null),
+  ]);
+  const activeProfileDoc = (pDoc1 && pDoc1.exists ? pDoc1 : (pDoc2 && pDoc2.exists ? pDoc2 : null));
+  const currentProfileData = activeProfileDoc ? activeProfileDoc.data()! : {};
+  const existingPast: PastTeamAffiliation[] = Array.isArray(currentProfileData.past_teams) ? currentProfileData.past_teams : [];
+
+  const updatedPast = [
+    pastRecord,
+    ...existingPast.filter((pt) => pt.team_id !== teamId),
+  ];
+
+  const athleteUpdates: Record<string, any> = {
+    past_teams: updatedPast,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (currentProfileData.team_id === teamId) {
+    athleteUpdates.team_id = null;
+  }
+  if (currentProfileData.current_affiliation?.team_id === teamId) {
+    athleteUpdates.current_affiliation = null;
+  }
+
+  await Promise.all([
+    db.collection('Athlete_Profiles').doc(canonicalAthId).set(athleteUpdates, { merge: true }),
+    db.collection('Athlete_Profiles').doc(cleanAthId).set(athleteUpdates, { merge: true }).catch(() => null),
+  ]);
+
+  // 2. Update Team document
+  const existingTerminated = Array.isArray((teamData as any).terminated_roster_list) ? (teamData as any).terminated_roster_list : [];
+  const updatedTerminated = [
+    ...existingTerminated.filter((m: any) => !possibleAthIds.includes(m.athlete_id || m)),
+    {
+      athlete_id: typeof removedMember === 'string' ? removedMember : removedMember.athlete_id,
+      user_id: typeof removedMember === 'string' ? removedMember : (removedMember.user_id || cleanAthId),
+      terminated_at: nowIso,
+      jersey_number: typeof removedMember !== 'string' ? removedMember.jersey_number : null,
+      position: typeof removedMember !== 'string' ? removedMember.position : 'Unassigned',
+      reason,
+      stats_summary: statsSummary,
+    },
+  ];
+
+  await db.collection('Teams').doc(teamId).set({
+    roster_list: newRoster,
+    terminated_roster_list: updatedTerminated,
+    timestamp: nowIso,
+  }, { merge: true });
+
+  // 3. Notify the athlete
+  createNotification({
+    recipient_id: cleanAthId,
+    title: `Roster Status Update: ${teamData.team_name}`,
+    message: `You have been released from ${teamData.team_name}. Your entire performance stats and achievements while playing with this team have been preserved in your past teams career portfolio.`,
+    type: 'SYSTEM',
+    metadata: {
+      team_id: teamId,
+      team_name: teamData.team_name,
+      status: 'Terminated',
+    },
+  }).catch((notifErr) => console.warn('Could not send termination notification:', notifErr));
+
+  invalidateTeamCache();
+  return {
+    message: `Player successfully terminated from ${teamData.team_name}. Past team stats archived.`,
+    team: await getTeamDetails(teamId),
+    past_team_record: pastRecord,
   };
 }
