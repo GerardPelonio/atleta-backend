@@ -6,6 +6,7 @@ import {
   saveTournamentBracket,
   advanceBracketMatch,
   createDefaultSingleEliminationBracket,
+  deleteTournamentBracket,
 } from '../services/tournamentService';
 
 export async function getBracketsHandler(req: AuthRequest, res: Response): Promise<void> {
@@ -92,3 +93,20 @@ export async function createDefaultBracketHandler(req: AuthRequest, res: Respons
     res.status(500).json({ error: 'Failed to generate bracket.', details: error?.message });
   }
 }
+
+export async function deleteBracketHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const rawId = req.params.bracketId;
+    const bracketId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!bracketId) {
+      res.status(400).json({ error: 'Bracket ID is required.' });
+      return;
+    }
+    const success = await deleteTournamentBracket(bracketId);
+    res.status(200).json({ message: 'Tournament bracket deleted successfully.', bracket_id: bracketId, success });
+  } catch (error: any) {
+    console.error('deleteBracketHandler error:', error);
+    res.status(500).json({ error: 'Failed to delete tournament bracket.', details: error?.message });
+  }
+}
+

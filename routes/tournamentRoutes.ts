@@ -6,6 +6,7 @@ import {
   saveBracketHandler,
   advanceBracketHandler,
   createDefaultBracketHandler,
+  deleteBracketHandler,
 } from '../controllers/tournamentController';
 
 import { cacheMiddleware, invalidateCacheMiddleware } from '../middlewares/cacheMiddleware';
@@ -36,6 +37,18 @@ router.put(
   authenticate,
   invalidateCacheMiddleware(['tournaments', 'brackets']),
   saveBracketHandler
+);
+router.delete(
+  '/brackets/:bracketId',
+  authenticate,
+  invalidateCacheMiddleware(['tournaments', 'brackets']),
+  deleteBracketHandler
+);
+router.delete(
+  '/:bracketId',
+  authenticate,
+  invalidateCacheMiddleware(['tournaments', 'brackets']),
+  deleteBracketHandler
 );
 router.post(
   '/brackets/:bracketId/advance',

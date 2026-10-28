@@ -467,3 +467,30 @@ export async function advanceBracketMatch(
   await db.collection(COLLECTION_NAME).doc(bracketId).set(cleanUndefined(bracket), { merge: true });
   return bracket;
 }
+
+export async function deleteTournamentBracket(bracketId: string): Promise<boolean> {
+  if (!bracketId) return false;
+  try {
+    const docRef = db.collection(COLLECTION_NAME).doc(bracketId);
+    const doc = await docRef.get();
+    if (doc.exists) {
+      await docRef.delete();
+      return true;
+    }
+
+    // Fallback: check if bracket_id field matches
+    const snapshot = await db.collection(COLLECTION_NAME).where('bracket_id', '==', bracketId).get();
+    if (!snapshot.empty) {
+      const batch = db.batch();
+      snapshot.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+      return true;
+    }
+
+    return true; // Idempotent success
+  } catch (error) {
+    console.error('Error deleting tournament bracket:', error);
+    throw error;
+  }
+}
+
