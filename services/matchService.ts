@@ -978,6 +978,7 @@ export function normalizeExtractedPlayer(item: any, idx: number, matchId?: strin
   const teamName = item.team_name || item.team || defaultTeam || '';
 
   return {
+    index: item.index ?? (idx + 1),
     athlete_id: item.athlete_id || `ath_ocr_${matchId || 'scan'}_${idx + 1}`,
     player_name: rawName,
     team_name: teamName,
@@ -2194,7 +2195,20 @@ export async function scanMultipleScoresheetsStandalone(
 
   const isContinuation = parsedMatches.length > 1 && parsedMatches.slice(1).every((m) => {
     const fileName = String(m.file_name || '').toLowerCase();
-    const isExplicitPart = fileName.includes('part2') || fileName.includes('half2') || fileName.includes('2nd_half') || fileName.includes('continuation') || fileName.includes('page2') || fileName.includes('set2') || fileName.includes('set3');
+    const isExplicitPart =
+      fileName.includes('part') ||
+      fileName.includes('half') ||
+      fileName.includes('2nd_half') ||
+      fileName.includes('continuation') ||
+      fileName.includes('page') ||
+      fileName.includes('sheet') ||
+      fileName.includes('starter') ||
+      fileName.includes('bench') ||
+      fileName.includes('sub') ||
+      fileName.includes('set') ||
+      fileName.includes('p1') ||
+      fileName.includes('p2') ||
+      fileName.includes('doc');
     if (isExplicitPart) return true;
 
     const mSport = getSport(m);
@@ -2202,38 +2216,53 @@ export async function scanMultipleScoresheetsStandalone(
 
     const mHome = getHome(m);
     const mAway = getAway(m);
-    if (firstHome && mHome) {
-      const matchHome = firstHome === mHome || firstHome.includes(mHome) || mHome.includes(firstHome);
-      const matchAway = !firstAway || !mAway || firstAway === mAway || firstAway.includes(mAway) || mAway.includes(firstAway);
-      return matchHome || matchAway;
-    }
-    return false;
+    // If either mHome or firstHome is empty, assume continuation since continuation sheets (e.g. Bench) often omit the title banner
+    if (!mHome || !firstHome) return true;
+
+    const matchHome = firstHome === mHome || firstHome.includes(mHome) || mHome.includes(firstHome);
+    const matchAway = !firstAway || !mAway || firstAway === mAway || firstAway.includes(mAway) || mAway.includes(firstAway);
+    return matchHome || matchAway;
   });
 
-  const allPlayers = isContinuation ? parsedMatches.flatMap((m) => m.player_summary || []) : (primaryMatch?.player_summary || []);
+  const allPlayers = isContinuation
+    ? parsedMatches.flatMap((m) => m.player_summary || m.player_stats || m.playerStats || m.parsed_tables?.player_summary || [])
+    : (primaryMatch?.player_summary || primaryMatch?.player_stats || primaryMatch?.playerStats || primaryMatch?.parsed_tables?.player_summary || []);
   const allTeamScores = isContinuation ? parsedMatches.flatMap((m) => m.team_scores || []) : (primaryMatch?.team_scores || []);
 
   const NON_ADDITIVE_KEYS = new Set([
     'jersey_number', 'number', 'athlete_id', 'rank', 'place', 'heat', 'lane',
     'player_name', 'team_name', 'position', 'pos', 'event', 'event_name',
-    'finish_time', 'time', 'split_time', 'split', 'seed_time', 'pace'
+    'finish_time', 'time', 'split_time', 'split', 'seed_time', 'pace', 'index'
   ]);
+
+  const defaultHomeTeam = primaryMatch?.match_info?.home_team_name || firstHome || 'Home Team';
 
   // Sum stats from sheet 1 and sheet 2 for players appearing across continuation scoresheets
   const mergedPlayerMap = new Map<string, any>();
   for (const p of allPlayers) {
-    const pName = String(p.player_name || '').trim().toLowerCase();
-    const pTeam = String(p.team_name || '').trim().toLowerCase();
+    const pName = String(p.player_name || p.name || '').trim();
+    const pTeam = (p.team_name || p.team || defaultHomeTeam).trim();
     const pJersey = p.jersey_number ?? p.number;
     const pEvent = String(p.event || p.event_name || p.event_id || p.discipline || '').trim().toLowerCase();
     const pHeat = p.heat !== undefined && p.heat !== null ? `_h${p.heat}` : '';
+
+    const normTeam = pTeam.toLowerCase();
+    const normName = pName.toLowerCase().replace(/[^a-z0-9]/g, '');
+
     // Disambiguate multi-event entries so same athlete across different events (e.g. 50m vs 100m) are never collapsed
-    const key = pEvent
-      ? `${pTeam}_${pName}_${pEvent}${pHeat}`
-      : (pJersey !== undefined ? `${pTeam}_#${pJersey}` : `${pTeam}_${pName}`);
+    let key: string;
+    if (pEvent) {
+      key = `${normTeam}_${normName}_${pEvent}${pHeat}`;
+    } else if (normName) {
+      key = `${normTeam}_${normName}`;
+    } else if (pJersey !== undefined && pJersey !== null && pJersey !== '') {
+      key = `${normTeam}_#${pJersey}`;
+    } else {
+      key = `${normTeam}_row_${mergedPlayerMap.size + 1}`;
+    }
 
     if (!mergedPlayerMap.has(key)) {
-      mergedPlayerMap.set(key, { ...p });
+      mergedPlayerMap.set(key, { ...p, team_name: pTeam, player_name: pName });
     } else {
       const existing = mergedPlayerMap.get(key);
       const exPts = Number(existing.points ?? existing.pts ?? 0);
@@ -2274,7 +2303,92 @@ export async function scanMultipleScoresheetsStandalone(
     }
   }
 
-  const mergedPlayers = Array.from(mergedPlayerMap.values());
+  const isBasketball = String(firstSport || primaryMatch?.match_info?.sport_type || 'basketball').toLowerCase().includes('basket');
+
+  const mergedPlayers = Array.from(mergedPlayerMap.values()).map((p, idx) => {
+    const teamName = p.team_name || p.team || defaultHomeTeam;
+    const jerseyNumber = p.jersey_number ?? p.number ?? (idx + 1);
+    const position = p.position || p.pos || 'G';
+    const points = Number(p.points ?? p.pts ?? 0);
+    const fouls = Number(p.fouls ?? p.pf ?? p.personal_fouls ?? 0);
+    const assists = Number(p.assists ?? p.ast ?? 0);
+    const rebounds = Number(p.rebounds ?? p.reb ?? (Number(p.offensive_rebounds || 0) + Number(p.defensive_rebounds || 0)));
+    const oReb = Number(p.offensive_rebounds ?? 0);
+    const dReb = Number(p.defensive_rebounds ?? (rebounds >= oReb ? rebounds - oReb : 0));
+    const steals = Number(p.steals ?? p.stl ?? 0);
+    const blocks = Number(p.blocks ?? p.blk ?? 0);
+    const turnovers = Number(p.turnovers ?? p.to ?? p.tov ?? 0);
+    const minutes = Number(p.minutes ?? p.min ?? 0);
+    const fgMade = Number(p.fg_made ?? p.fgm ?? 0);
+    const fgAttempted = Number(p.fg_attempted ?? p.fga ?? (fgMade > 0 ? fgMade : 0));
+    const threeMade = Number(p.three_made ?? 0);
+    const threeAttempted = Number(p.three_attempted ?? (threeMade > 0 ? threeMade : 0));
+    const ftMade = Number(p.ft_made ?? p.ftm ?? 0);
+    const ftAttempted = Number(p.ft_attempted ?? p.fta ?? (ftMade > 0 ? ftMade : 0));
+    const fgPct = fgAttempted > 0 ? Number(((fgMade / fgAttempted) * 100).toFixed(1)) : 0;
+    const tsPct = (fgAttempted + 0.44 * ftAttempted > 0)
+      ? Number(((points / (2 * (fgAttempted + 0.44 * ftAttempted))) * 100).toFixed(1))
+      : 0;
+
+    const baseItem = {
+      ...p,
+      index: idx + 1,
+      athlete_id: `ath_ocr_unified_${idx + 1}`,
+      player_name: p.player_name || p.name || `Player ${idx + 1}`,
+      team_name: teamName,
+      jersey_number: jerseyNumber,
+      position,
+      points,
+      pts: points,
+      fouls,
+      pf: fouls,
+      assists,
+      ast: assists,
+      rebounds,
+      reb: rebounds,
+      offensive_rebounds: oReb,
+      defensive_rebounds: dReb,
+      steals,
+      stl: steals,
+      blocks,
+      blk: blocks,
+      turnovers,
+      to: turnovers,
+      minutes,
+      min: minutes,
+      fg_made: fgMade,
+      fgm: fgMade,
+      fg_attempted: fgAttempted,
+      fga: fgAttempted,
+      fg_pct: fgPct,
+      three_made: threeMade,
+      three_attempted: threeAttempted,
+      ft_made: ftMade,
+      ftm: ftMade,
+      ft_attempted: ftAttempted,
+      fta: ftAttempted,
+      true_shooting_pct: tsPct,
+    };
+
+    if (isBasketball) {
+      const computed = calculateBasketballMetrics(baseItem);
+      return {
+        ...baseItem,
+        stats: { ...baseItem },
+        sport_stats: computed.enrichedStats || baseItem,
+        calculated_efficiency: computed.efficiency,
+        calculated_player_efficiency: computed.efficiency,
+      };
+    }
+
+    return {
+      ...baseItem,
+      stats: { ...baseItem },
+      sport_stats: { ...baseItem },
+      calculated_efficiency: points + rebounds + assists + steals + blocks - fouls - turnovers,
+      calculated_player_efficiency: points + rebounds + assists + steals + blocks - fouls - turnovers,
+    };
+  });
 
   // Aggregate final team scores by summing scores from each continuation sheet part
   const mergedTeamScoresMap = new Map<string, any>();
@@ -2338,11 +2452,15 @@ export async function scanMultipleScoresheetsStandalone(
     },
     team_scores: mergedTeamScores.length > 0 ? mergedTeamScores : primaryMatch?.team_scores || [],
     player_summary: mergedPlayers.length > 0 ? mergedPlayers : primaryMatch?.player_summary || [],
+    player_stats: mergedPlayers.length > 0 ? mergedPlayers : primaryMatch?.player_summary || [],
+    playerStats: mergedPlayers.length > 0 ? mergedPlayers : primaryMatch?.player_summary || [],
     race_results: mergedRaceResults.length > 0 ? mergedRaceResults : (primaryMatch?.race_results || primaryMatch?.parsed_tables?.race_results || []),
     injuries: mergedInjuries.length > 0 ? mergedInjuries : (primaryMatch?.injuries || []),
     parsed_tables: {
       team_scores: mergedTeamScores,
-      player_summary: mergedPlayers,
+      player_summary: mergedPlayers.length > 0 ? mergedPlayers : primaryMatch?.player_summary || [],
+      player_stats: mergedPlayers.length > 0 ? mergedPlayers : primaryMatch?.player_summary || [],
+      playerStats: mergedPlayers.length > 0 ? mergedPlayers : primaryMatch?.player_summary || [],
       race_results: mergedRaceResults.length > 0 ? mergedRaceResults : (primaryMatch?.race_results || primaryMatch?.parsed_tables?.race_results || []),
       injuries: mergedInjuries.length > 0 ? mergedInjuries : (primaryMatch?.injuries || []),
     },
