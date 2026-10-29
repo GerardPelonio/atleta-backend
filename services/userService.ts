@@ -1379,6 +1379,9 @@ export async function socialLoginService(
       auth_provider: provider,
       avatar_url: avatarUrl || null,
       account_status: userRole === 'Coach' ? 'Pending' : 'Active',
+      status: userRole === 'Coach' ? 'pending' : 'active',
+      is_approved: userRole !== 'Coach',
+      isApproved: userRole !== 'Coach',
       is_profile_complete: Boolean(hasProfileDetails),
       created_at: now,
       updated_at: now,
@@ -1420,6 +1423,9 @@ export async function socialLoginService(
       profileData.years_of_experience = Number(additionalData?.years_of_experience || 0);
       profileData.certification_license_num = additionalData?.certification_license_num || null;
       profileData.account_status = 'Pending';
+      profileData.status = 'pending';
+      profileData.is_approved = false;
+      profileData.isApproved = false;
     }
 
     sanitizeProfile(profileData);
@@ -1467,6 +1473,28 @@ export async function socialLoginService(
     console.warn('Failed to persist social login session:', sessErr);
   }
 
+  const docData = userDoc && userDoc.exists ? userDoc.data() : null;
+  let docStatus = docData?.status || docData?.account_status;
+  let docIsApproved = docData?.isApproved ?? docData?.is_approved;
+
+  if (finalRole === 'Coach') {
+    if (!docStatus || docStatus === 'Pending' || docStatus === 'pending') {
+      const coachDocSnap = await db.collection('Coach_Profiles').doc(`coach_${uid}`).get().catch(() => null);
+      if (coachDocSnap && coachDocSnap.exists) {
+        const cData = coachDocSnap.data();
+        if (cData?.status || cData?.account_status) {
+          docStatus = cData.status || cData.account_status;
+        }
+        if (cData?.isApproved !== undefined || cData?.is_approved !== undefined) {
+          docIsApproved = cData.isApproved ?? cData.is_approved;
+        }
+      }
+    }
+  }
+
+  const resolvedStatus = String(docStatus || (finalRole === 'Coach' ? 'pending' : 'active')).toLowerCase();
+  const resolvedIsApproved = docIsApproved !== undefined ? Boolean(docIsApproved) : (finalRole !== 'Coach');
+
   return {
     account_exists: true,
     require_signup: false,
@@ -1482,6 +1510,10 @@ export async function socialLoginService(
       role: finalRole,
       avatar_url: avatarUrl,
       provider,
+      status: resolvedStatus,
+      account_status: resolvedStatus === 'approved' || resolvedStatus === 'active' ? 'Active' : 'Pending',
+      is_approved: resolvedIsApproved,
+      isApproved: resolvedIsApproved,
     }),
   };
 }
