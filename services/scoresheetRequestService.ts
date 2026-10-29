@@ -10,6 +10,11 @@ export interface ScoresheetRequestDoc {
   teamId: string;
   matchId: string;
   matchName: string;
+  customGameTitle?: string;
+  custom_game_title?: string;
+  gameName?: string;
+  match_name?: string;
+  game_name?: string;
   sportType?: string;
   status: 'pending' | 'fulfilled' | 'accepted' | 'rejected';
   createdAt: string;
@@ -44,8 +49,9 @@ export async function createScoresheetRequestService(payload: {
     throw new Error('matchId is required to request a scoresheet.');
   }
 
-  // Resolve match name and details from Match_Logs if not provided
+  // Resolve match name and details directly from Firestore match document (prioritizing official's custom title)
   let matchName = payload.matchName;
+  let customGameTitle: string | undefined = (payload as any).customGameTitle || (payload as any).custom_game_title;
   let teamId = payload.teamId;
   let sportType = payload.sportType;
   let coachName = payload.coachName;
@@ -54,8 +60,21 @@ export async function createScoresheetRequestService(payload: {
   const matchDoc = await matchRef.get();
   if (matchDoc.exists) {
     const m = matchDoc.data()!;
-    if (!matchName) {
-      matchName = m.matchName || m.match_name || m.game_name || `${m.home_team_name || 'Home'} vs ${m.away_team_name || 'Away'}`;
+    // Priority: Pull directly from customGameTitle, matchName, or gameName in the Firestore match document assigned by Tournament Official
+    const officialAssignedTitle =
+      (m.customGameTitle && String(m.customGameTitle).trim()) ||
+      (m.custom_game_title && String(m.custom_game_title).trim()) ||
+      (m.matchName && String(m.matchName).trim()) ||
+      (m.match_name && String(m.match_name).trim()) ||
+      (m.gameName && String(m.gameName).trim()) ||
+      (m.game_name && String(m.game_name).trim()) ||
+      null;
+
+    if (officialAssignedTitle) {
+      matchName = officialAssignedTitle;
+      customGameTitle = officialAssignedTitle;
+    } else if (!matchName) {
+      matchName = `${m.home_team_name || 'Home Team'} vs. ${m.away_team_name || 'Away Team'}`;
     }
     if (!teamId) teamId = m.team_id || m.home_team_id || 'team_default';
     if (!sportType) sportType = m.sport_type || 'BASKETBALL';
@@ -64,6 +83,8 @@ export async function createScoresheetRequestService(payload: {
     if (!teamId) teamId = 'team_default';
     if (!sportType) sportType = 'BASKETBALL';
   }
+
+  const resolvedMatchTitle = (customGameTitle || matchName || `Match ${matchId}`).trim();
 
   // Resolve coach name if missing
   if (!coachName) {
@@ -87,7 +108,12 @@ export async function createScoresheetRequestService(payload: {
     coachName: coachName || 'Coach',
     teamId: teamId || 'team_default',
     matchId,
-    matchName: matchName || `Match ${matchId}`,
+    matchName: resolvedMatchTitle,
+    customGameTitle: resolvedMatchTitle,
+    custom_game_title: resolvedMatchTitle,
+    match_name: resolvedMatchTitle,
+    gameName: resolvedMatchTitle,
+    game_name: resolvedMatchTitle,
     sportType: sportType || 'BASKETBALL',
     status: 'pending',
     createdAt: now,
@@ -109,14 +135,16 @@ export async function createScoresheetRequestService(payload: {
       updated_at: now,
     });
   } else {
-    const safeMatchName = matchName || `Match ${matchId}`;
     batch.set(matchRef, {
       match_id: matchId,
       team_id: teamId,
-      matchName: safeMatchName,
-      game_name: safeMatchName,
-      home_team_name: safeMatchName.split(/\s+vs\.?\s+/i)[0]?.trim() || 'Home Team',
-      away_team_name: safeMatchName.split(/\s+vs\.?\s+/i)[1]?.trim() || 'Away Team',
+      matchName: resolvedMatchTitle,
+      customGameTitle: resolvedMatchTitle,
+      match_name: resolvedMatchTitle,
+      gameName: resolvedMatchTitle,
+      game_name: resolvedMatchTitle,
+      home_team_name: resolvedMatchTitle.split(/\s+vs\.?\s+/i)[0]?.trim() || 'Home Team',
+      away_team_name: resolvedMatchTitle.split(/\s+vs\.?\s+/i)[1]?.trim() || 'Away Team',
       sport_type: sportType,
       audit_status: 'PENDING REQUEST',
       verification_status: 'Pending',
@@ -131,14 +159,18 @@ export async function createScoresheetRequestService(payload: {
   const notifId = `notif_req_${requestId}`;
   batch.set(db.collection('Official_Notifications').doc(notifId), {
     notification_id: notifId,
-    title: `Scoresheet Request: ${matchName}`,
-    message: `${coachName} requested the official scoresheet for ${matchName}.`,
+    title: `Scoresheet Request: ${resolvedMatchTitle}`,
+    message: `${coachName} requested the official scoresheet for ${resolvedMatchTitle}.`,
     type: 'SCORESHEET_REQUEST',
     match_id: matchId,
     request_id: requestId,
     coach_id: coachId,
     requested_by_coach: coachName,
-    match_context: matchName,
+    match_context: resolvedMatchTitle,
+    matchName: resolvedMatchTitle,
+    customGameTitle: resolvedMatchTitle,
+    custom_game_title: resolvedMatchTitle,
+    match_name: resolvedMatchTitle,
     sport_discipline: sportType,
     is_read: false,
     created_at: now,
@@ -171,9 +203,53 @@ export async function getScoresheetRequestsService(filters?: {
 
   const snap = await query.get();
   const list: ScoresheetRequestDoc[] = [];
+
+  // Collect match IDs to enrich with custom titles directly from Firestore Match_Logs
+  const matchIds = new Set<string>();
   snap.forEach((d) => {
     const data = d.data() as ScoresheetRequestDoc;
-    list.push({ ...data, id: d.id, requestId: d.id });
+    if (data.matchId) matchIds.add(data.matchId);
+  });
+
+  const matchesMap = new Map<string, any>();
+  if (matchIds.size > 0) {
+    const matchDocs = await Promise.all(
+      Array.from(matchIds).map((mid) => db.collection('Match_Logs').doc(mid).get().catch(() => null))
+    );
+    matchDocs.forEach((md) => {
+      if (md && md.exists) {
+        matchesMap.set(md.id, md.data());
+      }
+    });
+  }
+
+  snap.forEach((d) => {
+    const data = d.data() as ScoresheetRequestDoc;
+    const matchData = data.matchId ? matchesMap.get(data.matchId) : null;
+    const officialCustomTitle =
+      (matchData?.customGameTitle && String(matchData.customGameTitle).trim()) ||
+      (matchData?.custom_game_title && String(matchData.custom_game_title).trim()) ||
+      (matchData?.matchName && String(matchData.matchName).trim()) ||
+      (matchData?.match_name && String(matchData.match_name).trim()) ||
+      (matchData?.gameName && String(matchData.gameName).trim()) ||
+      (matchData?.game_name && String(matchData.game_name).trim()) ||
+      (data.customGameTitle && String(data.customGameTitle).trim()) ||
+      (data.custom_game_title && String(data.custom_game_title).trim()) ||
+      (data.matchName && String(data.matchName).trim()) ||
+      (data.match_name && String(data.match_name).trim()) ||
+      `Match ${data.matchId || d.id}`;
+
+    list.push({
+      ...data,
+      id: d.id,
+      requestId: d.id,
+      matchName: officialCustomTitle,
+      customGameTitle: officialCustomTitle,
+      custom_game_title: officialCustomTitle,
+      match_name: officialCustomTitle,
+      gameName: officialCustomTitle,
+      game_name: officialCustomTitle,
+    });
   });
 
   return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -269,7 +345,16 @@ export async function fulfillScoresheetRequestService(
   // Push real-time notification to the coach's mobile notification center
   const coachNotifId = `coach_notif_${crypto.randomUUID()}`;
   const coachId = reqData.coachId;
-  const matchName = reqData.matchName || `Match ${matchId}`;
+  const matchSnap = await matchRef.get();
+  const mLogData = matchSnap.exists ? matchSnap.data() : null;
+  const matchName =
+    (mLogData?.customGameTitle && String(mLogData.customGameTitle).trim()) ||
+    (mLogData?.custom_game_title && String(mLogData.custom_game_title).trim()) ||
+    (mLogData?.matchName && String(mLogData.matchName).trim()) ||
+    (mLogData?.match_name && String(mLogData.match_name).trim()) ||
+    reqData.customGameTitle ||
+    reqData.matchName ||
+    `Match ${matchId}`;
 
   batch.set(db.collection('Notifications').doc(coachNotifId), {
     notification_id: coachNotifId,
@@ -367,7 +452,16 @@ export async function rejectScoresheetRequestService(
   // Push notification to Coach
   const coachNotifId = `coach_notif_${crypto.randomUUID()}`;
   const coachId = reqData.coachId;
-  const matchName = reqData.matchName || `Match ${matchId}`;
+  const mLogSnap = await matchRef.get();
+  const mLogData = mLogSnap.exists ? mLogSnap.data() : null;
+  const matchName =
+    (mLogData?.customGameTitle && String(mLogData.customGameTitle).trim()) ||
+    (mLogData?.custom_game_title && String(mLogData.custom_game_title).trim()) ||
+    (mLogData?.matchName && String(mLogData.matchName).trim()) ||
+    (mLogData?.match_name && String(mLogData.match_name).trim()) ||
+    reqData.customGameTitle ||
+    reqData.matchName ||
+    `Match ${matchId}`;
 
   batch.set(db.collection('Notifications').doc(coachNotifId), {
     notification_id: coachNotifId,

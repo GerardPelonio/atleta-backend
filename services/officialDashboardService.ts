@@ -89,11 +89,17 @@ export async function getOfficialDashboardMetrics(officialId: string) {
     const auditData = d.data();
     const details = matchesMap.get(auditData.match_id) || {};
     const customMatchName = String(
+      auditData.customGameTitle ||
+      auditData.custom_game_title ||
+      details.customGameTitle ||
+      details.custom_game_title ||
       auditData.matchName ||
       auditData.match_name ||
+      auditData.gameName ||
       auditData.game_name ||
       details.matchName ||
       details.match_name ||
+      details.gameName ||
       details.game_name ||
       ''
     ).trim();
@@ -200,18 +206,29 @@ export async function getOfficialNotifications(officialId: string): Promise<Offi
       seenIds.add(`req_${data.request_id}`);
       seenIds.add(data.request_id);
     }
+    const resolvedCustomTitle = (
+      data.customGameTitle ||
+      data.custom_game_title ||
+      data.matchName ||
+      data.match_name ||
+      data.match_context ||
+      undefined
+    );
+
     notifications.push({
       notification_id: data.notification_id || doc.id,
       official_id: data.official_id || data.recipient_id || officialId,
       type: data.type || 'OFFICIAL_ALERT',
-      title: data.title || 'Notification',
+      title: data.title || (resolvedCustomTitle ? `Scoresheet Request: ${resolvedCustomTitle}` : 'Notification'),
       message: data.message || '',
       reference_id: data.reference_id || data.request_id || data.match_id || null,
       request_id: data.request_id || null,
       match_id: data.match_id || null,
-      match_name: data.match_name || data.match_context || undefined,
+      match_name: resolvedCustomTitle,
+      customGameTitle: resolvedCustomTitle,
+      custom_game_title: resolvedCustomTitle,
       requested_by_coach: data.requested_by_coach || data.coach_name || undefined,
-      match_context: data.match_context || data.match_name || undefined,
+      match_context: resolvedCustomTitle,
       sport_discipline: data.sport_discipline || data.sport || undefined,
       status: data.status || 'pending',
       scoresheet_url: data.scoresheetUrl || data.scoresheet_url || null,
@@ -235,20 +252,32 @@ export async function getOfficialNotifications(officialId: string): Promise<Offi
     seenIds.add(reqId);
 
     const isFulfilled = data.status === 'fulfilled';
+    const matchTitle = (
+      data.customGameTitle ||
+      data.custom_game_title ||
+      data.matchName ||
+      data.match_name ||
+      data.gameName ||
+      data.game_name ||
+      'Match'
+    );
+
     notifications.push({
       notification_id: notifKey,
       request_id: reqId,
       official_id: officialId,
       type: 'SCORESHEET_REQUEST',
-      title: `Scoresheet Request: ${data.matchName || 'Match'}`,
-      message: `${data.coachName || 'Coach'} requested the official scoresheet for ${data.matchName || 'match'}.`,
+      title: `Scoresheet Request: ${matchTitle}`,
+      message: `${data.coachName || 'Coach'} requested the official scoresheet for ${matchTitle}.`,
       reference_id: data.matchId || null,
       match_id: data.matchId || null,
-      match_name: data.matchName || null,
+      match_name: matchTitle,
+      customGameTitle: matchTitle,
+      custom_game_title: matchTitle,
       requested_by_coach: data.coachName || 'Coach',
       coach_id: data.coachId || null,
       team_id: data.teamId || null,
-      match_context: data.matchName || 'Official Match',
+      match_context: matchTitle,
       sport_discipline: data.sportType || 'BASKETBALL',
       scoresheet_url: data.scoresheetUrl || data.scoresheet_url || null,
       status: data.status || 'pending',

@@ -791,11 +791,12 @@ export async function submitMatchSession(
       : enrichedPlayerStats,
     scoresheet_url: payload.scoresheet_url || payload.scoresheetUrl || '',
     scoresheetUrl: payload.scoresheetUrl || payload.scoresheet_url || '',
-    notes: payload.notes ? payload.notes.trim() : `OCR Logged: ${homeTeamName} vs ${oppTeamName} (${homeScore} - ${awayScore})`,
-    matchName: (((payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || `${homeTeamName} vs ${oppTeamName}`,
-    match_name: (((payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || `${homeTeamName} vs ${oppTeamName}`,
-    gameName: (((payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || `${homeTeamName} vs ${oppTeamName}`,
-    game_name: (((payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || `${homeTeamName} vs ${oppTeamName}`,
+    customGameTitle: (((payload as any).customGameTitle || (payload as any).custom_game_title || (payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || undefined,
+    custom_game_title: (((payload as any).customGameTitle || (payload as any).custom_game_title || (payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || undefined,
+    matchName: (((payload as any).customGameTitle || (payload as any).custom_game_title || (payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || `${homeTeamName} vs ${oppTeamName}`,
+    match_name: (((payload as any).customGameTitle || (payload as any).custom_game_title || (payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || `${homeTeamName} vs ${oppTeamName}`,
+    gameName: (((payload as any).customGameTitle || (payload as any).custom_game_title || (payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || `${homeTeamName} vs ${oppTeamName}`,
+    game_name: (((payload as any).customGameTitle || (payload as any).custom_game_title || (payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || `${homeTeamName} vs ${oppTeamName}`,
     gameReferenceId: (((payload as any).gameReferenceId || (payload as any).matchName || '') as string).trim() || undefined,
     tournament_id: payload.tournament_id || null,
     assigned_coaches: payload.assigned_coaches || (coachId ? [coachId] : []),
@@ -1949,6 +1950,8 @@ export async function processScoresheetOCR(matchId: string, file?: Express.Multe
     if (detectedHome || detectedAway) {
       updatePayload.teams = [homeTeamName, awayTeamName];
       const existingMatchName = String(
+        matchData.customGameTitle ||
+        matchData.custom_game_title ||
         matchData.matchName ||
         matchData.match_name ||
         matchData.game_name ||
@@ -1963,6 +1966,8 @@ export async function processScoresheetOCR(matchId: string, file?: Express.Multe
         updatePayload.gameName = `${homeTeamName} vs ${awayTeamName}`;
       } else {
         // Strictly preserve user-defined custom match name
+        updatePayload.customGameTitle = existingMatchName;
+        updatePayload.custom_game_title = existingMatchName;
         updatePayload.match_name = existingMatchName;
         updatePayload.game_name = existingMatchName;
         updatePayload.matchName = existingMatchName;

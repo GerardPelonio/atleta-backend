@@ -78,7 +78,17 @@ export async function submitAuditRequest(
     verification_status: 'Pending',
   });
 
-  const matchTitle = matchData.matchName || matchData.game_name || `${matchData.home_team_name || 'Home'} vs ${matchData.away_team_name || 'Away'}`;
+  const officialTitle =
+    (matchData.customGameTitle && String(matchData.customGameTitle).trim()) ||
+    (matchData.custom_game_title && String(matchData.custom_game_title).trim()) ||
+    (matchData.matchName && String(matchData.matchName).trim()) ||
+    (matchData.match_name && String(matchData.match_name).trim()) ||
+    (matchData.gameName && String(matchData.gameName).trim()) ||
+    (matchData.game_name && String(matchData.game_name).trim()) ||
+    (fallbackMatchData?.customGameTitle && String(fallbackMatchData.customGameTitle).trim()) ||
+    (fallbackMatchData?.matchName && String(fallbackMatchData.matchName).trim()) ||
+    `${matchData.home_team_name || 'Home'} vs ${matchData.away_team_name || 'Away'}`;
+
   const reqDocId = `req_${matchId}_${coachId.replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const coachName = fallbackMatchData?.coach_name || fallbackMatchData?.coachName || 'Coach';
   const sportType = matchData.sport_type || 'BASKETBALL';
@@ -87,14 +97,18 @@ export async function submitAuditRequest(
   const notifId = `notif_${crypto.randomUUID()}`;
   batch.set(db.collection('Official_Notifications').doc(notifId), {
     notification_id: notifId,
-    title: 'New Scoresheet Audit Request',
-    message: `Coach submitted a scoresheet verification request for ${matchData.home_team_name || 'Home'} vs ${matchData.away_team_name || 'Away'}.`,
+    title: `Scoresheet Request: ${officialTitle}`,
+    message: `${coachName} submitted a scoresheet verification request for ${officialTitle}.`,
     type: 'AUDIT_REQUEST',
     match_id: matchId,
     audit_id: auditId,
     request_id: reqDocId,
     requested_by_coach: coachName,
-    match_context: matchTitle,
+    match_context: officialTitle,
+    matchName: officialTitle,
+    customGameTitle: officialTitle,
+    custom_game_title: officialTitle,
+    match_name: officialTitle,
     sport_discipline: sportType,
     is_read: false,
     created_at: now,
@@ -109,7 +123,12 @@ export async function submitAuditRequest(
     coachName: fallbackMatchData?.coach_name || fallbackMatchData?.coachName || 'Coach',
     teamId: matchData.team_id || 'team_default',
     matchId,
-    matchName: matchTitle,
+    matchName: officialTitle,
+    customGameTitle: officialTitle,
+    custom_game_title: officialTitle,
+    match_name: officialTitle,
+    gameName: officialTitle,
+    game_name: officialTitle,
     sportType: matchData.sport_type || 'BASKETBALL',
     status: 'pending',
     createdAt: now,
