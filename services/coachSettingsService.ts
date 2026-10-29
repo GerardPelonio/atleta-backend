@@ -5,6 +5,7 @@ import { signInWithEmailAndPassword } from 'firebase/auth';
 import { CoachSettings } from '../models/userModel';
 import { hashPassword, verifyPassword } from '../utils/passwordUtils';
 import { createNotification } from './notificationService';
+import { assertPhoneNumberUnique, normalizePhoneNumber } from './userService';
 
 export class ServiceError extends Error {
   statusCode: number;
@@ -158,10 +159,28 @@ export async function updateCoachProfile(
     );
   }
 
+  const rawContact = ((payload as any).contact_number !== undefined ? (payload as any).contact_number : (payload as any).phoneNumber !== undefined ? (payload as any).phoneNumber : (payload as any).phone_number) as string | undefined;
+  if (rawContact !== undefined) {
+    const contactStr = typeof rawContact === 'string' ? rawContact.trim() : '';
+    if (contactStr) {
+      const normalizedContact = normalizePhoneNumber(contactStr);
+      await assertPhoneNumberUnique(normalizedContact, rawUserId);
+      userUpdates.contact_number = normalizedContact;
+      userUpdates.phoneNumber = normalizedContact;
+    } else {
+      userUpdates.contact_number = null;
+      userUpdates.phoneNumber = null;
+    }
+  }
+
   await db.collection('Users').doc(rawUserId).set(userUpdates, { merge: true });
 
   // 2. Patch canonical Coach_Profiles document (doc ID is coach_<uid>)
   const coachUpdates: Record<string, any> = { updated_at: now };
+  if (userUpdates.contact_number !== undefined) {
+    coachUpdates.contact_number = userUpdates.contact_number;
+    coachUpdates.phoneNumber = userUpdates.phoneNumber;
+  }
   if (payload.first_name) coachUpdates.first_name = payload.first_name.trim();
   if (payload.last_name) coachUpdates.last_name = payload.last_name.trim();
   if (payload.first_name || payload.last_name) {

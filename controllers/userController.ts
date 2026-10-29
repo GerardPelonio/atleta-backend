@@ -23,6 +23,7 @@ import {
   resetPasswordConfirmService,
   changePasswordService,
   socialLoginService,
+  assertPhoneNumberUnique,
 } from '../services/userService';
 
 export async function registerUser(req: AuthRequest, res: Response): Promise<void> {
@@ -262,7 +263,31 @@ export async function updateUserProfileHandler(req: AuthRequest, res: Response):
       res.status(404).json({ error: error.message });
       return;
     }
+    if (error instanceof ServiceError || (error.statusCode && error.statusCode < 500) || (error.status && error.status < 500)) {
+      res.status(error.statusCode || error.status || 400).json({ error: error.message });
+      return;
+    }
     console.error('updateUserProfileHandler error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function checkPhoneHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const rawPhone = (req.query.phoneNumber || req.query.phone || req.query.contact_number || req.body?.phoneNumber || req.body?.contact_number) as string | undefined;
+    if (!rawPhone || !rawPhone.trim()) {
+      res.status(400).json({ error: 'Phone number is required.' });
+      return;
+    }
+    const excludeUid = (req.query.excludeUid || req.body?.excludeUid || (req as any).user?.uid) as string | undefined;
+    await assertPhoneNumberUnique(rawPhone, excludeUid);
+    res.status(200).json({ available: true, message: 'Phone number is available.' });
+  } catch (error: any) {
+    if (error instanceof ServiceError || (error.statusCode && error.statusCode < 500) || (error.status && error.status < 500)) {
+      res.status(error.statusCode || error.status || 400).json({ available: false, error: error.message });
+      return;
+    }
+    console.error('checkPhoneHandler error:', error);
     res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
   }
 }

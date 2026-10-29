@@ -41,13 +41,22 @@ export function validateRegisterCoach(data: Record<string, unknown>, hasFile: bo
     errors.push({ field: 'password', message: 'Password must be at least 6 characters.' });
   }
 
-  // contact_number (Optional, 11 characters)
-  let contactNumber = typeof data.contact_number === 'string' ? data.contact_number.replace(/[\s\-_()]/g, '') : '';
+  // contact_number (Optional, 11 digits starting with 09)
+  const rawContact = typeof data.contact_number === 'string'
+    ? data.contact_number
+    : typeof data.phoneNumber === 'string'
+    ? data.phoneNumber
+    : typeof data.phone_number === 'string'
+    ? data.phone_number
+    : '';
+  let contactNumber = rawContact ? rawContact.replace(/[\s\-_()]/g, '') : '';
   if (contactNumber.startsWith('+63')) contactNumber = '0' + contactNumber.slice(3);
   else if (contactNumber.startsWith('63') && contactNumber.length === 12) contactNumber = '0' + contactNumber.slice(2);
+  else if (contactNumber.length === 10 && contactNumber.startsWith('9')) contactNumber = '0' + contactNumber;
   data.contact_number = contactNumber;
-  if (contactNumber && contactNumber.length !== 11) {
-    errors.push({ field: 'contact_number', message: 'Contact number must be exactly 11 characters.' });
+  data.phoneNumber = contactNumber;
+  if (contactNumber && (!/^09\d{9}$/.test(contactNumber))) {
+    errors.push({ field: 'contact_number', message: 'Contact number must be 11 digits starting with 09 (e.g. 09123456789).' });
   }
 
   // current_institution (Required for Coach)

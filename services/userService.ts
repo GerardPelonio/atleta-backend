@@ -263,6 +263,114 @@ export async function createFirebaseAuthUser(params: {
 }
 
 /**
+ * Normalizes a phone number to standard 11-digit Philippine mobile format (09XXXXXXXXX)
+ * or returns cleaned digits string.
+ */
+export function normalizePhoneNumber(phone: string | null | undefined): string {
+  if (!phone || typeof phone !== 'string') return '';
+  let cleaned = phone.trim().replace(/[\s\-_().+]/g, '');
+  if (cleaned.startsWith('63') && cleaned.length === 12) {
+    cleaned = '0' + cleaned.slice(2);
+  } else if (cleaned.length === 10 && cleaned.startsWith('9')) {
+    cleaned = '0' + cleaned;
+  }
+  return cleaned;
+}
+
+/**
+ * Validates that a phone number is unique across all users in Firestore.
+ * If a duplicate number is detected, reject the request with a 400 Bad Request
+ * and return the error message: "This phone number is already registered to another account."
+ */
+export async function assertPhoneNumberUnique(
+  rawPhone: string | null | undefined,
+  excludeUid?: string
+): Promise<void> {
+  if (!rawPhone || typeof rawPhone !== 'string') return;
+  const normalized = normalizePhoneNumber(rawPhone);
+  if (!normalized) return;
+
+  const variations = new Set<string>();
+  variations.add(normalized);
+  if (normalized.startsWith('09') && normalized.length === 11) {
+    variations.add('+63' + normalized.slice(1));
+    variations.add('63' + normalized.slice(1));
+    const spaced = `+63 ${normalized.slice(1, 4)} ${normalized.slice(4, 7)} ${normalized.slice(7)}`;
+    variations.add(spaced);
+  }
+  const rawClean = rawPhone.trim();
+  if (rawClean) variations.add(rawClean);
+
+  const variantList = Array.from(variations).slice(0, 10);
+  const normalizedExclude = excludeUid ? excludeUid.replace(/^(ath_|coach_|off_)/, '') : undefined;
+
+  const collectionsToCheck = ['Users', 'users'];
+  const fieldsToCheck = ['contact_number', 'phoneNumber', 'phone_number'];
+
+  for (const col of collectionsToCheck) {
+    for (const field of fieldsToCheck) {
+      try {
+        const snap = await db.collection(col).where(field, 'in', variantList).get();
+        for (const doc of snap.docs) {
+          const docId = doc.id;
+          const data = doc.data();
+          const docUserId = (data?.user_id as string) || (data?.uid as string) || docId;
+          const cleanDocId = docId.replace(/^(ath_|coach_|off_)/, '');
+          const cleanDocUserId = docUserId.replace(/^(ath_|coach_|off_)/, '');
+
+          // Skip if this doc belongs to the user being updated
+          if (
+            normalizedExclude &&
+            (cleanDocId === normalizedExclude || cleanDocUserId === normalizedExclude)
+          ) {
+            continue;
+          }
+
+          throw new ServiceError(
+            'This phone number is already registered to another account.',
+            400
+          );
+        }
+      } catch (err: any) {
+        if (err instanceof ServiceError) throw err;
+        console.warn(`[assertPhoneNumberUnique] Query note on ${col}.${field}:`, err?.message);
+      }
+    }
+  }
+
+  // Also check subtype profile collections
+  const profileCols = ['Athlete_Profiles', 'Coach_Profiles', 'Official_Profiles'];
+  for (const col of profileCols) {
+    for (const field of fieldsToCheck) {
+      try {
+        const snap = await db.collection(col).where(field, 'in', variantList).get();
+        for (const doc of snap.docs) {
+          const docId = doc.id;
+          const data = doc.data();
+          const docUserId = (data?.user_id as string) || (data?.uid as string) || docId;
+          const cleanDocId = docId.replace(/^(ath_|coach_|off_)/, '');
+          const cleanDocUserId = docUserId.replace(/^(ath_|coach_|off_)/, '');
+
+          if (
+            normalizedExclude &&
+            (cleanDocId === normalizedExclude || cleanDocUserId === normalizedExclude)
+          ) {
+            continue;
+          }
+
+          throw new ServiceError(
+            'This phone number is already registered to another account.',
+            400
+          );
+        }
+      } catch (err: any) {
+        if (err instanceof ServiceError) throw err;
+      }
+    }
+  }
+}
+
+/**
  * Register a new user in Firebase Auth and provision master identity and subtype profile in an atomic batch.
  */
 export async function registerUserService(
@@ -273,8 +381,9 @@ export async function registerUserService(
   const last_name = (data.last_name as string).trim();
   const email = (data.email as string).trim();
   const password = data.password as string;
-  const contact_number = typeof data.contact_number === 'string' && data.contact_number.trim()
-    ? data.contact_number.trim()
+  const rawContact = (data.contact_number || data.phoneNumber || data.phone_number) as string | undefined;
+  const contact_number = typeof rawContact === 'string' && rawContact.trim()
+    ? normalizePhoneNumber(rawContact)
     : null;
   const rawRole = (data.role as string) || 'Athlete';
   const firestoreRole = normalizeRole(rawRole);
@@ -293,7 +402,12 @@ export async function registerUserService(
     throw err;
   }
 
-  // 2. Create Firebase Auth user (with REST fallback)
+  // 2. Check if phone number already exists in Firestore Users collection
+  if (contact_number) {
+    await assertPhoneNumberUnique(contact_number);
+  }
+
+  // 3. Create Firebase Auth user (with REST fallback)
   const authUser = await createFirebaseAuthUser({
     email,
     password,
@@ -1245,13 +1359,21 @@ export async function socialLoginService(
       Boolean(additionalData?.years_of_experience) ||
       Boolean(additionalData?.birthdate);
 
+    const rawSocialContact = (additionalData?.contact_number || additionalData?.phoneNumber || additionalData?.phone_number) as string | undefined;
+    let socialContact = null;
+    if (rawSocialContact && typeof rawSocialContact === 'string' && rawSocialContact.trim()) {
+      socialContact = normalizePhoneNumber(rawSocialContact);
+      await assertPhoneNumberUnique(socialContact, uid);
+    }
+
     const userData: Record<string, any> = {
       user_id: uid,
       first_name: firstName,
       last_name: lastName,
       full_name: `${firstName} ${lastName}`.trim(),
       email: cleanEmail,
-      contact_number: additionalData?.contact_number || null,
+      contact_number: socialContact,
+      phoneNumber: socialContact,
       role: userRole,
       provider,
       auth_provider: provider,
@@ -1742,9 +1864,22 @@ export async function updateUserProfileService(uid: string, payload: Record<stri
   if (payload.last_name !== undefined) {
     userUpdates.last_name = payload.last_name;
   }
-  if (payload.contact_number !== undefined) {
-    userUpdates.contact_number = payload.contact_number;
-    profileUpdates.contact_number = payload.contact_number;
+  const rawContact = (payload.contact_number !== undefined ? payload.contact_number : (payload.phoneNumber !== undefined ? payload.phoneNumber : payload.phone_number)) as string | undefined;
+  if (rawContact !== undefined) {
+    const contactStr = typeof rawContact === 'string' ? rawContact.trim() : '';
+    if (contactStr) {
+      const normalizedContact = normalizePhoneNumber(contactStr);
+      await assertPhoneNumberUnique(normalizedContact, uid);
+      userUpdates.contact_number = normalizedContact;
+      userUpdates.phoneNumber = normalizedContact;
+      profileUpdates.contact_number = normalizedContact;
+      profileUpdates.phoneNumber = normalizedContact;
+    } else {
+      userUpdates.contact_number = null;
+      userUpdates.phoneNumber = null;
+      profileUpdates.contact_number = null;
+      profileUpdates.phoneNumber = null;
+    }
   }
   if (payload.organization_name !== undefined || payload.organization !== undefined) {
     const org = payload.organization_name || payload.organization;

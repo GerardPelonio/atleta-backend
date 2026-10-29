@@ -3,7 +3,7 @@ import { db, auth } from '../utils/firebaseAdmin';
 import { clientAuth } from '../utils/firebaseClient';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { OfficialProfile, OfficialSettings, RegisterOfficialDto, UpdateOfficialSettingsDto, User } from '../models/userModel';
-import { generateToken, createFirebaseAuthUser } from './userService';
+import { generateToken, createFirebaseAuthUser, assertPhoneNumberUnique, normalizePhoneNumber } from './userService';
 import { generateElevatedAdminToken } from './adminService';
 import { hashPassword, verifyPassword, sanitizeUser, sanitizeProfile } from '../utils/passwordUtils';
 
@@ -58,6 +58,13 @@ export async function registerOfficialService(data: RegisterOfficialDto) {
     console.warn('Tournament_Registry auto-provisioning note (non-blocking):', regError);
   }
 
+  const rawContact = ((data as any).contact_number || (data as any).phoneNumber || (data as any).phone_number) as string | undefined;
+  let contact_number = null;
+  if (rawContact && typeof rawContact === 'string' && rawContact.trim()) {
+    contact_number = normalizePhoneNumber(rawContact);
+    await assertPhoneNumberUnique(contact_number);
+  }
+
   // 2. Create Firebase Auth user (with REST fallback)
   const authUser = await createFirebaseAuthUser({
     email,
@@ -100,6 +107,8 @@ export async function registerOfficialService(data: RegisterOfficialDto) {
     is_approved: false,
     isApproved: false,
     is_active: true,
+    contact_number,
+    phoneNumber: contact_number,
     created_at: now,
     updated_at: now,
   };
@@ -108,6 +117,8 @@ export async function registerOfficialService(data: RegisterOfficialDto) {
   const profileData: any = {
     official_id: officialId,
     user_id: uid,
+    contact_number,
+    phoneNumber: contact_number,
     organization_name: orgName,
     official_license_number: licenseNumber,
     assigned_tournaments: assignedTournaments,

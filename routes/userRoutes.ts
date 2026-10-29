@@ -16,6 +16,7 @@ import {
   resetPassword,
   changePassword,
   refreshTokenHandler,
+  checkPhoneHandler,
 } from '../controllers/userController';
 import {
   registerOfficialHandler,
@@ -28,6 +29,10 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 },
 });
+
+// Phone Uniqueness Pre-check
+router.get('/check-phone', checkPhoneHandler);
+router.post('/check-phone', checkPhoneHandler);
 
 // Registration Routes
 router.post('/register-athlete', upload.single('eligible_documents'), registerUser);

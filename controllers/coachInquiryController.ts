@@ -182,6 +182,10 @@ export async function updateCoachProfileHandler(req: AuthRequest, res: Response)
       ...updatedProfile,
     });
   } catch (error: any) {
+    if (error instanceof ServiceError || (error.statusCode && error.statusCode < 500) || (error.status && error.status < 500)) {
+      res.status(error.statusCode || error.status || 400).json({ error: error.message });
+      return;
+    }
     console.error('updateCoachProfileHandler error:', error);
     res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
   }

@@ -4,6 +4,7 @@ import { AthleteHomeSummary } from '../models/notificationModel';
 import { eventBus, EVENTS } from '../utils/eventBus';
 import { getAthleteWorkloadSummary } from './workloadService';
 import { getAthleteTeam, getAthletePastTeams } from './teamService';
+import { assertPhoneNumberUnique, normalizePhoneNumber } from './userService';
 
 /**
  * Calculate BMI = weight (kg) / height (m)²
@@ -242,6 +243,23 @@ export async function updateAthleteProfile(
   if (updateData.eligible_documents) {
     payload.eligible_documents = updateData.eligible_documents;
     payload.documents = updateData.eligible_documents;
+  }
+  const rawContact = (updateData.contact_number !== undefined ? updateData.contact_number : (updateData as any).phoneNumber !== undefined ? (updateData as any).phoneNumber : (updateData as any).phone_number) as string | undefined;
+  if (rawContact !== undefined) {
+    const contactStr = typeof rawContact === 'string' ? rawContact.trim() : '';
+    if (contactStr) {
+      const normalizedContact = normalizePhoneNumber(contactStr);
+      await assertPhoneNumberUnique(normalizedContact, rawUid);
+      payload.contact_number = normalizedContact;
+      payload.phoneNumber = normalizedContact;
+      userPayload.contact_number = normalizedContact;
+      userPayload.phoneNumber = normalizedContact;
+    } else {
+      payload.contact_number = null;
+      payload.phoneNumber = null;
+      userPayload.contact_number = null;
+      userPayload.phoneNumber = null;
+    }
   }
 
   // Player status enum validation & sync
