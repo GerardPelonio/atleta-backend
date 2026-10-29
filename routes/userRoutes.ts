@@ -15,6 +15,7 @@ import {
   requestPasswordReset,
   resetPassword,
   changePassword,
+  refreshTokenHandler,
 } from '../controllers/userController';
 import {
   registerOfficialHandler,
@@ -39,6 +40,7 @@ router.post('/register-official', authRateLimiter, registerOfficialHandler);
 
 // Authentication & OAuth
 router.post('/login', authRateLimiter, loginUser);
+router.post('/refresh', refreshTokenHandler);
 router.post('/official/login', authRateLimiter, loginOfficialHandler);
 router.post('/google-login', socialLogin as any);
 router.post('/facebook-login', socialLogin as any);

@@ -12,6 +12,7 @@ import {
 import { sendPasswordResetEmailService } from './emailService';
 import { hashPassword, verifyPassword, sanitizeUser, sanitizeProfile } from '../utils/passwordUtils';
 import { ServiceError } from '../validators/matchValidator';
+export { ServiceError };
 
 const googleOAuthClient = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_ANDROID_CLIENT_ID || '203586668533-uii0i4gjqcm2cmj4ssvrdq70a2efhmnf.apps.googleusercontent.com'
@@ -29,16 +30,102 @@ export function normalizeRole(roleInput: string): UserRole {
   return 'Athlete';
 }
 
+export interface TokenPair {
+  accessToken: string;
+  refreshToken: string;
+  token: string;
+}
+
 /**
- * Generate a custom JWT token for a user.
+ * Generate JWT access and refresh tokens for a user.
+ * accessToken: short-lived (15 minutes by default).
+ * refreshToken: long-lived (30 days by default).
  */
-export function generateToken(uid: string, email: string, role: string): string {
+export function generateToken(uid: string, email: string, role: string): TokenPair {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
     throw new Error('JWT_SECRET is not configured in environment');
   }
-  const expiresIn = (process.env.JWT_EXPIRES_IN || '7d') as any;
-  return jwt.sign({ uid, email, role }, secret, { expiresIn });
+  const refreshSecret = process.env.JWT_REFRESH_SECRET || secret;
+  const accessExpiresIn = (process.env.JWT_ACCESS_EXPIRES_IN || '15m') as any;
+  const refreshExpiresIn = (process.env.JWT_REFRESH_EXPIRES_IN || '30d') as any;
+
+  const accessToken = jwt.sign({ uid, email, role }, secret, { expiresIn: accessExpiresIn });
+  const refreshToken = jwt.sign({ uid, email, role, token_type: 'refresh' }, refreshSecret, { expiresIn: refreshExpiresIn });
+
+  return {
+    accessToken,
+    refreshToken,
+    token: accessToken,
+  };
+}
+
+/**
+ * Verifies a refresh token and returns decoded user payload.
+ */
+export async function verifyRefreshToken(refreshToken: string): Promise<{ uid: string; email: string; role: string }> {
+  if (!refreshToken || typeof refreshToken !== 'string') {
+    throw new ServiceError('Refresh token is required.', 400);
+  }
+
+  const secret = process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET;
+  if (!secret) {
+    throw new ServiceError('Server JWT configuration missing.', 500);
+  }
+
+  let decoded: any;
+  try {
+    decoded = jwt.verify(refreshToken, secret);
+  } catch (err: any) {
+    if (err?.name === 'TokenExpiredError') {
+      throw new ServiceError('Refresh token expired. Please log in again.', 401);
+    }
+    throw new ServiceError('Invalid refresh token.', 401);
+  }
+
+  if (!decoded || !decoded.uid) {
+    throw new ServiceError('Invalid refresh token payload.', 401);
+  }
+
+  try {
+    const sessionDoc = await db.collection('User_Sessions').doc(decoded.uid).get();
+    if (sessionDoc.exists) {
+      const sessionData = sessionDoc.data();
+      if (sessionData?.refreshToken && sessionData.refreshToken !== refreshToken) {
+        throw new ServiceError('Refresh token has been revoked or replaced.', 401);
+      }
+    }
+  } catch (err: any) {
+    if (err instanceof ServiceError) throw err;
+  }
+
+  return {
+    uid: decoded.uid,
+    email: decoded.email,
+    role: decoded.role || 'Athlete',
+  };
+}
+
+/**
+ * Verifies refresh token, generates new accessToken & refreshToken pair, and updates user session.
+ */
+export async function refreshAccessToken(refreshToken: string): Promise<TokenPair> {
+  const user = await verifyRefreshToken(refreshToken);
+  const newTokens = generateToken(user.uid, user.email, user.role);
+
+  try {
+    await db.collection('User_Sessions').doc(user.uid).set({
+      uid: user.uid,
+      email: user.email,
+      role: user.role,
+      refreshToken: newTokens.refreshToken,
+      updated_at: new Date().toISOString(),
+    }, { merge: true });
+  } catch (err) {
+    console.warn('Failed to update User_Sessions on token refresh:', err);
+  }
+
+  return newTokens;
 }
 
 /**
@@ -545,14 +632,16 @@ export async function registerUserService(
   await writeUserToDatabase(db);
 
   // 5. Generate token & permissions
-  const token = generateToken(uid, email, firestoreRole);
+  const tokenData = generateToken(uid, email, firestoreRole);
   const permissions = ROLE_PERMISSIONS_MAP[firestoreRole];
 
   return {
     user: sanitizeUser(userData),
     profile: sanitizeProfile(profileData),
     permissions: ROLE_PERMISSIONS_MAP[firestoreRole] || [],
-    token,
+    token: tokenData.token,
+    accessToken: tokenData.accessToken,
+    refreshToken: tokenData.refreshToken,
   };
 }
 
@@ -673,7 +762,19 @@ export async function loginUserService(email: string, password: string) {
     }
   }
 
-  const token = generateToken(canonicalUid, userData.email, role);
+  const tokenData = generateToken(canonicalUid, userData.email, role);
+
+  try {
+    await db.collection('User_Sessions').doc(canonicalUid).set({
+      uid: canonicalUid,
+      email: userData.email,
+      role,
+      refreshToken: tokenData.refreshToken,
+      updated_at: new Date().toISOString(),
+    }, { merge: true });
+  } catch (sessErr) {
+    console.warn('Failed to persist user session on login:', sessErr);
+  }
 
   return {
     user: sanitizeUser({
@@ -688,7 +789,9 @@ export async function loginUserService(email: string, password: string) {
       isApproved: userData.isApproved,
       rejection_reason: userData.rejection_reason || null,
     }),
-    token,
+    token: tokenData.token,
+    accessToken: tokenData.accessToken,
+    refreshToken: tokenData.refreshToken,
     firebase_id_token: firebaseIdToken,
   };
 }
@@ -1228,13 +1331,27 @@ export async function socialLoginService(
 
   // BRANCH A: Account Exists in Firestore (or just successfully provisioned via registration)
   const finalRole = userRole || 'Athlete';
-  const token = generateToken(uid, cleanEmail, finalRole);
+  const tokenData = generateToken(uid, cleanEmail, finalRole);
+
+  try {
+    await db.collection('User_Sessions').doc(uid).set({
+      uid,
+      email: cleanEmail,
+      role: finalRole,
+      refreshToken: tokenData.refreshToken,
+      updated_at: new Date().toISOString(),
+    }, { merge: true });
+  } catch (sessErr) {
+    console.warn('Failed to persist social login session:', sessErr);
+  }
 
   return {
     account_exists: true,
     require_signup: false,
     is_new_user: false,
-    token,
+    token: tokenData.token,
+    accessToken: tokenData.accessToken,
+    refreshToken: tokenData.refreshToken,
     user: sanitizeUser({
       user_id: uid,
       first_name: firstName,

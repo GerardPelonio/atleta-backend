@@ -125,9 +125,21 @@ export async function loginUser(req: AuthRequest, res: Response): Promise<void> 
       });
     } catch {}
 
+    if (result?.refreshToken) {
+      res.cookie('refreshToken', result.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 30 * 24 * 60 * 60 * 1000,
+      });
+    }
+
     res.status(200).json({
       message: 'Login successful.',
       ...result,
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      token: result.accessToken || result.token,
     });
   } catch (error: any) {
     try {
@@ -187,9 +199,21 @@ export async function socialLogin(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    if (result?.refreshToken) {
+      res.cookie('refreshToken', result.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 30 * 24 * 60 * 60 * 1000,
+      });
+    }
+
     res.status(200).json({
       message: `${providerType.toUpperCase()} login successful.`,
       ...result,
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      token: result.accessToken || result.token,
     });
   } catch (error: any) {
     console.error('socialLogin error:', error);
@@ -415,3 +439,6 @@ export async function changePassword(req: AuthRequest, res: Response): Promise<v
     res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
   }
 }
+
+export { refreshTokenHandler } from './authController';
+

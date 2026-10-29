@@ -158,7 +158,9 @@ export async function registerOfficialService(data: RegisterOfficialDto) {
     }),
     profile: sanitizeProfile(profileData),
     settings: settingsData,
-    token,
+    token: (token as any).accessToken || token,
+    accessToken: (token as any).accessToken || token,
+    refreshToken: (token as any).refreshToken,
   };
 }
 
@@ -269,7 +271,9 @@ export async function loginOfficialService(email: string, password: string) {
       clearance_level: userData.clearance_level,
       department_code: userData.department_code,
     }),
-    token,
+    token: (token as any).accessToken || token,
+    accessToken: (token as any).accessToken || token,
+    refreshToken: (token as any).refreshToken,
     firebase_id_token: firebaseIdToken,
   };
 }

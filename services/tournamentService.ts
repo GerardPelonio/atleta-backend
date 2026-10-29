@@ -331,27 +331,10 @@ export async function getTournamentBrackets(sport?: string): Promise<TournamentB
       });
     }
 
-    // If no bracket exists, initialize default bracket
-    if (brackets.length === 0) {
-      const defaultBracket = createDefaultSingleEliminationBracket(
-        'National Inter-Collegiate Championship',
-        sport || 'Basketball',
-        []
-      );
-      await db.collection(COLLECTION_NAME).doc(defaultBracket.bracket_id).set(defaultBracket).catch(() => null);
-      brackets.push(defaultBracket);
-    }
-
     return brackets;
   } catch (err) {
-    console.warn('getTournamentBrackets error, returning default:', err);
-    return [
-      createDefaultSingleEliminationBracket(
-        'National Inter-Collegiate Championship',
-        sport || 'Basketball',
-        []
-      ),
-    ];
+    console.warn('getTournamentBrackets error:', err);
+    return [];
   }
 }
 
