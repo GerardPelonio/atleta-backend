@@ -100,6 +100,9 @@ export const authV1: Auth = getAuth(mainApp);
 // 4. Export Firestore db (exclusively connected to atleta-v1)
 // -------------------------------------------------------------
 export const db: Firestore = getFirestore(mainApp);
+try {
+  db.settings({ ignoreUndefinedProperties: true });
+} catch (_) {}
 
 // Specific named instances all point to atleta-v1 for 100% consistency
 export const dbV1: Firestore = getFirestore(mainApp); // Primary Main Store (atleta-v1)

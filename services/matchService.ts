@@ -280,6 +280,39 @@ export async function submitMatchSession(
   const playerStatsList = (Array.isArray(payload.playerStats) && payload.playerStats.length > 0)
     ? payload.playerStats
     : (payload.player_stats || []);
+
+  // Pre-load coach's active team roster athlete profiles for robust matching by ID, name, or jersey number
+  let homeTeamRosterProfiles: Array<{ id: string; ref: FirebaseFirestore.DocumentReference; data: any }> = [];
+  try {
+    const teamDoc = await db.collection('Teams').doc(homeTeamId).get();
+    if (teamDoc.exists) {
+      const tData = teamDoc.data() || {};
+      const rosterIds: string[] = [
+        ...(Array.isArray(tData.roster_list) ? tData.roster_list.map((r: any) => typeof r === 'string' ? r : (r?.athlete_id || r?.id)) : []),
+        ...(Array.isArray(tData.athletes) ? tData.athletes : []),
+        ...(Array.isArray(tData.rosterAthletes) ? tData.rosterAthletes : []),
+      ].filter(Boolean);
+
+      const [byTeamSnap, ...rosterDocs] = await Promise.all([
+        db.collection('Athlete_Profiles').where('team_id', '==', homeTeamId).get().catch(() => null),
+        ...rosterIds.map(id => db.collection('Athlete_Profiles').doc(id).get().catch(() => null)),
+      ]);
+
+      const map = new Map<string, { id: string; ref: FirebaseFirestore.DocumentReference; data: any }>();
+      if (byTeamSnap && !byTeamSnap.empty) {
+        byTeamSnap.docs.forEach(d => map.set(d.id, { id: d.id, ref: d.ref, data: d.data() }));
+      }
+      rosterDocs.forEach(d => {
+        if (d && d.exists) {
+          map.set(d.id, { id: d.id, ref: d.ref, data: d.data() });
+        }
+      });
+      homeTeamRosterProfiles = Array.from(map.values());
+    }
+  } catch (err: any) {
+    console.warn('⚠️ [SUBMIT MATCH] Could not pre-fetch team roster profiles:', err?.message || err);
+  }
+
   for (let idx = 0; idx < playerStatsList.length; idx++) {
     const item = playerStatsList[idx];
     const athleteId = item.athlete_id || `ath_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -318,8 +351,8 @@ export async function submitMatchSession(
       shots: Number((item as any).shots ?? 0),
       saves: Number((item as any).saves ?? 0),
       tackles: Number((item as any).tackles ?? 0),
-      finish_time: (item as any).formatted_time || (item as any).finish_time || (item as any).time,
-      time: (item as any).formatted_time || (item as any).time || (item as any).finish_time,
+      finish_time: (item as any).formatted_time || (item as any).finish_time || (item as any).time || null,
+      time: (item as any).formatted_time || (item as any).time || (item as any).finish_time || null,
       distance_meters: Number((item as any).distance_meters ?? (item as any).distance_m ?? 0),
       split_times: (item as any).split_times || (item as any).split || [],
       stroke_count: Number((item as any).stroke_count ?? 0),
@@ -526,8 +559,50 @@ export async function submitMatchSession(
     let registeredAthleteDoc = athleteDoc.exists ? athleteDoc : null;
     let targetAthleteRef = athleteRef;
 
+    // 1. High-precision roster lookup against coach's managed home team
+    if (!registeredAthleteDoc && isHomePlayer && homeTeamRosterProfiles.length > 0) {
+      const itemJersey = (item as any).jersey_number !== undefined && (item as any).jersey_number !== null
+        ? Number((item as any).jersey_number)
+        : null;
+      const cleanPName = String(pName || '').trim().toLowerCase();
+
+      const matchedRosterProfile = homeTeamRosterProfiles.find(rp => {
+        const d = rp.data;
+        const rpId = rp.id;
+        const rpRawId = rpId.replace(/^ath_/, '');
+        const athRawId = athleteId.replace(/^ath_/, '');
+        if (rpId === athleteId || rpRawId === athRawId) return true;
+
+        const fullName = String(d.full_name || `${d.first_name || ''} ${d.last_name || ''}`).trim().toLowerCase();
+        const firstLast = `${String(d.first_name || '').trim()} ${String(d.last_name || '').trim()}`.toLowerCase();
+        const lastName = String(d.last_name || '').trim().toLowerCase();
+
+        // Exact full name match or first/last match
+        if (cleanPName && (cleanPName === fullName || cleanPName === firstLast || cleanPName === lastName)) {
+          return true;
+        }
+
+        // Jersey number match within coach's active team roster
+        if (itemJersey !== null && d.jersey_number !== undefined && Number(d.jersey_number) === itemJersey) {
+          if (!cleanPName || cleanPName.includes('player') || cleanPName === fullName || cleanPName.includes(lastName)) {
+            return true;
+          }
+        }
+
+        return false;
+      });
+
+      if (matchedRosterProfile) {
+        registeredAthleteDoc = { exists: true, data: () => matchedRosterProfile.data, id: matchedRosterProfile.id, ref: matchedRosterProfile.ref } as any;
+        targetAthleteRef = matchedRosterProfile.ref;
+        if (!homeRosterIds.includes(matchedRosterProfile.id)) {
+          homeRosterIds.push(matchedRosterProfile.id);
+        }
+      }
+    }
+
+    // 2. Global fallback lookup (canonical ID, raw UID, user doc, or full name)
     if (!registeredAthleteDoc) {
-      // Check canonical or raw UID variants and Users collection
       const rawUid = athleteId.replace(/^ath_/, '');
       const [altDoc1, altDoc2, userDoc] = await Promise.all([
         db.collection('Athlete_Profiles').doc(rawUid).get().catch(() => null),
@@ -545,7 +620,6 @@ export async function submitMatchSession(
         registeredAthleteDoc = userDoc;
         targetAthleteRef = db.collection('Athlete_Profiles').doc(`ath_${rawUid}`);
       } else if (pName && pName.trim().length > 0) {
-        // Fallback: match by player full name if player is used again under a different/generic ID
         const trimmedName = pName.trim();
         const [profileByName, userByName] = await Promise.all([
           db.collection('Athlete_Profiles').where('full_name', '==', trimmedName).limit(1).get().catch(() => null),
@@ -562,47 +636,125 @@ export async function submitMatchSession(
     }
 
     if (registeredAthleteDoc && registeredAthleteDoc.exists) {
-      // Verified registered player: update career averages and match statistics!
+      // Verified registered player: aggregate career totals, averages, and match statistics!
       const currentData = registeredAthleteDoc.data() || {};
       const currentAvg = currentData.averages || currentData.stats || {};
-      const prevGames = Number(currentAvg.games_played || 1);
+      const currentTotals = currentData.career_totals || currentData.stats?.career_totals || {};
+      
+      const prevGames = Number(currentTotals.games_played || currentAvg.games_played || currentData.stats?.games_played || 0);
       const newGames = prevGames + 1;
-      
-      const prevPpg = Number(currentAvg.ppg || currentAvg.pts || gamePts);
-      const prevApg = Number(currentAvg.apg || currentAvg.ast || gameAst);
-      const prevRpg = Number(currentAvg.rpg || currentAvg.reb || gameReb);
-      
-      const newPpg = Number(((prevPpg * prevGames + gamePts) / newGames).toFixed(1));
-      const newApg = Number(((prevApg * prevGames + gameAst) / newGames).toFixed(1));
-      const newRpg = Number(((prevRpg * prevGames + gameReb) / newGames).toFixed(1));
-      
+
+      // Extract Game Stats for this match
+      const gamePts = Number(rawStats.points ?? rawStats.pts ?? (item as any).pts ?? (item as any).points ?? 0);
+      const gameAst = Number(rawStats.assists ?? rawStats.ast ?? (item as any).ast ?? (item as any).assists ?? 0);
+      const gameReb = Number(rawStats.rebounds ?? rawStats.reb ?? (item as any).reb ?? (item as any).rebounds ?? 0);
+      const gameStl = Number(rawStats.steals ?? rawStats.stl ?? (item as any).stl ?? 0);
+      const gameBlk = Number(rawStats.blocks ?? rawStats.blk ?? (item as any).blk ?? (item as any).block_points ?? 0);
+      const gameTo = Number(rawStats.turnovers ?? rawStats.to ?? (item as any).to ?? 0);
+      const gameFouls = Number(rawStats.fouls ?? rawStats.pf ?? (item as any).pf ?? 0);
+      const gameFgm = Number(rawStats.fg_made ?? rawStats.fgm ?? (item as any).fgm ?? 0);
+      const gameFga = Number(rawStats.fg_attempted ?? rawStats.fga ?? (item as any).fga ?? 0);
+      const game3pm = Number(rawStats.three_made ?? (item as any).three_made ?? 0);
+      const game3pa = Number(rawStats.three_attempted ?? (item as any).three_attempted ?? 0);
+      const gameFtm = Number(rawStats.ft_made ?? rawStats.ftm ?? (item as any).ftm ?? 0);
+      const gameFta = Number(rawStats.ft_attempted ?? rawStats.fta ?? (item as any).fta ?? 0);
+      const gameMin = Number(rawStats.minutes ?? rawStats.min ?? (item as any).min ?? 0);
+
+      // Aggregate Career Totals
+      const totalPts = Number(currentTotals.points ?? currentData.stats?.total_points ?? (Number(currentAvg.ppg || 0) * prevGames)) + gamePts;
+      const totalAst = Number(currentTotals.assists ?? currentData.stats?.total_assists ?? (Number(currentAvg.apg || 0) * prevGames)) + gameAst;
+      const totalReb = Number(currentTotals.rebounds ?? currentData.stats?.total_rebounds ?? (Number(currentAvg.rpg || 0) * prevGames)) + gameReb;
+      const totalStl = Number(currentTotals.steals ?? currentData.stats?.total_steals ?? 0) + gameStl;
+      const totalBlk = Number(currentTotals.blocks ?? currentData.stats?.total_blocks ?? 0) + gameBlk;
+      const totalTo = Number(currentTotals.turnovers ?? currentData.stats?.total_turnovers ?? 0) + gameTo;
+      const totalFouls = Number(currentTotals.fouls ?? currentData.stats?.total_fouls ?? 0) + gameFouls;
+      const totalFgm = Number(currentTotals.fg_made ?? currentData.stats?.total_fgm ?? 0) + gameFgm;
+      const totalFga = Number(currentTotals.fg_attempted ?? currentData.stats?.total_fga ?? 0) + gameFga;
+      const total3pm = Number(currentTotals.three_made ?? currentData.stats?.total_3pm ?? 0) + game3pm;
+      const total3pa = Number(currentTotals.three_attempted ?? currentData.stats?.total_3pa ?? 0) + game3pa;
+      const totalFtm = Number(currentTotals.ft_made ?? currentData.stats?.total_ftm ?? 0) + gameFtm;
+      const totalFta = Number(currentTotals.ft_attempted ?? currentData.stats?.total_fta ?? 0) + gameFta;
+      const totalMin = Number(currentTotals.minutes ?? currentData.stats?.total_minutes ?? 0) + gameMin;
+
+      // Calculate Updated Career Averages
+      const newPpg = Number((totalPts / newGames).toFixed(1));
+      const newApg = Number((totalAst / newGames).toFixed(1));
+      const newRpg = Number((totalReb / newGames).toFixed(1));
+      const newSpg = Number((totalStl / newGames).toFixed(1));
+      const newBpg = Number((totalBlk / newGames).toFixed(1));
+
+      const updatedTotals = {
+        points: totalPts,
+        total_points: totalPts,
+        assists: totalAst,
+        total_assists: totalAst,
+        rebounds: totalReb,
+        total_rebounds: totalReb,
+        steals: totalStl,
+        total_steals: totalStl,
+        blocks: totalBlk,
+        total_blocks: totalBlk,
+        turnovers: totalTo,
+        total_turnovers: totalTo,
+        fouls: totalFouls,
+        total_fouls: totalFouls,
+        fg_made: totalFgm,
+        total_fgm: totalFgm,
+        fg_attempted: totalFga,
+        total_fga: totalFga,
+        three_made: total3pm,
+        total_3pm: total3pm,
+        three_attempted: total3pa,
+        total_3pa: total3pa,
+        ft_made: totalFtm,
+        total_ftm: totalFtm,
+        ft_attempted: totalFta,
+        total_fta: totalFta,
+        minutes: totalMin,
+        total_minutes: totalMin,
+        games_played: newGames,
+      };
+
+      const updatedAverages = {
+        ...currentAvg,
+        ppg: newPpg,
+        apg: newApg,
+        rpg: newRpg,
+        spg: newSpg,
+        bpg: newBpg,
+        games_played: newGames,
+        ...dynamicAverages,
+      };
+
       const prevTrends: number[] = Array.isArray(currentData.scoring_trends_last_10)
         ? currentData.scoring_trends_last_10
-        : [prevPpg];
+        : (currentAvg.ppg ? [Number(currentAvg.ppg)] : []);
       const newTrends = [...prevTrends, gamePts].slice(-10);
 
-      await targetAthleteRef.set({
-        averages: {
-          ...currentAvg,
-          ppg: newPpg,
-          apg: newApg,
-          rpg: newRpg,
-          games_played: newGames,
-          ...dynamicAverages,
-        },
+      const profileUpdate: Record<string, any> = {
+        career_totals: updatedTotals,
+        career_averages: updatedAverages,
+        averages: updatedAverages,
         stats: {
           ...(currentData.stats || {}),
-          ppg: newPpg,
-          apg: newApg,
-          rpg: newRpg,
-          games_played: newGames,
+          ...updatedAverages,
+          total_points: totalPts,
+          total_assists: totalAst,
+          total_rebounds: totalReb,
+          total_steals: totalStl,
+          total_blocks: totalBlk,
+          total_turnovers: totalTo,
+          total_fouls: totalFouls,
+          career_totals: updatedTotals,
           ...dynamicAverages,
         },
         scoring_trends_last_10: newTrends,
         updated_at: now,
-      }, { merge: true });
+      };
+
+      await targetAthleteRef.set(profileUpdate, { merge: true });
     } else {
-      // Unregistered / guest opponent player: skip creating database user profiles
+      // Unregistered / guest opponent player: skip creating database user profiles or orphaned documents
       console.log(`[OCR / MATCH LOG] Skipping user profile creation for unregistered guest player: ${pName} (${athleteId})`);
     }
   }

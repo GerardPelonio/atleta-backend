@@ -310,7 +310,7 @@ async function runOcrE2EVerification() {
       key = `${normTeam}_${normName}_${pEvent}${pHeat}`;
     } else if (normName) {
       key = `${normTeam}_${normName}`;
-    } else if (pJersey !== undefined && pJersey !== null && pJersey !== '') {
+    } else if (pJersey !== undefined && pJersey !== null) {
       key = `${normTeam}_#${pJersey}`;
     } else {
       key = `${normTeam}_row_${mergedPlayerMap.size + 1}`;
