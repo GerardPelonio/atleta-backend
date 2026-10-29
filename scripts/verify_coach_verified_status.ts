@@ -173,10 +173,10 @@ async function runCoachVerifiedStatusTests() {
     const loginResult = await loginUserService(testCoachEmail, rawPassword);
     assert(loginResult !== null, 'loginUserService succeeds without 403 error');
     assert(Boolean(loginResult.token), 'loginUserService returned valid JWT session token');
-    assert(loginResult.user.status === 'approved', 'Returned user status === "approved"');
-    assert(loginResult.user.account_status === 'Active', 'Returned user account_status === "Active"');
-    assert(loginResult.user.is_approved === true, 'Returned user is_approved === true');
-    assert(loginResult.user.isVerified === true, 'Returned user isVerified === true');
+    assert(loginResult.user?.status === 'approved', 'Returned user status === "approved"');
+    assert(loginResult.user?.account_status === 'Active', 'Returned user account_status === "Active"');
+    assert(loginResult.user?.is_approved === true, 'Returned user is_approved === true');
+    assert(loginResult.user?.isVerified === true, 'Returned user isVerified === true');
 
     // -------------------------------------------------------------------------
     // TEST 5: Auto-healing Desynchronized Coach Documents
@@ -195,7 +195,7 @@ async function runCoachVerifiedStatusTests() {
     // Attempt login: Backend detects Coach_Profiles is approved, heals Users record, and grants login
     const desyncLoginResult = await loginUserService(testCoachEmail, rawPassword);
     assert(desyncLoginResult !== null, 'Desynchronized coach successfully logs in via Coach_Profiles fallback');
-    assert(desyncLoginResult.user.status === 'approved', 'Auto-healed user status is "approved"');
+    assert(desyncLoginResult.user?.status === 'approved', 'Auto-healed user status is "approved"');
 
     const healedUserSnap = await db.collection('Users').doc(testCoachUid).get();
     assert(healedUserSnap.data()?.status === 'approved', 'Users document auto-healed in Firestore');
