@@ -1205,14 +1205,19 @@ export async function socialLoginService(
 
     // Record / update login timestamp and provider in Users collection
     try {
-      await db.collection('Users').doc(uid).set({
+      const updatePayload = {
+        uid,
         provider,
         auth_provider: provider,
+        authProvider: provider,
         avatar_url: avatarUrl || userData.avatar_url || null,
         updated_at: new Date(),
-      }, { merge: true });
+        updatedAt: new Date(),
+      };
+      await db.collection('Users').doc(uid).set(updatePayload, { merge: true });
+      await db.collection('users').doc(uid).set(updatePayload, { merge: true });
     } catch (updateErr) {
-      console.error('Error updating login metadata in Users:', updateErr);
+      console.error('Error updating login metadata in Users and users collections:', updateErr);
     }
   }
 
@@ -1366,24 +1371,30 @@ export async function socialLoginService(
       await assertPhoneNumberUnique(socialContact, uid);
     }
 
+    const userFullName = `${firstName} ${lastName}`.trim();
     const userData: Record<string, any> = {
+      uid,
       user_id: uid,
       first_name: firstName,
       last_name: lastName,
-      full_name: `${firstName} ${lastName}`.trim(),
+      full_name: userFullName,
+      fullName: userFullName,
       email: cleanEmail,
       contact_number: socialContact,
       phoneNumber: socialContact,
       role: userRole,
       provider,
+      authProvider: provider,
       auth_provider: provider,
       avatar_url: avatarUrl || null,
-      account_status: userRole === 'Coach' ? 'Pending' : 'Active',
-      status: userRole === 'Coach' ? 'pending' : 'active',
+      account_status: userRole === 'Coach' ? 'Pending' : 'Pending',
+      status: 'pending',
       is_approved: userRole !== 'Coach',
       isApproved: userRole !== 'Coach',
       is_profile_complete: Boolean(hasProfileDetails),
+      createdAt: now,
       created_at: now,
+      updatedAt: now,
       updated_at: now,
     };
 
@@ -1440,6 +1451,7 @@ export async function socialLoginService(
 
     const batch = db.batch();
     batch.set(db.collection('Users').doc(uid), userData, { merge: true });
+    batch.set(db.collection('users').doc(uid), userData, { merge: true });
     batch.set(db.collection(profileCollection).doc(uid), profileData, { merge: true });
 
     if (userRole === 'Athlete') {

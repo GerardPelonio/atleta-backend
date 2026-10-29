@@ -128,7 +128,7 @@ async function runVerification() {
     // 6. Query official dashboard notifications via getOfficialNotificationsService
     console.log('\n6️⃣ Verifying getOfficialNotifications data mapping...');
     const officialNotifs = await getOfficialNotifications(testOfficialId);
-    const targetNotif = officialNotifs.find((n) => n.request_id === createdRequest.id || n.match_id === testOfficialMatchId);
+    const targetNotif: any = officialNotifs.find((n: any) => n.request_id === createdRequest.id || n.match_id === testOfficialMatchId);
     assert(targetNotif !== undefined, 'Found notification in official dashboard notifications feed');
     if (targetNotif) {
       assert(
