@@ -854,6 +854,9 @@ export async function loginUserService(email: string, password: string) {
   const roleStr = String(role || '').toLowerCase();
   const isAdmin = roleStr.includes('admin');
 
+  let isApprovedFlag = !(roleStr.includes('official') || roleStr.includes('coach'));
+  let isApprovedStatus = isApprovedFlag;
+
   // Admissions Gate: Intercept login if Coach or Official is not approved by system admin
   if (!isAdmin && (roleStr.includes('official') || roleStr.includes('coach'))) {
     const rawStatus = String(
@@ -863,8 +866,55 @@ export async function loginUserService(email: string, password: string) {
       ''
     ).toLowerCase().trim();
 
-    const isApprovedFlag = userData.is_approved === true || userData.isApproved === true;
-    const isApprovedStatus = rawStatus === 'approved' || rawStatus === 'active' || rawStatus === 'verified';
+    const userDirectApproved =
+      userData.is_approved === true ||
+      userData.isApproved === true ||
+      userData.is_verified === true ||
+      userData.isVerified === true ||
+      rawStatus === 'approved' ||
+      rawStatus === 'active' ||
+      rawStatus === 'verified';
+
+    if (userDirectApproved) {
+      isApprovedFlag = true;
+      isApprovedStatus = true;
+    } else if (roleStr.includes('coach')) {
+      // Cross-check Coach_Profiles to prevent login gate desynchronization
+      let coachSnap = await db.collection('Coach_Profiles').doc(`coach_${canonicalUid}`).get().catch(() => null);
+      if (!coachSnap || !coachSnap.exists) {
+        coachSnap = await db.collection('Coach_Profiles').doc(canonicalUid).get().catch(() => null);
+      }
+      if (coachSnap && coachSnap.exists) {
+        const cData = coachSnap.data()!;
+        const cStatus = String(cData.status || cData.account_status || '').toLowerCase().trim();
+        const cApproved =
+          cData.is_approved === true ||
+          cData.isApproved === true ||
+          cData.is_verified === true ||
+          cData.isVerified === true ||
+          cStatus === 'approved' ||
+          cStatus === 'active' ||
+          cStatus === 'verified';
+
+        if (cApproved) {
+          isApprovedFlag = true;
+          isApprovedStatus = true;
+          // Synchronize Users and users documents immediately
+          const syncUpdates = {
+            account_status: 'Active',
+            status: 'approved',
+            certification_status: 'approved',
+            is_approved: true,
+            isApproved: true,
+            is_verified: true,
+            isVerified: true,
+            updated_at: new Date(),
+          };
+          await db.collection('Users').doc(canonicalUid).set(syncUpdates, { merge: true }).catch(() => null);
+          await db.collection('users').doc(canonicalUid).set(syncUpdates, { merge: true }).catch(() => null);
+        }
+      }
+    }
 
     if (!isApprovedFlag && !isApprovedStatus) {
       const entityName = roleStr.includes('coach') ? 'coach' : 'official';
@@ -897,10 +947,12 @@ export async function loginUserService(email: string, password: string) {
       last_name: userData.last_name,
       email: userData.email,
       role,
-      account_status: userData.account_status,
-      status: userData.status,
-      is_approved: userData.is_approved,
-      isApproved: userData.isApproved,
+      account_status: isApprovedStatus ? 'Active' : (userData.account_status || 'Pending'),
+      status: isApprovedStatus ? 'approved' : (userData.status || 'pending'),
+      is_approved: isApprovedFlag || isApprovedStatus,
+      isApproved: isApprovedFlag || isApprovedStatus,
+      is_verified: isApprovedFlag || isApprovedStatus,
+      isVerified: isApprovedFlag || isApprovedStatus,
       rejection_reason: userData.rejection_reason || null,
     }),
     token: tokenData.token,
@@ -1498,22 +1550,27 @@ export async function socialLoginService(
   let docIsApproved = docData?.isApproved ?? docData?.is_approved;
 
   if (finalRole === 'Coach') {
-    if (!docStatus || docStatus === 'Pending' || docStatus === 'pending') {
-      const coachDocSnap = await db.collection('Coach_Profiles').doc(`coach_${uid}`).get().catch(() => null);
-      if (coachDocSnap && coachDocSnap.exists) {
-        const cData = coachDocSnap.data();
-        if (cData?.status || cData?.account_status) {
-          docStatus = cData.status || cData.account_status;
-        }
-        if (cData?.isApproved !== undefined || cData?.is_approved !== undefined) {
-          docIsApproved = cData.isApproved ?? cData.is_approved;
-        }
+    const coachDocSnap = await db.collection('Coach_Profiles').doc(`coach_${uid}`).get().catch(() => null);
+    if (coachDocSnap && coachDocSnap.exists) {
+      const cData = coachDocSnap.data();
+      if (cData?.status || cData?.account_status) {
+        docStatus = cData.status || cData.account_status;
+      }
+      if (cData?.isApproved !== undefined || cData?.is_approved !== undefined || cData?.isVerified !== undefined) {
+        docIsApproved = cData.isApproved ?? cData.is_approved ?? cData.isVerified;
       }
     }
   }
 
-  const resolvedStatus = String(docStatus || (finalRole === 'Coach' ? 'pending' : 'active')).toLowerCase();
-  const resolvedIsApproved = docIsApproved !== undefined ? Boolean(docIsApproved) : (finalRole !== 'Coach');
+  const isApprovedCandidate =
+    docIsApproved === true ||
+    ['approved', 'active', 'verified'].includes(String(docStatus || '').toLowerCase());
+
+  const resolvedStatus = isApprovedCandidate
+    ? 'approved'
+    : String(docStatus || (finalRole === 'Coach' ? 'pending' : 'active')).toLowerCase();
+  const resolvedIsApproved = finalRole === 'Coach' ? isApprovedCandidate : true;
+  const resolvedAccountStatus = isApprovedCandidate || finalRole !== 'Coach' ? 'Active' : 'Pending';
 
   return {
     account_exists: true,
@@ -1531,9 +1588,11 @@ export async function socialLoginService(
       avatar_url: avatarUrl,
       provider,
       status: resolvedStatus,
-      account_status: resolvedStatus === 'approved' || resolvedStatus === 'active' ? 'Active' : 'Pending',
+      account_status: resolvedAccountStatus,
       is_approved: resolvedIsApproved,
       isApproved: resolvedIsApproved,
+      is_verified: resolvedIsApproved,
+      isVerified: resolvedIsApproved,
     }),
   };
 }

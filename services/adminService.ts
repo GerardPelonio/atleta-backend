@@ -502,21 +502,34 @@ export async function approveCoachService(adminId: string, coachIdParam: string)
 
   const now = new Date();
 
-  // Perform atomic batch update to update account_status to "Active" across Coach_Profiles and Users
-  const batch = db.batch();
-
+  // Standardized coach approval attributes across all platform naming conventions
   const coachApprovalUpdates = {
     account_status: 'Active',
-    status: 'VERIFIED',
+    status: 'approved',
+    certification_status: 'approved',
     is_approved: true,
     isApproved: true,
+    is_verified: true,
+    isVerified: true,
     rejection_reason: null,
     updated_at: now,
+    updatedAt: now,
   };
+
+  // Perform atomic batch update across Coach_Profiles, Users, and users collections
+  const batch = db.batch();
 
   batch.set(coachRef, coachApprovalUpdates, { merge: true });
   batch.set(rawCoachRef, coachApprovalUpdates, { merge: true });
   batch.set(userRef, coachApprovalUpdates, { merge: true });
+  batch.set(db.collection('users').doc(userId), coachApprovalUpdates, { merge: true });
+
+  const coachData = coachSnap.exists ? coachSnap.data() : null;
+  const linkedUserId = coachData?.user_id || coachData?.uid;
+  if (linkedUserId && linkedUserId !== userId) {
+    batch.set(db.collection('Users').doc(linkedUserId), coachApprovalUpdates, { merge: true });
+    batch.set(db.collection('users').doc(linkedUserId), coachApprovalUpdates, { merge: true });
+  }
 
   // Write Admin_Audit_Logs record for accreditation decision
   const auditLogId = crypto.randomUUID();
@@ -532,6 +545,21 @@ export async function approveCoachService(adminId: string, coachIdParam: string)
   batch.set(auditRef, auditData);
 
   await batch.commit();
+
+  // Set Firebase Auth custom claims and trigger token refresh readiness
+  try {
+    const authTargetUid = linkedUserId || userId;
+    await auth.setCustomUserClaims(authTargetUid, {
+      role: 'Coach',
+      approved: true,
+      isApproved: true,
+      isVerified: true,
+      status: 'approved',
+    });
+    await auth.revokeRefreshTokens(authTargetUid).catch(() => null);
+  } catch (_) {
+    // Non-blocking notice for auth claims
+  }
 
   // Dispatch confirmation notification asynchronously (non-blocking for < 200ms SLA)
   createNotification({
