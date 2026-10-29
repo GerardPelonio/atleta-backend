@@ -1426,6 +1426,14 @@ export async function socialLoginService(
       profileData.status = 'pending';
       profileData.is_approved = false;
       profileData.isApproved = false;
+
+      // Maintain strict segregation and synchronization of decoupled fields in Users collection
+      userData.sport_type = profileData.sport_type;
+      userData.current_institution = profileData.current_institution;
+      userData.regional_affiliation = profileData.regional_affiliation;
+      userData.national_sports_league = profileData.national_sports_league;
+      userData.years_of_experience = profileData.years_of_experience;
+      userData.certification_license_num = profileData.certification_license_num;
     }
 
     sanitizeProfile(profileData);

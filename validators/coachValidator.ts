@@ -85,6 +85,12 @@ export function validateRegisterCoach(data: Record<string, unknown>, hasFile: bo
     errors.push({ field: 'regional_affiliation', message: 'Regional affiliation must not exceed 255 characters.' });
   }
 
+  // national_sports_league (Optional / string max 255)
+  const nationalSportsLeague = typeof data.national_sports_league === 'string' ? data.national_sports_league.trim() : '';
+  if (nationalSportsLeague.length > 255) {
+    errors.push({ field: 'national_sports_league', message: 'National sports league must not exceed 255 characters.' });
+  }
+
   // professional_documents (Optional: document links or uploaded files)
   const docs = data.professional_documents;
   if (docs !== undefined && docs !== null) {
