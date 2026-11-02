@@ -1222,7 +1222,8 @@ export async function socialLoginService(
       const docSnap = await db.collection('Users').doc(id).get();
       if (docSnap.exists) {
         userDoc = docSnap;
-        uid = docSnap.id;
+        const d = docSnap.data();
+        uid = d?.canonical_uid || d?.user_id || docSnap.id;
         break;
       }
     }
@@ -1232,13 +1233,35 @@ export async function socialLoginService(
       let snap = await db.collection('Users').where('email', '==', cleanEmail).limit(1).get();
       if (!snap.empty) {
         userDoc = snap.docs[0];
-        uid = userDoc.id;
+        const d = userDoc.data();
+        uid = d?.canonical_uid || d?.user_id || userDoc.id;
       } else if (rawEmail && rawEmail !== cleanEmail) {
         snap = await db.collection('Users').where('email', '==', rawEmail).limit(1).get();
         if (!snap.empty) {
           userDoc = snap.docs[0];
-          uid = userDoc.id;
+          const d = userDoc.data();
+          uid = d?.canonical_uid || d?.user_id || userDoc.id;
         }
+      }
+    }
+
+    // 3. Query Users collection by social ID (facebook_id or social_id) or linked emails
+    if (!userDoc && uid) {
+      const cleanSocialId = uid.replace(/^(facebook|google)_/, '');
+      let snap = await db.collection('Users').where('facebook_id', '==', cleanSocialId).limit(1).get().catch(() => null);
+      if (!snap || snap.empty) {
+        snap = await db.collection('Users').where('social_id', '==', cleanSocialId).limit(1).get().catch(() => null);
+      }
+      if (!snap || snap.empty) {
+        snap = await db.collection('Users').where('facebook_email', '==', cleanEmail).limit(1).get().catch(() => null);
+      }
+      if (!snap || snap.empty) {
+        snap = await db.collection('Users').where('linked_emails', 'array-contains', cleanEmail).limit(1).get().catch(() => null);
+      }
+      if (snap && !snap.empty) {
+        userDoc = snap.docs[0];
+        const d = userDoc.data();
+        uid = d?.canonical_uid || d?.user_id || userDoc.id;
       }
     }
   } catch (firestoreErr) {
@@ -1320,6 +1343,7 @@ export async function socialLoginService(
         if (athDoc.exists) {
           userRole = 'Athlete';
           const aData = athDoc.data()!;
+          uid = aData.user_id || aData.uid || uid;
           firstName = aData.first_name || firstName;
           lastName = aData.last_name || lastName;
           avatarUrl = aData.avatar_url || avatarUrl;
@@ -1329,6 +1353,7 @@ export async function socialLoginService(
         if (athPrefixed.exists) {
           userRole = 'Athlete';
           const aData = athPrefixed.data()!;
+          uid = aData.user_id || aData.uid || uid;
           firstName = aData.first_name || firstName;
           lastName = aData.last_name || lastName;
           avatarUrl = aData.avatar_url || avatarUrl;
@@ -1341,6 +1366,7 @@ export async function socialLoginService(
         if (!athEmailSnap.empty) {
           userRole = 'Athlete';
           const aData = athEmailSnap.docs[0].data();
+          uid = aData.user_id || aData.uid || uid;
           firstName = aData.first_name || firstName;
           lastName = aData.last_name || lastName;
           avatarUrl = aData.avatar_url || avatarUrl;
