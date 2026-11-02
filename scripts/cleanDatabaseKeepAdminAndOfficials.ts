@@ -192,3 +192,4 @@ main().catch((err) => {
   console.error('Fatal error during database cleanup:', err);
   process.exit(1);
 });
+

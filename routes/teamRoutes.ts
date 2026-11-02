@@ -13,7 +13,7 @@ import { cacheMiddleware, invalidateCacheMiddleware } from '../middlewares/cache
 
 const router = Router();
 
-const teamCache = cacheMiddleware({ ttlSeconds: 60, tags: ['teams', 'roster'] });
+const teamCache = cacheMiddleware({ ttlSeconds: 60, tags: ['teams', 'roster'], isUserSpecific: true });
 const teamInvalidate = invalidateCacheMiddleware(['teams', 'roster']);
 
 // Browse & Search Teams (Named and Root Routes)
