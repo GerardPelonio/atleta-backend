@@ -7,6 +7,7 @@ import {
   submitRecruitmentInquiry,
   getAthleteInquiries,
   respondToRecruitmentInquiry,
+  getActiveCoachSportsService,
   ServiceError,
 } from '../services/coachInquiryService';
 import { dispatchRecruitmentProposal } from '../services/scoutingService';
@@ -42,6 +43,16 @@ export async function getCoachProfileHandler(req: AuthRequest, res: Response): P
   } catch (error: any) {
     console.error('getCoachProfileHandler error:', error);
     res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function getActiveCoachSportsHandler(req: any, res: Response): Promise<void> {
+  try {
+    const sports = await getActiveCoachSportsService();
+    res.status(200).json({ success: true, sports });
+  } catch (error: any) {
+    console.error('getActiveCoachSportsHandler error:', error);
+    res.status(500).json({ error: 'Failed to fetch active coach sports', details: error?.message || String(error) });
   }
 }
 

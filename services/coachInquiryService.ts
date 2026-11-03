@@ -639,3 +639,71 @@ export async function respondToRecruitmentInquiry(
 
 export const respondToInquiry = respondToRecruitmentInquiry;
 
+/**
+ * Retrieve the distinct list of sports offered by currently registered and active/approved coaches.
+ * Dynamic filtering across coach profiles and coach users in Firestore.
+ */
+export async function getActiveCoachSportsService(): Promise<string[]> {
+  try {
+    const [coachProfilesSnap, usersSnap] = await Promise.all([
+      db.collection('Coach_Profiles').get().catch(() => null),
+      db.collection('Users').where('role', 'in', ['Coach', 'coach', 'COACH']).get().catch(() => null),
+    ]);
+
+    const activeSportsSet = new Set<string>();
+
+    const checkAndAddSport = (data: any) => {
+      if (!data) return;
+      const status = String(data.status || '').toLowerCase();
+      const accStatus = String(data.account_status || '').toLowerCase();
+      const isApproved = Boolean(data.is_approved || data.isApproved);
+      const isVerified = Boolean(data.is_verified || data.isVerified);
+
+      // Exclude suspended, rejected, or disabled accounts
+      if (
+        status === 'rejected' ||
+        status === 'disabled' ||
+        status === 'banned' ||
+        status === 'inactive' ||
+        accStatus === 'inactive' ||
+        accStatus === 'disabled'
+      ) {
+        return;
+      }
+
+      // Check active / verified / approved gating
+      const isActive =
+        status === 'approved' ||
+        status === 'verified' ||
+        accStatus === 'active' ||
+        isApproved ||
+        isVerified;
+
+      if (!isActive) return;
+
+      const rawSport = String(data.sport_type || data.sports_focus || data.sport || '').trim();
+      if (!rawSport) return;
+
+      // Standardize sport naming (e.g. "Track & Field" -> "TRACK AND FIELD")
+      let normalized = rawSport.toUpperCase().replace(/&/g, 'AND').replace(/\s+/g, ' ').trim();
+      if (normalized && normalized !== 'ALL') {
+        activeSportsSet.add(normalized);
+      }
+    };
+
+    if (coachProfilesSnap && !coachProfilesSnap.empty) {
+      coachProfilesSnap.docs.forEach((doc) => checkAndAddSport(doc.data()));
+    }
+
+    if (usersSnap && !usersSnap.empty) {
+      usersSnap.docs.forEach((doc) => checkAndAddSport(doc.data()));
+    }
+
+    return Array.from(activeSportsSet).sort();
+  } catch (error) {
+    console.error('getActiveCoachSportsService error:', error);
+    return [];
+  }
+}
+
+

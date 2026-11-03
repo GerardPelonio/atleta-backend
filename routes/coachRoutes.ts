@@ -11,6 +11,7 @@ import {
   changeCoachPasswordHandler,
   getCoachAthletesHandler,
   resubmitCoachCredentialsHandler,
+  getActiveCoachSportsHandler,
 } from '../controllers/coachInquiryController';
 import { getScoutingAthleteProfileController } from '../controllers/scoutingController';
 import { postSrpeLog, getAthleteWorkloadHandler } from '../controllers/workloadController';
@@ -37,6 +38,7 @@ router.post('/reapply', upload.any(), resubmitCoachCredentialsHandler);
 // Clean Token-Based Routes (No Coach ID required)
 router.get('/me', authenticate, getCoachProfileHandler);
 router.get('/profile', authenticate, getCoachProfileHandler);
+router.get('/active-sports', getActiveCoachSportsHandler);
 
 // Coach Settings
 router.get('/me/settings', authenticate, getCoachSettingsHandler);
