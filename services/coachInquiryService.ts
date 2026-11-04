@@ -379,15 +379,23 @@ export async function getAthleteInquiries(athleteId: string): Promise<EnrichedIn
   const rawId = athleteId.replace(/^ath_/, '');
   const possibleAthleteIds = Array.from(new Set([athleteId, `ath_${rawId}`, rawId]));
 
-  const snapshot = await db
-    .collection('Scouting_Registry')
-    .where('athlete_id', 'in', possibleAthleteIds)
-    .get();
+  // Direct index query using athlete_id and athleteId
+  const [snapshotSnake, snapshotCamel] = await Promise.all([
+    db.collection('Scouting_Registry').where('athlete_id', 'in', possibleAthleteIds).get(),
+    db.collection('Scouting_Registry').where('athleteId', 'in', possibleAthleteIds).get().catch(() => null),
+  ]);
 
-  const inquiries: RecruitmentInquiry[] = [];
-  snapshot.forEach((doc) => {
-    inquiries.push(doc.data() as RecruitmentInquiry);
-  });
+  const docMap = new Map<string, RecruitmentInquiry>();
+  snapshotSnake.forEach((doc) => docMap.set(doc.id, doc.data() as RecruitmentInquiry));
+  if (snapshotCamel) {
+    snapshotCamel.forEach((doc) => docMap.set(doc.id, doc.data() as RecruitmentInquiry));
+  }
+
+  if (docMap.size === 0) {
+    return [];
+  }
+
+  const inquiries = Array.from(docMap.values());
 
   // Enrich with coach information in parallel
   const coachIds = Array.from(new Set(inquiries.map((inq) => inq.coach_scout_id).filter(Boolean)));
