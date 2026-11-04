@@ -82,7 +82,7 @@ export async function getPublicCoachProfile(coachId: string): Promise<CoachPubli
     if (!userDoc.exists) {
       userDoc = await db.collection('Users').doc(canonicalCoachId).get();
     }
-    if (userDoc.exists && userDoc.data()?.role === 'Coach') {
+    if (userDoc.exists && String(userDoc.data()?.role || '').toLowerCase() === 'coach') {
       coachData = {
         coach_id: canonicalCoachId,
         user_id: rawUid,

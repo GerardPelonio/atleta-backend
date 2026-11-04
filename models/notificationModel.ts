@@ -77,7 +77,25 @@ export interface CurrentTeamSummary {
 
 export interface AthleteHomeSummary {
   athlete_id: string;
+  user_id?: string;
+  first_name?: string;
+  last_name?: string;
+  full_name?: string;
+  email?: string;
+  gender?: string;
+  birthdate?: string;
+  province?: string;
+  location?: string;
+  avatar_url?: string;
+  height_cm?: number | null;
+  weight_kg?: number | null;
+  wingspan_cm?: number | null;
+  vertical_cm?: number | null;
+  vertical_leap_in?: number | null;
+  eligible_documents?: any[];
   sport_category: string;
+  sport_type?: string;
+  past_teams?: any[];
   personal_analytics: {
     ppg: number;
     rpg: number;
@@ -99,4 +117,5 @@ export interface AthleteHomeSummary {
     risk_description: string;
     days_logged: number;
   };
+  [key: string]: any;
 }

@@ -151,7 +151,8 @@ export async function respondToInquiryHandler(req: AuthRequest, res: Response): 
 
 export async function getCoachSettingsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const coachId = `coach_${req.user!.uid}`;
+    const rawUid = String(req.user?.uid || '').replace(/^coach_/, '');
+    const coachId = `coach_${rawUid}`;
     const settings = await getCoachSettings(coachId);
     res.status(200).json(settings);
   } catch (error: any) {
@@ -162,7 +163,8 @@ export async function getCoachSettingsHandler(req: AuthRequest, res: Response): 
 
 export async function updateCoachSettingsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const coachId = `coach_${req.user!.uid}`;
+    const rawUid = String(req.user?.uid || '').replace(/^coach_/, '');
+    const coachId = `coach_${rawUid}`;
     const errors = validateUpdateCoachSettings(req.body);
     if (errors.length > 0) {
       res.status(400).json({ errors });
@@ -183,9 +185,9 @@ export async function updateCoachSettingsHandler(req: AuthRequest, res: Response
 
 export async function updateCoachProfileHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const userId = req.user!.uid;
-    const coachId = `coach_${userId}`;
-    const updatedProfile = await updateCoachProfile(coachId, userId, req.body);
+    const rawUserId = String(req.user?.uid || '').replace(/^coach_/, '');
+    const coachId = `coach_${rawUserId}`;
+    const updatedProfile = await updateCoachProfile(coachId, rawUserId, req.body);
 
     res.status(200).json({
       message: 'Coach profile updated successfully.',
@@ -268,7 +270,8 @@ export async function resubmitCoachCredentialsHandler(req: AuthRequest, res: Res
   try {
     const body = (req.body || {}) as Record<string, any>;
     const userId = req.user?.uid || body.user_id || body.userId;
-    const coachId = body.coach_id || body.coachId || (userId ? `coach_${userId}` : undefined);
+    const rawUserId = userId ? String(userId).replace(/^coach_/, '') : undefined;
+    const coachId = body.coach_id || body.coachId || (rawUserId ? `coach_${rawUserId}` : undefined);
     const email = body.email;
 
     let documents: string[] = [];

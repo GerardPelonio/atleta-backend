@@ -511,7 +511,10 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
   let userExists = false;
   let userData: Record<string, any> = {};
   try {
-    const userDoc = await db.collection('Users').doc(rawUid).get();
+    let userDoc = await db.collection('Users').doc(rawUid).get();
+    if (!userDoc.exists) {
+      userDoc = await db.collection('Users').doc(canonicalAthleteId).get();
+    }
     if (userDoc.exists) {
       userExists = true;
       userData = userDoc.data() || {};
@@ -759,9 +762,30 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
     tech: rawRadar?.tech || (fgPct > 0 ? Math.min(99, Math.round(fgPct * 0.9 + 35)) : 80),
   };
 
+  const firstName = userData.first_name || profileData.first_name || '';
+  const lastName = userData.last_name || profileData.last_name || '';
+  const fullName = userData.full_name || profileData.full_name || `${firstName} ${lastName}`.trim();
+
   const summary: AthleteHomeSummary = {
-    athlete_id: athleteId,
+    athlete_id: canonicalAthleteId,
+    user_id: rawUid,
+    first_name: firstName,
+    last_name: lastName,
+    full_name: fullName,
+    email: userData.email || profileData.email || '',
+    gender: userData.gender || profileData.gender || '',
+    birthdate: userData.birthdate || profileData.birthdate || '',
+    province: userData.province || profileData.province || 'Camarines Sur',
+    location: userData.location || userData.province || profileData.province || 'Camarines Sur',
+    avatar_url: profileData.avatar_url || userData.avatar_url || userData.profile_image || '',
     sport_category: sportCategory,
+    sport_type: sportCategory,
+    height_cm: profileData.height_cm ?? userData.height_cm ?? null,
+    weight_kg: profileData.weight_kg ?? userData.weight_kg ?? null,
+    wingspan_cm: profileData.wingspan_cm ?? userData.wingspan_cm ?? null,
+    vertical_cm: profileData.vertical_cm ?? profileData.vertical_jump_cm ?? userData.vertical_cm ?? 0,
+    vertical_leap_in: profileData.vertical_leap_in ?? (profileData.vertical_cm ? Math.round(Number(profileData.vertical_cm) / 2.54) : 0),
+    eligible_documents: profileData.eligible_documents || profileData.documents || userData.eligible_documents || [],
     personal_analytics: {
       ppg: stats.ppg,
       rpg: stats.rpg,
