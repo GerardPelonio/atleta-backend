@@ -103,21 +103,6 @@ export async function verifyRefreshToken(refreshToken: string): Promise<{ uid: s
     throw new ServiceError('Invalid refresh token payload.', 401);
   }
 
-  try {
-    const sessionDoc = await db.collection('User_Sessions').doc(decoded.uid).get();
-    if (sessionDoc.exists) {
-      const sessionData = sessionDoc.data();
-      if (sessionData?.revoked === true) {
-        throw new ServiceError('Session has been revoked.', 401);
-      }
-      if (sessionData?.revokedTokens && Array.isArray(sessionData.revokedTokens) && sessionData.revokedTokens.includes(refreshToken)) {
-        throw new ServiceError('Refresh token has been revoked.', 401);
-      }
-    }
-  } catch (err: any) {
-    if (err instanceof ServiceError) throw err;
-  }
-
   return {
     uid: decoded.uid,
     email: decoded.email,
@@ -126,24 +111,12 @@ export async function verifyRefreshToken(refreshToken: string): Promise<{ uid: s
 }
 
 /**
- * Verifies refresh token, generates new accessToken & refreshToken pair, and updates user session.
+ * Verifies refresh token and generates new accessToken & refreshToken pair.
+ * Eliminates redundant User_Sessions read/write operations for rapid resolution.
  */
 export async function refreshAccessToken(refreshToken: string): Promise<TokenPair> {
   const user = await verifyRefreshToken(refreshToken);
   const newTokens = generateToken(user.uid, user.email, user.role);
-
-  try {
-    await db.collection('User_Sessions').doc(user.uid).set({
-      uid: user.uid,
-      email: user.email,
-      role: user.role,
-      refreshToken: newTokens.refreshToken,
-      updated_at: new Date().toISOString(),
-    }, { merge: true });
-  } catch (err) {
-    console.warn('Failed to update User_Sessions on token refresh:', err);
-  }
-
   return newTokens;
 }
 
@@ -323,7 +296,7 @@ export async function assertPhoneNumberUnique(
   const variantList = Array.from(variations).slice(0, 10);
   const normalizedExclude = excludeUid ? excludeUid.replace(/^(ath_|coach_|off_)/, '') : undefined;
 
-  const collectionsToCheck = ['Users', 'users'];
+  const collectionsToCheck = ['Users'];
   const fieldsToCheck = ['contact_number', 'phoneNumber', 'phone_number'];
 
   for (const col of collectionsToCheck) {
@@ -919,7 +892,7 @@ export async function loginUserService(email: string, password: string) {
         if (cApproved) {
           isApprovedFlag = true;
           isApprovedStatus = true;
-          // Synchronize Users and users documents immediately
+          // Synchronize Users document immediately
           const syncUpdates = {
             account_status: 'Active',
             status: 'approved',
@@ -931,7 +904,6 @@ export async function loginUserService(email: string, password: string) {
             updated_at: new Date(),
           };
           await db.collection('Users').doc(canonicalUid).set(syncUpdates, { merge: true }).catch(() => null);
-          await db.collection('users').doc(canonicalUid).set(syncUpdates, { merge: true }).catch(() => null);
         }
       }
     }
@@ -947,18 +919,6 @@ export async function loginUserService(email: string, password: string) {
   }
 
   const tokenData = generateToken(canonicalUid, userData.email, role, isApprovedStatus);
-
-  try {
-    await db.collection('User_Sessions').doc(canonicalUid).set({
-      uid: canonicalUid,
-      email: userData.email,
-      role,
-      refreshToken: tokenData.refreshToken,
-      updated_at: new Date().toISOString(),
-    }, { merge: true });
-  } catch (sessErr) {
-    console.warn('Failed to persist user session on login:', sessErr);
-  }
 
   return {
     user: sanitizeUser({
@@ -1310,9 +1270,8 @@ export async function socialLoginService(
         updatedAt: new Date(),
       };
       await db.collection('Users').doc(uid).set(updatePayload, { merge: true });
-      await db.collection('users').doc(uid).set(updatePayload, { merge: true });
     } catch (updateErr) {
-      console.error('Error updating login metadata in Users and users collections:', updateErr);
+      console.error('Error updating login metadata in Users collection:', updateErr);
     }
   }
 
@@ -1549,7 +1508,6 @@ export async function socialLoginService(
 
     const batch = db.batch();
     batch.set(db.collection('Users').doc(uid), userData, { merge: true });
-    batch.set(db.collection('users').doc(uid), userData, { merge: true });
     batch.set(db.collection(profileCollection).doc(uid), profileData, { merge: true });
 
     if (userRole === 'Athlete') {
@@ -1578,18 +1536,6 @@ export async function socialLoginService(
   // BRANCH A: Account Exists in Firestore (or just successfully provisioned via registration)
   const finalRole = userRole || 'Athlete';
   const tokenData = generateToken(uid, cleanEmail, finalRole);
-
-  try {
-    await db.collection('User_Sessions').doc(uid).set({
-      uid,
-      email: cleanEmail,
-      role: finalRole,
-      refreshToken: tokenData.refreshToken,
-      updated_at: new Date().toISOString(),
-    }, { merge: true });
-  } catch (sessErr) {
-    console.warn('Failed to persist social login session:', sessErr);
-  }
 
   const docData = userDoc && userDoc.exists ? userDoc.data() : null;
   let docStatus = docData?.status || docData?.account_status;

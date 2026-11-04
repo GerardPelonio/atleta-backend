@@ -2,7 +2,7 @@
  * Item 9: Google & Facebook Sign-Up Firestore Persistence E2E Verification
  *
  * Verifies:
- * 1. Post-OAuth callback handler explicitly writes the user document to the 'users' collection prior to registration.
+ * 1. Post-OAuth callback handler explicitly writes the user document to the canonical 'Users' collection prior to registration.
  * 2. All required fields are verified:
  *    - uid
  *    - email
@@ -43,9 +43,9 @@ async function runOAuthSignupPersistenceTests() {
 
   try {
     // -------------------------------------------------------------------------
-    // TEST SUITE 1: Explicit setDoc to 'users' Collection (Google Post-OAuth)
+    // TEST SUITE 1: Explicit setDoc to 'Users' Collection (Google Post-OAuth)
     // -------------------------------------------------------------------------
-    console.log('--- TEST 1: Post-OAuth Explicit Write to "users" Collection (Google) ---');
+    console.log('--- TEST 1: Post-OAuth Explicit Write to "Users" Collection (Google) ---');
     const googleUserPayload = {
       uid: testGoogleUid,
       email: testGoogleEmail,
@@ -65,12 +65,11 @@ async function runOAuthSignupPersistenceTests() {
       account_status: 'pending',
     };
 
-    // Explicit setDoc to 'users' collection prior to completing registration
-    await db.collection('users').doc(testGoogleUid).set(googleUserPayload, { merge: true });
+    // Explicit setDoc to canonical 'Users' collection prior to completing registration
     await db.collection('Users').doc(testGoogleUid).set(googleUserPayload, { merge: true });
 
-    const googleDocSnap = await db.collection('users').doc(testGoogleUid).get();
-    assert(googleDocSnap.exists, 'User document exists in "users" collection (lowercase)');
+    const googleDocSnap = await db.collection('Users').doc(testGoogleUid).get();
+    assert(googleDocSnap.exists, 'User document exists in "Users" collection (canonical)');
 
     const gData = googleDocSnap.data()!;
     assert(gData.uid === testGoogleUid, 'Contains required field: uid === ' + testGoogleUid);
@@ -82,9 +81,9 @@ async function runOAuthSignupPersistenceTests() {
     assert(Boolean(gData.createdAt), 'Contains required field: createdAt');
 
     // -------------------------------------------------------------------------
-    // TEST SUITE 2: Explicit setDoc to 'users' Collection (Facebook Post-OAuth)
+    // TEST SUITE 2: Explicit setDoc to 'Users' Collection (Facebook Post-OAuth)
     // -------------------------------------------------------------------------
-    console.log('\n--- TEST 2: Post-OAuth Explicit Write to "users" Collection (Facebook) ---');
+    console.log('\n--- TEST 2: Post-OAuth Explicit Write to "Users" Collection (Facebook) ---');
     const facebookUserPayload = {
       uid: testFacebookUid,
       email: testFacebookEmail,
@@ -104,11 +103,10 @@ async function runOAuthSignupPersistenceTests() {
       account_status: 'pending',
     };
 
-    await db.collection('users').doc(testFacebookUid).set(facebookUserPayload, { merge: true });
     await db.collection('Users').doc(testFacebookUid).set(facebookUserPayload, { merge: true });
 
-    const fbDocSnap = await db.collection('users').doc(testFacebookUid).get();
-    assert(fbDocSnap.exists, 'Facebook user document exists in "users" collection');
+    const fbDocSnap = await db.collection('Users').doc(testFacebookUid).get();
+    assert(fbDocSnap.exists, 'Facebook user document exists in "Users" collection');
 
     const fbData = fbDocSnap.data()!;
     assert(fbData.uid === testFacebookUid, 'Contains required field: uid === ' + testFacebookUid);
@@ -192,19 +190,19 @@ async function runOAuthSignupPersistenceTests() {
 
     assert(regResult !== null && typeof regResult === 'object', 'socialLoginService completed registration');
 
-    const updatedUserDoc = await db.collection('users').doc(testGoogleUid).get();
+    const updatedUserDoc = await db.collection('Users').doc(testGoogleUid).get();
     if (updatedUserDoc.exists) {
       const uData = updatedUserDoc.data()!;
-      assert(uData.status === 'pending', 'User document in "users" collection maintains status: "pending"');
+      assert(uData.status === 'pending', 'User document in "Users" collection maintains status: "pending"');
       assert(uData.authProvider === 'google', 'User document maintains authProvider: "google"');
       assert(uData.fullName === 'Carlos Yulo', 'User document maintains fullName: "Carlos Yulo"');
     } else {
       // Check by email query
-      const emailSnap = await db.collection('users').where('email', '==', testGoogleEmail).limit(1).get();
-      assert(!emailSnap.empty, 'User document found in "users" collection by email query');
+      const emailSnap = await db.collection('Users').where('email', '==', testGoogleEmail).limit(1).get();
+      assert(!emailSnap.empty, 'User document found in "Users" collection by email query');
       if (!emailSnap.empty) {
         const uData = emailSnap.docs[0].data();
-        assert(uData.status === 'pending', 'User document in "users" collection maintains status: "pending"');
+        assert(uData.status === 'pending', 'User document in "Users" collection maintains status: "pending"');
         assert(uData.authProvider === 'google', 'User document maintains authProvider: "google"');
         assert(uData.fullName === 'Carlos Yulo', 'User document maintains fullName: "Carlos Yulo"');
       }
@@ -218,9 +216,7 @@ async function runOAuthSignupPersistenceTests() {
     // CLEANUP
     // -------------------------------------------------------------------------
     console.log('\n--- CLEANUP ---');
-    await db.collection('users').doc(testGoogleUid).delete().catch(() => null);
     await db.collection('Users').doc(testGoogleUid).delete().catch(() => null);
-    await db.collection('users').doc(testFacebookUid).delete().catch(() => null);
     await db.collection('Users').doc(testFacebookUid).delete().catch(() => null);
     console.log('  🧹 Cleanup completed.');
 

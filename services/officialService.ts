@@ -278,20 +278,6 @@ export async function loginOfficialService(email: string, password: string) {
   const accessToken = isAdmin ? tokenPair.accessToken : ((tokenPair as any).accessToken || tokenPair);
   const refreshToken = (tokenPair as any).refreshToken;
 
-  if (refreshToken) {
-    try {
-      await db.collection('User_Sessions').doc(uid).set({
-        uid: uid,
-        email: userData.email,
-        role: actualRole,
-        refreshToken: refreshToken,
-        updated_at: new Date().toISOString(),
-      }, { merge: true });
-    } catch (err) {
-      console.warn('Failed to record User_Sessions for official:', err);
-    }
-  }
-
   return {
     user: sanitizeUser({
       user_id: uid,

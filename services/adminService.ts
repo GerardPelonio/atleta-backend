@@ -327,18 +327,6 @@ export async function loginAdminService(
   const token = generateElevatedAdminToken(uid, email, 'SystemAdmin', clearanceLevel, departmentCode);
   const tokenPair = generateToken(uid, email, 'SystemAdmin');
 
-  try {
-    await db.collection('User_Sessions').doc(uid).set({
-      uid: uid,
-      email: userData.email,
-      role: 'SystemAdmin',
-      refreshToken: tokenPair.refreshToken,
-      updated_at: new Date().toISOString(),
-    }, { merge: true });
-  } catch (err) {
-    console.warn('Failed to record User_Sessions for admin:', err);
-  }
-
   // 7. Log successful login access event (non-blocking async)
   logAdminAudit({
     user_id: uid,
@@ -532,19 +520,17 @@ export async function approveCoachService(adminId: string, coachIdParam: string)
     updatedAt: now,
   };
 
-  // Perform atomic batch update across Coach_Profiles, Users, and users collections
+  // Perform atomic batch update across Coach_Profiles and Users collections
   const batch = db.batch();
 
   batch.set(coachRef, coachApprovalUpdates, { merge: true });
   batch.set(rawCoachRef, coachApprovalUpdates, { merge: true });
   batch.set(userRef, coachApprovalUpdates, { merge: true });
-  batch.set(db.collection('users').doc(userId), coachApprovalUpdates, { merge: true });
 
   const coachData = coachSnap.exists ? coachSnap.data() : null;
   const linkedUserId = coachData?.user_id || coachData?.uid;
   if (linkedUserId && linkedUserId !== userId) {
     batch.set(db.collection('Users').doc(linkedUserId), coachApprovalUpdates, { merge: true });
-    batch.set(db.collection('users').doc(linkedUserId), coachApprovalUpdates, { merge: true });
   }
 
   // Write Admin_Audit_Logs record for accreditation decision

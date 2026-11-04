@@ -126,7 +126,6 @@ async function runCoachVerifiedStatusTests() {
     };
 
     await db.collection('Users').doc(testCoachUid).set(pendingCoachUserData);
-    await db.collection('users').doc(testCoachUid).set(pendingCoachUserData);
     await db.collection('Coach_Profiles').doc(`coach_${testCoachUid}`).set(pendingCoachProfileData);
 
     let loginBlocked = false;
@@ -155,11 +154,6 @@ async function runCoachVerifiedStatusTests() {
     assert(usersData.account_status === 'Active', 'Users document account_status is "Active"');
     assert(usersData.is_approved === true, 'Users document is_approved is true');
     assert(usersData.isVerified === true, 'Users document isVerified is true');
-
-    // Verify users (lowercase) collection
-    const lowercaseSnap = await db.collection('users').doc(testCoachUid).get();
-    assert(lowercaseSnap.exists, 'users (lowercase) document exists post-approval');
-    assert(isCoachAccountApproved(lowercaseSnap.data()), 'users (lowercase) document evaluates as approved');
 
     // Verify Coach_Profiles collection
     const coachDocSnap = await db.collection('Coach_Profiles').doc(`coach_${testCoachUid}`).get();
@@ -206,7 +200,6 @@ async function runCoachVerifiedStatusTests() {
     // -------------------------------------------------------------------------
     console.log('\n--- CLEANUP ---');
     await db.collection('Users').doc(testCoachUid).delete().catch(() => null);
-    await db.collection('users').doc(testCoachUid).delete().catch(() => null);
     await db.collection('Coach_Profiles').doc(`coach_${testCoachUid}`).delete().catch(() => null);
     await db.collection('Coach_Profiles').doc(testCoachUid).delete().catch(() => null);
     console.log('  🧹 Cleanup completed.');
