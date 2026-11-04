@@ -260,6 +260,32 @@ export async function submitRecruitmentInquiry(
   const athleteIds = Array.from(new Set([athleteId, rawAthleteUid, canonicalAthleteId].filter(Boolean)));
   const coachIds = Array.from(new Set([coachId, coachProfile.coach_id, coachProfile.user_id].filter(Boolean)));
 
+  // Cross-sport validation check: Athlete primary sport must match coach sport
+  let athleteSport = '';
+  const [athProfDoc, athUserDoc] = await Promise.all([
+    db.collection('Athlete_Profiles').doc(rawAthleteUid).get().catch(() => null),
+    db.collection('Users').doc(rawAthleteUid).get().catch(() => null),
+  ]);
+  if (athProfDoc && athProfDoc.exists) {
+    const d = athProfDoc.data();
+    athleteSport = d?.sport_type || d?.sport_category || d?.sports_type || d?.category || '';
+  }
+  if (!athleteSport && athUserDoc && athUserDoc.exists) {
+    const d = athUserDoc.data();
+    athleteSport = d?.sport_type || d?.sport_category || d?.category || '';
+  }
+
+  const normSport = (s: string) => s.toLowerCase().replace(/&/g, 'and').replace(/\s+/g, '').trim();
+  const aSport = normSport(athleteSport);
+  const cSport = normSport(coachProfile.sport_type || (coachProfile as any).sport || (coachProfile as any).sports_focus || '');
+
+  if (aSport && cSport && cSport !== 'all' && aSport !== cSport && !aSport.includes(cSport) && !cSport.includes(aSport)) {
+    throw new ServiceError(
+      'Cannot Inquire with Different Sport. Change your sport in profile page to proceed.',
+      400
+    );
+  }
+
   // 2. Rate Limit Check: Max 10 requests/day per athlete
   const oneDayAgoMs = Date.now() - 24 * 60 * 60 * 1000;
   const athleteInquiriesSnapshot = await db
