@@ -465,6 +465,12 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
   const athleteIdSet = new Set<string>();
   const athleteTeamsMap = new Map<string, Array<{ team_id: string; team_name: string; sport_type: string; jersey_number?: number; position?: string }>>();
 
+  const normalizeAthId = (raw: string) => {
+    if (!raw) return '';
+    const clean = String(raw).trim().replace(/^ath_/, '');
+    return clean ? `ath_${clean}` : '';
+  };
+
   const addTeamForAthlete = (rawAthId: string, teamObj: { team_id: string; team_name: string; sport_type: string; jersey_number?: number; position?: string }) => {
     const clean = rawAthId.replace(/^ath_/, '');
     const canonical = rawAthId.startsWith('ath_') ? rawAthId : `ath_${rawAthId}`;
@@ -484,7 +490,8 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
     if (Array.isArray(managed)) {
       managed.forEach((item: any) => {
         const id = typeof item === 'string' ? item : (item.athlete_id || item.user_id || item.id);
-        if (id) athleteIdSet.add(String(id).trim());
+        const norm = normalizeAthId(id);
+        if (norm) athleteIdSet.add(norm);
       });
     }
   }
@@ -496,9 +503,10 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
       if (Array.isArray(t.roster_list)) {
         for (const item of t.roster_list) {
           const aId = typeof item === 'string' ? item : (item.athlete_id || (item as any).user_id);
-          if (aId) {
-            athleteIdSet.add(aId);
-            addTeamForAthlete(aId, {
+          const norm = normalizeAthId(aId);
+          if (norm) {
+            athleteIdSet.add(norm);
+            addTeamForAthlete(norm, {
               team_id: t.team_id || doc.id,
               team_name: t.team_name,
               sport_type: t.sport_type,
@@ -518,10 +526,11 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
       const inq = doc.data();
       const status = String(inq.offer_status || inq.status || '').toLowerCase();
       if (status === 'declined' || status === 'rejected' || status === 'revoked') continue;
-      if (inq.athlete_id) {
-        athleteIdSet.add(inq.athlete_id);
-        scoutedAthleteMap.set(inq.athlete_id, inq);
-        scoutedAthleteMap.set(String(inq.athlete_id).replace(/^ath_/, ''), inq);
+      const norm = normalizeAthId(inq.athlete_id);
+      if (norm) {
+        athleteIdSet.add(norm);
+        scoutedAthleteMap.set(norm, inq);
+        scoutedAthleteMap.set(norm.replace(/^ath_/, ''), inq);
       }
     }
   }
@@ -529,9 +538,11 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
   // 4. From Athlete_Profiles where coach_id is assigned
   if (assignedAthletesSnapshot && !assignedAthletesSnapshot.empty) {
     for (const doc of assignedAthletesSnapshot.docs) {
-      athleteIdSet.add(doc.id);
       const d = doc.data();
-      if (d.athlete_id) athleteIdSet.add(d.athlete_id);
+      const norm1 = normalizeAthId(doc.id);
+      const norm2 = normalizeAthId(d.athlete_id);
+      if (norm1) athleteIdSet.add(norm1);
+      if (norm2) athleteIdSet.add(norm2);
     }
   }
 
@@ -649,7 +660,14 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
     };
   });
 
-  const managedAthletes = await Promise.all(profileFetchPromises);
+  const rawManagedAthletes = await Promise.all(profileFetchPromises);
+  const seenAthIds = new Set<string>();
+  const managedAthletes = rawManagedAthletes.filter((a) => {
+    const k = (a.athlete_id || a.user_id || '').replace(/^ath_/, '');
+    if (!k || seenAthIds.has(k)) return false;
+    seenAthIds.add(k);
+    return true;
+  });
   coachManagedAthletesCache.set(coachId, { data: managedAthletes, cachedAt: Date.now() });
   return managedAthletes;
 }

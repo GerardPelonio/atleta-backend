@@ -532,17 +532,34 @@ export async function getCoachOfflineSnapshotService(coachId: string): Promise<C
       teamsSnap.docs.forEach((d: any) => teamsMap.set(d.id, d.data()));
       staffSnap.docs.forEach((d: any) => teamsMap.set(d.id, d.data()));
 
+      const managedIds: string[] = Array.isArray((profile as any)?.teams_managed) ? (profile as any).teams_managed : [];
+      for (const tId of managedIds) {
+        if (!teamsMap.has(tId)) {
+          const tDoc = await db.collection('Teams').doc(tId).get().catch(() => null);
+          if (tDoc && tDoc.exists) {
+            teamsMap.set(tDoc.id, tDoc.data());
+          }
+        }
+      }
+
       const teams: any[] = [];
       const rosters: Record<string, any[]> = {};
 
       for (const t of teamsMap.values()) {
         teams.push(t);
-        const rosterIds: string[] = (t.roster_list || t.roster_athletes || []).map((x: any) => typeof x === 'string' ? x : (x.athlete_id || x.user_id)).filter(Boolean);
-        if (rosterIds.length > 0) {
-          const athleteDocs = await db.collection('Athlete_Profiles').where('athlete_id', 'in', rosterIds.slice(0, 10)).get().catch(() => null);
-          rosters[t.team_id] = athleteDocs ? athleteDocs.docs.map(d => d.data()) : [];
+        const rawRoster = t.roster_list || t.roster_athletes || [];
+        if (Array.isArray(rawRoster) && rawRoster.length > 0 && typeof rawRoster[0] === 'object') {
+          rosters[t.team_id] = rawRoster;
         } else {
-          rosters[t.team_id] = [];
+          const rosterIds: string[] = rawRoster.map((x: any) => typeof x === 'string' ? x : (x.athlete_id || x.user_id)).filter(Boolean);
+          if (rosterIds.length > 0) {
+            const cleanIds = rosterIds.map(id => id.replace(/^ath_/, ''));
+            const allLookup = Array.from(new Set([...rosterIds, ...cleanIds]));
+            const athleteDocs = await db.collection('Athlete_Profiles').where('athlete_id', 'in', allLookup.slice(0, 10)).get().catch(() => null);
+            rosters[t.team_id] = athleteDocs ? athleteDocs.docs.map(d => d.data()) : [];
+          } else {
+            rosters[t.team_id] = [];
+          }
         }
       }
 

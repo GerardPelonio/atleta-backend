@@ -52,7 +52,8 @@ export function optionalAuth(req: AuthRequest, res: Response, next: NextFunction
 }
 
 export function requireCoach(req: AuthRequest, res: Response, next: NextFunction): void {
-  if (!req.user || req.user.role !== 'Coach') {
+  const role = String(req.user?.role || '').toLowerCase();
+  if (!req.user || role !== 'coach') {
     res.status(403).json({ error: 'Access denied. Coach role required.' });
     return;
   }

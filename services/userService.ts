@@ -41,7 +41,7 @@ export interface TokenPair {
  * accessToken: short-lived (15 minutes by default).
  * refreshToken: long-lived (30 days by default).
  */
-export function generateToken(uid: string, email: string, role: string): TokenPair {
+export function generateToken(uid: string, email: string, role: string, isApproved: boolean = true): TokenPair {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
     throw new Error('JWT_SECRET is not configured in environment');
@@ -50,8 +50,18 @@ export function generateToken(uid: string, email: string, role: string): TokenPa
   const accessExpiresIn = (process.env.JWT_ACCESS_EXPIRES_IN || '15m') as any;
   const refreshExpiresIn = (process.env.JWT_REFRESH_EXPIRES_IN || '30d') as any;
 
-  const accessToken = jwt.sign({ uid, email, role }, secret, { expiresIn: accessExpiresIn });
-  const refreshToken = jwt.sign({ uid, email, role, token_type: 'refresh' }, refreshSecret, { expiresIn: refreshExpiresIn });
+  const payload = {
+    uid,
+    email,
+    role,
+    is_approved: isApproved,
+    isApproved: isApproved,
+    status: isApproved ? 'approved' : 'pending',
+    account_status: isApproved ? 'Active' : 'Pending',
+  };
+
+  const accessToken = jwt.sign(payload, secret, { expiresIn: accessExpiresIn });
+  const refreshToken = jwt.sign({ ...payload, token_type: 'refresh' }, refreshSecret, { expiresIn: refreshExpiresIn });
 
   return {
     accessToken,
@@ -880,9 +890,10 @@ export async function loginUserService(email: string, password: string) {
       isApprovedStatus = true;
     } else if (roleStr.includes('coach')) {
       // Cross-check Coach_Profiles to prevent login gate desynchronization
-      let coachSnap = await db.collection('Coach_Profiles').doc(`coach_${canonicalUid}`).get().catch(() => null);
+      const cleanCoachUid = canonicalUid.replace(/^coach_/, '');
+      let coachSnap = await db.collection('Coach_Profiles').doc(`coach_${cleanCoachUid}`).get().catch(() => null);
       if (!coachSnap || !coachSnap.exists) {
-        coachSnap = await db.collection('Coach_Profiles').doc(canonicalUid).get().catch(() => null);
+        coachSnap = await db.collection('Coach_Profiles').doc(cleanCoachUid).get().catch(() => null);
       }
       if (coachSnap && coachSnap.exists) {
         const cData = coachSnap.data()!;
@@ -926,7 +937,7 @@ export async function loginUserService(email: string, password: string) {
     }
   }
 
-  const tokenData = generateToken(canonicalUid, userData.email, role);
+  const tokenData = generateToken(canonicalUid, userData.email, role, isApprovedStatus);
 
   try {
     await db.collection('User_Sessions').doc(canonicalUid).set({
