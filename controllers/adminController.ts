@@ -52,6 +52,16 @@ export async function loginAdminHandler(req: Request, res: Response): Promise<vo
     const clientIp = req.ip || (req.headers['x-forwarded-for'] as string) || '127.0.0.1';
 
     const result = await loginAdminService(email, password, clientIp);
+
+    if (result?.refreshToken) {
+      res.cookie('refreshToken', result.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+      });
+    }
+
     res.status(200).json({
       message: 'System Admin authenticated successfully.',
       ...result,

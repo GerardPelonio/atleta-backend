@@ -56,6 +56,15 @@ export async function loginOfficialHandler(req: AuthRequest, res: Response): Pro
     const { email, password } = req.body;
     const result = await loginOfficialService(email, password);
 
+    if (result?.refreshToken) {
+      res.cookie('refreshToken', result.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+      });
+    }
+
     res.status(200).json({
       message: 'Official login successful.',
       ...result,

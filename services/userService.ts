@@ -50,6 +50,7 @@ export function generateToken(uid: string, email: string, role: string, isApprov
   const accessExpiresIn = (process.env.JWT_ACCESS_EXPIRES_IN || '15m') as any;
   const refreshExpiresIn = (process.env.JWT_REFRESH_EXPIRES_IN || '30d') as any;
 
+  const isSystemAdmin = String(role || '').toLowerCase().includes('admin');
   const payload = {
     uid,
     email,
@@ -58,6 +59,11 @@ export function generateToken(uid: string, email: string, role: string, isApprov
     isApproved: isApproved,
     status: isApproved ? 'approved' : 'pending',
     account_status: isApproved ? 'Active' : 'Pending',
+    ...(isSystemAdmin ? {
+      clearance_level: 4,
+      department_code: 'SYS_ADMIN',
+      is_elevated: true,
+    } : {}),
   };
 
   const accessToken = jwt.sign(payload, secret, { expiresIn: accessExpiresIn });
@@ -101,8 +107,11 @@ export async function verifyRefreshToken(refreshToken: string): Promise<{ uid: s
     const sessionDoc = await db.collection('User_Sessions').doc(decoded.uid).get();
     if (sessionDoc.exists) {
       const sessionData = sessionDoc.data();
-      if (sessionData?.refreshToken && sessionData.refreshToken !== refreshToken) {
-        throw new ServiceError('Refresh token has been revoked or replaced.', 401);
+      if (sessionData?.revoked === true) {
+        throw new ServiceError('Session has been revoked.', 401);
+      }
+      if (sessionData?.revokedTokens && Array.isArray(sessionData.revokedTokens) && sessionData.revokedTokens.includes(refreshToken)) {
+        throw new ServiceError('Refresh token has been revoked.', 401);
       }
     }
   } catch (err: any) {

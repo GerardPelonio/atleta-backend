@@ -8,6 +8,7 @@ import { ServiceError } from '../validators/matchValidator';
 import { createNotification } from './notificationService';
 import { sendCoachStatusEmailService, sendOfficialStatusEmailService } from './emailService';
 import { hashPassword, verifyPassword, sanitizeUser, sanitizeProfile } from '../utils/passwordUtils';
+import { generateToken } from './userService';
 
 export interface AdminAuditLog {
   log_id: string;
@@ -322,8 +323,21 @@ export async function loginAdminService(
   const clearanceLevel = adminProfileData.clearance_level || 4;
   const departmentCode = adminProfileData.department_code || 'SYS_ADMIN';
 
-  // 6. Generate elevated Bearer JWT
+  // 6. Generate elevated Bearer JWT and Refresh Token
   const token = generateElevatedAdminToken(uid, email, 'SystemAdmin', clearanceLevel, departmentCode);
+  const tokenPair = generateToken(uid, email, 'SystemAdmin');
+
+  try {
+    await db.collection('User_Sessions').doc(uid).set({
+      uid: uid,
+      email: userData.email,
+      role: 'SystemAdmin',
+      refreshToken: tokenPair.refreshToken,
+      updated_at: new Date().toISOString(),
+    }, { merge: true });
+  } catch (err) {
+    console.warn('Failed to record User_Sessions for admin:', err);
+  }
 
   // 7. Log successful login access event (non-blocking async)
   logAdminAudit({
@@ -349,6 +363,8 @@ export async function loginAdminService(
     }),
     admin_profile: sanitizeProfile(adminProfileData),
     token,
+    accessToken: token,
+    refreshToken: tokenPair.refreshToken,
   };
 }
 

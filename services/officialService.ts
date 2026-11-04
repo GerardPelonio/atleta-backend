@@ -267,9 +267,30 @@ export async function loginOfficialService(email: string, password: string) {
   }
 
   const actualRole = isAdmin ? 'SystemAdmin' : (userData.role || 'Official');
-  const token = isAdmin
-    ? generateElevatedAdminToken(uid, userData.email, 'SystemAdmin', Number(userData.clearance_level || 4), userData.department_code || 'SYS_ADMIN')
+  const tokenPair = isAdmin
+    ? {
+        accessToken: generateElevatedAdminToken(uid, userData.email, 'SystemAdmin', Number(userData.clearance_level || 4), userData.department_code || 'SYS_ADMIN'),
+        refreshToken: generateToken(uid, userData.email, 'SystemAdmin').refreshToken,
+        token: '',
+      }
     : generateToken(uid, userData.email, actualRole as any);
+
+  const accessToken = isAdmin ? tokenPair.accessToken : ((tokenPair as any).accessToken || tokenPair);
+  const refreshToken = (tokenPair as any).refreshToken;
+
+  if (refreshToken) {
+    try {
+      await db.collection('User_Sessions').doc(uid).set({
+        uid: uid,
+        email: userData.email,
+        role: actualRole,
+        refreshToken: refreshToken,
+        updated_at: new Date().toISOString(),
+      }, { merge: true });
+    } catch (err) {
+      console.warn('Failed to record User_Sessions for official:', err);
+    }
+  }
 
   return {
     user: sanitizeUser({
@@ -282,9 +303,9 @@ export async function loginOfficialService(email: string, password: string) {
       clearance_level: userData.clearance_level,
       department_code: userData.department_code,
     }),
-    token: (token as any).accessToken || token,
-    accessToken: (token as any).accessToken || token,
-    refreshToken: (token as any).refreshToken,
+    token: accessToken,
+    accessToken: accessToken,
+    refreshToken: refreshToken,
     firebase_id_token: firebaseIdToken,
   };
 }
