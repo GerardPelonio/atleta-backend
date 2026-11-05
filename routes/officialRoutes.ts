@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticate } from '../middlewares/authMiddleware';
+import { refreshTokenHandler } from '../controllers/authController';
 import {
   registerOfficialHandler,
   loginOfficialHandler,
@@ -20,6 +21,7 @@ const router = Router();
 // Authentication
 router.post('/login', loginOfficialHandler);
 router.post('/register', registerOfficialHandler);
+router.post('/refresh', refreshTokenHandler);
 
 // Profile & Identity (Named and Root Routes)
 router.get('/profile', authenticate, getOfficialProfileHandler);
