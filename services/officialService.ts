@@ -21,10 +21,10 @@ export class ServiceError extends Error {
  * Checks that the organization_name exists and is active in the Tournament_Registry.
  */
 export async function registerOfficialService(data: RegisterOfficialDto) {
-  const full_legal_name = data.full_legal_name.trim();
-  const email = data.email.trim();
+  const full_legal_name = (data.full_legal_name || (data as any).full_name || (data as any).name || '').trim();
+  const email = (data.email || '').trim().toLowerCase();
   const password = data.password;
-  const orgName = (data.organization_name || 'Independent Tournament Body').trim();
+  const orgName = (data.organization_name || (data as any).organization || 'Independent Tournament Body').trim();
 
   // 1. Seamlessly record or activate tournament/organization in Tournament_Registry (Non-blocking)
   try {
@@ -59,10 +59,16 @@ export async function registerOfficialService(data: RegisterOfficialDto) {
   }
 
   const rawContact = ((data as any).contact_number || (data as any).phoneNumber || (data as any).phone_number) as string | undefined;
-  let contact_number = null;
-  if (rawContact && typeof rawContact === 'string' && rawContact.trim()) {
-    contact_number = normalizePhoneNumber(rawContact);
-    await assertPhoneNumberUnique(contact_number);
+  let contact_number: string | null = null;
+  if (rawContact && typeof rawContact === 'string') {
+    const cleanContact = rawContact.trim().toLowerCase();
+    const digits = rawContact.replace(/\D/g, '');
+    if (!['n/a', 'na', 'none', 'null', 'undefined', 'not applicable'].includes(cleanContact) && digits.length >= 7) {
+      contact_number = normalizePhoneNumber(rawContact);
+      if (contact_number) {
+        await assertPhoneNumberUnique(contact_number);
+      }
+    }
   }
 
   // 2. Create Firebase Auth user (with REST fallback)
@@ -76,19 +82,22 @@ export async function registerOfficialService(data: RegisterOfficialDto) {
   const now = new Date();
   const nowStr = now.toISOString();
 
-  const officialId = `off_${uid}`;
+  const officialId = uid.startsWith('off_') ? uid : `off_${uid}`;
   const settingId = crypto.randomUUID();
   const nameParts = full_legal_name.split(' ');
-  const firstName = nameParts[0] || 'Official';
-  const lastName = nameParts.slice(1).join(' ') || 'User';
-  const licenseNumber = (data as any).official_license_number || 'OFF-LIC-2026';
+  const firstName = (data as any).first_name || nameParts[0] || 'Official';
+  const lastName = (data as any).last_name || nameParts.slice(1).join(' ') || 'User';
+  const licenseNumber = (data as any).official_license_number || (data as any).license_number || 'OFF-LIC-2026';
+  const assignedSport = ((data as any).assigned_sport || (data as any).sport || 'Basketball').trim();
+  const sportAccreditation = (data as any).sport_accreditation || [assignedSport];
   const assignedTournaments = (data as any).assigned_tournaments || [orgName];
 
   const passwordHash = hashPassword(password);
 
-  // 3. Build Base Identity document (Users collection) - COMPLETE DATA (NO PREFIX)
+  // 3. Build Base Identity document (Users & users collections) - COMPLETE DATA (NO PREFIX)
   const userData: any = {
     user_id: uid,
+    uid: uid,
     full_legal_name,
     full_name: full_legal_name,
     first_name: firstName,
@@ -96,19 +105,25 @@ export async function registerOfficialService(data: RegisterOfficialDto) {
     email,
     password: passwordHash,
     password_hash: passwordHash,
-    role: 'Official',
+    role: 'official',
     organization_name: orgName,
     organization: orgName,
     official_license_number: licenseNumber,
+    license_number: licenseNumber,
     assigned_tournaments: assignedTournaments,
+    assigned_sport: assignedSport,
+    sport: assignedSport,
+    sport_accreditation: sportAccreditation,
     certification_status: 'Pending',
     account_status: 'Pending',
     status: 'pending',
     is_approved: false,
     isApproved: false,
     is_active: true,
+    rejection_reason: null,
     contact_number,
     phoneNumber: contact_number,
+    phone_number: contact_number,
     created_at: now,
     updated_at: now,
   };
@@ -117,17 +132,28 @@ export async function registerOfficialService(data: RegisterOfficialDto) {
   const profileData: any = {
     official_id: officialId,
     user_id: uid,
+    uid: uid,
+    full_legal_name,
+    full_name: full_legal_name,
+    email,
     contact_number,
     phoneNumber: contact_number,
+    phone_number: contact_number,
     organization_name: orgName,
+    organization: orgName,
     official_license_number: licenseNumber,
+    license_number: licenseNumber,
     assigned_tournaments: assignedTournaments,
+    assigned_sport: assignedSport,
+    sport: assignedSport,
+    sport_accreditation: sportAccreditation,
     certification_status: 'Pending',
     account_status: 'Pending',
     status: 'pending',
     is_approved: false,
     isApproved: false,
     is_active: true,
+    rejection_reason: null,
     created_at: now,
     updated_at: now,
   };
@@ -148,24 +174,32 @@ export async function registerOfficialService(data: RegisterOfficialDto) {
   // Ensure no password fields exist on child profile before committing
   sanitizeProfile(profileData);
 
-  // 6. Execute atomic batch write
+  // 6. Execute atomic batch write to Users, users, and Official_Profiles
   const batch = db.batch();
   
-  batch.set(db.collection('Users').doc(uid), userData);
-  batch.set(db.collection('Official_Profiles').doc(officialId), profileData);
-  batch.set(db.collection('Official_Profiles').doc(uid), profileData);
+  batch.set(db.collection('Users').doc(uid), userData, { merge: true });
+  batch.set(db.collection('users').doc(uid), userData, { merge: true });
+  batch.set(db.collection('Official_Profiles').doc(officialId), profileData, { merge: true });
+  batch.set(db.collection('Official_Profiles').doc(uid), profileData, { merge: true });
 
   await batch.commit();
 
-  // Generate tokens
-  const token = generateToken(uid, email, 'Official');
+  // Generate tokens (isApproved = false for newly registered officials pending admin review)
+  const token = generateToken(uid, email, 'official', false);
 
   return {
     user: sanitizeUser({
       user_id: uid,
+      uid: uid,
       full_legal_name,
+      full_name: full_legal_name,
       email,
-      role: 'Official',
+      role: 'official',
+      status: 'pending',
+      account_status: 'Pending',
+      certification_status: 'Pending',
+      is_approved: false,
+      isApproved: false,
     }),
     profile: sanitizeProfile(profileData),
     settings: settingsData,

@@ -260,6 +260,11 @@ export async function createFirebaseAuthUser(params: {
  */
 export function normalizePhoneNumber(phone: string | null | undefined): string {
   if (!phone || typeof phone !== 'string') return '';
+  const cleanStr = phone.trim().toLowerCase();
+  if (['n/a', 'na', 'none', 'null', 'undefined', 'not applicable'].includes(cleanStr)) return '';
+  const digitsOnly = phone.replace(/\D/g, '');
+  if (digitsOnly.length < 7) return '';
+
   let cleaned = phone.trim().replace(/[\s\-_().+]/g, '');
   if (cleaned.startsWith('63') && cleaned.length === 12) {
     cleaned = '0' + cleaned.slice(2);
@@ -279,8 +284,13 @@ export async function assertPhoneNumberUnique(
   excludeUid?: string
 ): Promise<void> {
   if (!rawPhone || typeof rawPhone !== 'string') return;
+  const rawClean = rawPhone.trim().toLowerCase();
+  if (['n/a', 'na', 'none', 'null', 'undefined', 'not applicable'].includes(rawClean)) return;
+  const digits = rawPhone.replace(/\D/g, '');
+  if (digits.length < 7) return;
+
   const normalized = normalizePhoneNumber(rawPhone);
-  if (!normalized) return;
+  if (!normalized || normalized.replace(/\D/g, '').length < 7) return;
 
   const variations = new Set<string>();
   variations.add(normalized);
@@ -290,8 +300,10 @@ export async function assertPhoneNumberUnique(
     const spaced = `+63 ${normalized.slice(1, 4)} ${normalized.slice(4, 7)} ${normalized.slice(7)}`;
     variations.add(spaced);
   }
-  const rawClean = rawPhone.trim();
-  if (rawClean) variations.add(rawClean);
+  const rawCleanVal = rawPhone.trim();
+  if (rawCleanVal && !['n/a', 'na', 'none', 'null', 'undefined'].includes(rawCleanVal.toLowerCase())) {
+    variations.add(rawCleanVal);
+  }
 
   const variantList = Array.from(variations).slice(0, 10);
   const normalizedExclude = excludeUid ? excludeUid.replace(/^(ath_|coach_|off_)/, '') : undefined;
@@ -306,6 +318,10 @@ export async function assertPhoneNumberUnique(
         for (const doc of snap.docs) {
           const docId = doc.id;
           const data = doc.data();
+          const docVal = String(data?.[field] || '').trim().toLowerCase();
+          if (['n/a', 'na', 'none', 'null', 'undefined', 'not applicable'].includes(docVal) || docVal.replace(/\D/g, '').length < 7) {
+            continue;
+          }
           const docUserId = (data?.user_id as string) || (data?.uid as string) || docId;
           const cleanDocId = docId.replace(/^(ath_|coach_|off_)/, '');
           const cleanDocUserId = docUserId.replace(/^(ath_|coach_|off_)/, '');
@@ -339,6 +355,10 @@ export async function assertPhoneNumberUnique(
         for (const doc of snap.docs) {
           const docId = doc.id;
           const data = doc.data();
+          const docVal = String(data?.[field] || '').trim().toLowerCase();
+          if (['n/a', 'na', 'none', 'null', 'undefined', 'not applicable'].includes(docVal) || docVal.replace(/\D/g, '').length < 7) {
+            continue;
+          }
           const docUserId = (data?.user_id as string) || (data?.uid as string) || docId;
           const cleanDocId = docId.replace(/^(ath_|coach_|off_)/, '');
           const cleanDocUserId = docUserId.replace(/^(ath_|coach_|off_)/, '');

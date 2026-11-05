@@ -32,12 +32,12 @@ export async function registerOfficialHandler(req: AuthRequest, res: Response): 
       ...result,
     });
   } catch (error: any) {
-    if (error.code === 'auth/email-already-exists') {
+    if (error.code === 'auth/email-already-exists' || error.code === 'auth/email-already-in-use') {
       res.status(409).json({ error: 'An official with this email already exists.' });
       return;
     }
-    if (error instanceof ServiceError) {
-      res.status(error.statusCode).json({ error: error.message });
+    if (error instanceof ServiceError || error?.statusCode || error?.status) {
+      res.status(error.statusCode || error.status || 400).json({ error: error.message });
       return;
     }
     console.error('Register official error:', error);
@@ -89,7 +89,8 @@ export async function loginOfficialHandler(req: AuthRequest, res: Response): Pro
 
 export async function getOfficialSettingsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    if (!req.user || req.user.role !== 'Official') {
+    const isOfficial = String(req.user?.role || '').toLowerCase() === 'official';
+    if (!req.user || !isOfficial) {
       res.status(401).json({ error: 'Unauthorized. Official role required.' });
       return;
     }
@@ -112,7 +113,8 @@ export async function getOfficialSettingsHandler(req: AuthRequest, res: Response
 
 export async function updateOfficialSettingsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    if (!req.user || req.user.role !== 'Official') {
+    const isOfficial = String(req.user?.role || '').toLowerCase() === 'official';
+    if (!req.user || !isOfficial) {
       res.status(401).json({ error: 'Unauthorized. Official role required.' });
       return;
     }
@@ -145,7 +147,8 @@ export async function updateOfficialSettingsHandler(req: AuthRequest, res: Respo
 
 export async function getOfficialProfileHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    if (!req.user || req.user.role !== 'Official') {
+    const isOfficial = String(req.user?.role || '').toLowerCase() === 'official';
+    if (!req.user || !isOfficial) {
       res.status(401).json({ error: 'Unauthorized. Official role required.' });
       return;
     }
@@ -172,7 +175,8 @@ export async function getOfficialProfileHandler(req: AuthRequest, res: Response)
 
 export async function updateOfficialProfileHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    if (!req.user || req.user.role !== 'Official') {
+    const isOfficial = String(req.user?.role || '').toLowerCase() === 'official';
+    if (!req.user || !isOfficial) {
       res.status(401).json({ error: 'Unauthorized. Official role required.' });
       return;
     }

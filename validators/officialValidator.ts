@@ -8,8 +8,9 @@ const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-
 export function validateRegisterOfficial(data: Record<string, unknown>): ValidationError[] {
   const errors: ValidationError[] = [];
 
-  // full_legal_name (Required, Max 255)
-  const fullLegalName = typeof data.full_legal_name === 'string' ? data.full_legal_name.trim() : '';
+  // full_legal_name (Required, Max 255) - supports full_name or name aliases
+  const rawFullName = data.full_legal_name ?? data.full_name ?? data.name;
+  const fullLegalName = typeof rawFullName === 'string' ? rawFullName.trim() : '';
   if (!fullLegalName) {
     errors.push({ field: 'full_legal_name', message: 'Full legal name is required.' });
   } else if (fullLegalName.length > 255) {
@@ -28,8 +29,9 @@ export function validateRegisterOfficial(data: Record<string, unknown>): Validat
   const password = typeof data.password === 'string' ? data.password : '';
   errors.push(...validatePasswordComplexity(password, 'password'));
 
-  // organization_name (Required)
-  const orgName = typeof data.organization_name === 'string' ? data.organization_name.trim() : '';
+  // organization_name (Required) - supports organization alias
+  const rawOrg = data.organization_name ?? data.organization;
+  const orgName = typeof rawOrg === 'string' ? rawOrg.trim() : '';
   if (!orgName) {
     errors.push({ field: 'organization_name', message: 'Organization name is required.' });
   }
