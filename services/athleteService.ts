@@ -588,7 +588,10 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
     ppg: Number(rawStats.ppg ?? rawAverages.ppg ?? rawStats.points_per_game ?? 0),
     rpg: Number(rawStats.rpg ?? rawAverages.rpg ?? rawStats.rebounds_per_game ?? 0),
     apg: Number(rawStats.apg ?? rawAverages.apg ?? rawStats.assists_per_game ?? 0),
+    spg: Number(rawStats.spg ?? rawAverages.spg ?? rawStats.steals_per_game ?? 0),
     bpg: Number(rawStats.bpg ?? rawAverages.bpg ?? 0),
+    tpg: Number(rawStats.tpg ?? rawAverages.tpg ?? rawStats.turnovers_per_game ?? 0),
+    games_played: Number(rawStats.games_played ?? rawAverages.games_played ?? 0),
     fg_pct: fgPct,
     three_pct: threePct,
     ft_pct: ftPct,
@@ -782,14 +785,24 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
     ? realScoringTrend.slice(0, 5).reverse()
     : [];
 
-  // Calculate default or derived radar competencies if not explicitly defined
+  // Calculate default or derived radar competencies strictly derived from verified match stats
   const rawRadar = profileData.analytics?.radar_competencies;
+  const hasMatchData = Boolean(stats.games_played > 0 || stats.ppg > 0 || stats.rpg > 0 || stats.apg > 0 || (stats.efficiency_rating > 0 && stats.efficiency_rating !== 15));
+  const rawPer = stats.efficiency_rating || 0;
+  const apg = stats.apg || 0;
+  const spg = stats.spg || 0;
+  const rpg = stats.rpg || 0;
+  const bpg = stats.bpg || 0;
+  const ppg = stats.ppg || 0;
+  const tpg = stats.tpg || 1.2;
+  const astToRatio = apg > 0 ? apg / Math.max(0.8, tpg) : 0.8;
+
   const radarCompetencies = {
-    speed: rawRadar?.speed || (stats.apg > 0 ? Math.min(99, Math.round(stats.apg * 12 + 40)) : 78),
-    agility: rawRadar?.agility || (stats.apg > 0 || stats.ppg > 0 ? Math.min(99, Math.round((stats.apg + stats.ppg) * 2.5 + 45)) : 82),
-    power: rawRadar?.power || (stats.rpg > 0 ? Math.min(99, Math.round(stats.rpg * 8 + 42)) : 75),
-    iq: rawRadar?.iq || (stats.efficiency_rating > 0 ? Math.min(99, Math.round(stats.efficiency_rating * 3.2 + 30)) : 85),
-    tech: rawRadar?.tech || (fgPct > 0 ? Math.min(99, Math.round(fgPct * 0.9 + 35)) : 80),
+    speed: rawRadar?.speed || (hasMatchData ? Math.min(99, Math.max(50, Math.round(50 + (spg * 13.0) + (apg * 3.6) + (ppg * 0.4)))) : 0),
+    agility: rawRadar?.agility || (hasMatchData ? Math.min(99, Math.max(50, Math.round(50 + (spg * 15.0) + (apg * 3.2)))) : 0),
+    power: rawRadar?.power || (hasMatchData ? Math.min(99, Math.max(50, Math.round(50 + (rpg * 4.2) + (bpg * 6.0)))) : 0),
+    iq: rawRadar?.iq || (hasMatchData ? Math.min(99, Math.max(50, Math.round(50 + Math.max(0, (rawPer - 8) * 1.55) + Math.min(18, astToRatio * 5.2)))) : 0),
+    tech: rawRadar?.tech || (hasMatchData ? Math.min(99, Math.max(50, Math.round(50 + (fgPct > 0 ? (fgPct - 30) * 1.35 : Math.min(25, ppg * 1.4))))) : 0),
   };
 
   const firstName = userData.first_name || profileData.first_name || '';

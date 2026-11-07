@@ -666,20 +666,27 @@ export async function getFullScoutingAthleteProfile(athleteId: string): Promise<
   if (!latestRadar && profileData.analytics?.radar_competencies) {
     const r = profileData.analytics.radar_competencies;
     latestRadar = {
-      speed: r.speed || 88,
-      power: r.power || 82,
-      agility: r.agility || 85,
-      iq: r.iq || 92,
-      endurance: r.endurance || r.tech || 89,
+      speed: r.speed || 0,
+      power: r.power || 0,
+      agility: r.agility || 0,
+      iq: r.iq || 0,
+      endurance: r.endurance || r.tech || 0,
     };
   }
-  const radarScores = latestRadar || {
-    speed: 85,
-    power: 82,
-    agility: 86,
-    iq: 90,
-    endurance: 84,
-  };
+  const hasScoutingData = Boolean((profileData.stats?.games_played > 0 || profileData.stats?.ppg > 0 || profileData.stats?.rpg > 0 || profileData.stats?.apg > 0));
+  const radarScores = latestRadar || (hasScoutingData ? {
+    speed: Math.min(99, Math.max(50, Math.round(50 + ((profileData.stats?.spg || 0) * 13) + ((profileData.stats?.apg || 0) * 3.6)))),
+    power: Math.min(99, Math.max(50, Math.round(50 + ((profileData.stats?.rpg || 0) * 4.2)))),
+    agility: Math.min(99, Math.max(50, Math.round(50 + ((profileData.stats?.spg || 0) * 15) + ((profileData.stats?.apg || 0) * 3.2)))),
+    iq: Math.min(99, Math.max(50, Math.round(50 + Math.max(0, (careerPer - 8) * 1.55)))),
+    endurance: Math.min(99, Math.max(50, Math.round(50 + ((profileData.stats?.fg_pct || 0) > 0 ? ((profileData.stats?.fg_pct || 0) - 30) * 1.35 : 15)))),
+  } : {
+    speed: 0,
+    power: 0,
+    agility: 0,
+    iq: 0,
+    endurance: 0,
+  });
 
   // Workload indicators
   const workloadEntries = workloadSnapshot.docs.map((d) => d.data());
