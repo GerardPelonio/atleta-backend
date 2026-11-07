@@ -364,18 +364,22 @@ export async function browseTeamDirectory(
     return cached.data;
   }
 
-  // Primary source of truth: atleta-v1
-  const snapshotV1 = await db.collection('Teams').get().catch(() => ({ docs: [] }));
-
-  const docsMap = new Map<string, any>();
-  snapshotV1.docs.forEach((d: any) => docsMap.set(d.id, d));
+  // Primary source of truth: atleta-v1 (Cached in-memory to prevent repeated full-collection scans)
+  const rawTeamDocs = await serverCache.getOrSet(
+    'teams_all_raw_documents',
+    async () => {
+      const snapshotV1 = await db.collection('Teams').get().catch(() => ({ docs: [] } as any));
+      return snapshotV1.docs.map((d: any) => ({ id: d.id, data: d.data() as Team }));
+    },
+    60,
+    ['teams']
+  );
 
   const teams: TeamSummary[] = [];
-
   const normSportQuery = (sport || '').toLowerCase().replace(/&/g, 'and').replace(/\s+/g, '').trim();
 
-  for (const doc of docsMap.values()) {
-    const data = doc.data() as Team;
+  for (const item of rawTeamDocs) {
+    const data = item.data;
 
     // Filter by excluded team ID
     if (excludeTeamId && data.team_id === excludeTeamId) {
@@ -385,7 +389,7 @@ export async function browseTeamDirectory(
     // Filter by excluded athlete membership (if athlete already plays in this team)
     if (excludeAthleteId && Array.isArray(data.roster_list)) {
       const cleanExId = excludeAthleteId.replace(/^ath_/, '');
-      const isMember = data.roster_list.some((item) => {
+      const isMember = data.roster_list.some((item: any) => {
         const id = (typeof item === 'string' ? item : (item.athlete_id || (item as any).user_id) || '').replace(/^ath_/, '');
         return id === cleanExId;
       });
@@ -1003,17 +1007,22 @@ export function matchesSportCategory(athleteSport?: string, athletePosition?: st
  * GET /api/v1/athletes/search?query=&sport=
  */
 export async function searchAthletes(queryStr?: string, sportType?: string) {
-  const resultsMap = new Map<string, RosterAthlete>();
   const queryLower = (queryStr || '').trim().toLowerCase();
 
-  // Fetch collections in parallel from atleta-v1
-  const [usersSnapshot, profilesSnapshot, teamsSnapshot, matchLogsSnapshot, metricsSnapshot] = await Promise.all([
-    db.collection('Users').get(),
-    db.collection('Athlete_Profiles').get(),
-    db.collection('Teams').get(),
-    db.collection('Match_Logs').get().catch(() => ({ docs: [] } as any)),
-    db.collection('Performance_Metrics').get().catch(() => ({ docs: [] } as any)),
-  ]);
+  // In-memory cached pool to eliminate 5 full-collection queries on every search
+  const allAthletesBase = await serverCache.getOrSet(
+    'all_searchable_athletes_pool',
+    async () => {
+      const resultsMap = new Map<string, RosterAthlete>();
+
+      // Fetch collections in parallel from atleta-v1
+      const [usersSnapshot, profilesSnapshot, teamsSnapshot, matchLogsSnapshot, metricsSnapshot] = await Promise.all([
+        db.collection('Users').get(),
+        db.collection('Athlete_Profiles').get(),
+        db.collection('Teams').get(),
+        db.collection('Match_Logs').get().catch(() => ({ docs: [] } as any)),
+        db.collection('Performance_Metrics').get().catch(() => ({ docs: [] } as any)),
+      ]);
 
   const profilesMap = new Map<string, any>();
   profilesSnapshot.docs.forEach((doc) => {
@@ -1298,11 +1307,8 @@ export async function searchAthletes(queryStr?: string, sportType?: string) {
         specialties: p.excel_tags || p.excelTags || p.specialties || uData.excel_tags || uData.excelTags || uData.specialties || [],
       };
 
-      const searchHaystack = `${fullName} ${athleteObj.position} ${athleteId} ${rawUid} ${uData.email || ''}`.toLowerCase();
-      if (!queryLower || searchHaystack.includes(queryLower)) {
-        resultsMap.set(athleteId, athleteObj);
-        resultsMap.set(rawUid, athleteObj);
-      }
+      resultsMap.set(athleteId, athleteObj);
+      resultsMap.set(rawUid, athleteObj);
     }
   }
 
@@ -1365,11 +1371,8 @@ export async function searchAthletes(queryStr?: string, sportType?: string) {
         specialties: p.excel_tags || p.excelTags || p.specialties || u.excel_tags || u.excelTags || u.specialties || [],
       };
 
-      const searchHaystack = `${firstName} ${lastName} ${athleteObj.position} ${athleteId}`.toLowerCase();
-      if (!queryLower || searchHaystack.includes(queryLower)) {
-        resultsMap.set(athleteId, athleteObj);
-        resultsMap.set(rawId, athleteObj);
-      }
+      resultsMap.set(athleteId, athleteObj);
+      resultsMap.set(rawId, athleteObj);
     }
   }
 
@@ -1423,11 +1426,8 @@ export async function searchAthletes(queryStr?: string, sportType?: string) {
               efficiency_pct: eff,
             };
 
-            const searchHaystack = `${firstName} ${lastName} ${athleteObj.position} ${athleteId}`.toLowerCase();
-            if (!queryLower || searchHaystack.includes(queryLower)) {
-              resultsMap.set(athleteId, athleteObj);
-              resultsMap.set(cleanId, athleteObj);
-            }
+            resultsMap.set(athleteId, athleteObj);
+            resultsMap.set(cleanId, athleteObj);
           }
         }
       }
@@ -1507,11 +1507,26 @@ export async function searchAthletes(queryStr?: string, sportType?: string) {
     }
   }
 
-  if (!sportType || sportType.toUpperCase() === 'ALL') {
-    return allAthletes;
+  return allAthletes;
+  },
+  60,
+  ['athletes', 'teams', 'users']
+);
+
+  let results = allAthletesBase;
+
+  if (queryLower) {
+    results = results.filter((ath) => {
+      const searchHaystack = `${ath.full_name} ${ath.first_name} ${ath.last_name} ${ath.position} ${ath.athlete_id} ${ath.user_id} ${ath.jersey_number || ''}`.toLowerCase();
+      return searchHaystack.includes(queryLower);
+    });
   }
 
-  return allAthletes.filter((a) => matchesSportCategory(a.sport_type, a.position, sportType));
+  if (sportType && sportType.toUpperCase() !== 'ALL') {
+    results = results.filter((a) => matchesSportCategory(a.sport_type, a.position, sportType));
+  }
+
+  return results.slice(0, 50);
 }
 
 /**

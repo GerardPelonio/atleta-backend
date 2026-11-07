@@ -119,68 +119,88 @@ export async function searchRegionalAthletes(
     }
   }
 
-  // Fetch Athlete Profiles, Users, Performance Metrics, and Teams in parallel
-  const [profilesSnapshot, usersSnapshot, metricsSnapshot, teamsSnapshot] = await Promise.all([
-    db.collection('Athlete_Profiles').get(),
-    db.collection('Users').where('role', '==', 'Athlete').get(),
-    db.collection('Performance_Metrics').get(),
-    db.collection('Teams').get(),
-  ]);
+  // Fetch Athlete Profiles, Users, Performance Metrics, and Teams (Cached base pool across coaches)
+  const basePool = await serverCache.getOrSet(
+    'scouting_profiles_base_pool',
+    async () => {
+      const [profilesSnapshot, usersSnapshot, metricsSnapshot, teamsSnapshot] = await Promise.all([
+        db.collection('Athlete_Profiles').get(),
+        db.collection('Users').where('role', '==', 'Athlete').get(),
+        db.collection('Performance_Metrics').get(),
+        db.collection('Teams').get(),
+      ]);
 
-  const signedAthleteIds = new Set<string>();
-  teamsSnapshot.docs.forEach((doc) => {
-    const t = doc.data();
-    if (Array.isArray(t.roster_list)) {
-      t.roster_list.forEach((item: any) => {
-        const id = typeof item === 'string' ? item : item.athlete_id || item.user_id;
-        if (id) {
-          const clean = String(id).trim();
-          signedAthleteIds.add(clean);
-          signedAthleteIds.add(clean.replace(/^ath_/, ''));
-          signedAthleteIds.add(`ath_${clean.replace(/^ath_/, '')}`);
+      const signedAthleteIds = new Set<string>();
+      teamsSnapshot.docs.forEach((doc) => {
+        const t = doc.data();
+        if (Array.isArray(t.roster_list)) {
+          t.roster_list.forEach((item: any) => {
+            const id = typeof item === 'string' ? item : item.athlete_id || item.user_id;
+            if (id) {
+              const clean = String(id).trim();
+              signedAthleteIds.add(clean);
+              signedAthleteIds.add(clean.replace(/^ath_/, ''));
+              signedAthleteIds.add(`ath_${clean.replace(/^ath_/, '')}`);
+            }
+          });
         }
       });
-    }
-  });
 
-  const profiles: any[] = [];
-  profilesSnapshot.docs.forEach((doc: any) => {
-    const data = doc.data();
-    const rawStatus = (data.recruitment_status || '').toUpperCase();
-    const isRecruited =
-      rawStatus === 'RECRUITED' ||
-      rawStatus === 'SIGNED' ||
-      rawStatus === 'COMMITTED' ||
-      rawStatus === 'UNAVAILABLE' ||
-      signedAthleteIds.has(doc.id) ||
-      signedAthleteIds.has(doc.id.replace(/^ath_/, ''));
+      const profiles: any[] = [];
+      profilesSnapshot.docs.forEach((doc: any) => {
+        const data = doc.data();
+        const rawStatus = (data.recruitment_status || '').toUpperCase();
+        const isRecruited =
+          rawStatus === 'RECRUITED' ||
+          rawStatus === 'SIGNED' ||
+          rawStatus === 'COMMITTED' ||
+          rawStatus === 'UNAVAILABLE' ||
+          signedAthleteIds.has(doc.id) ||
+          signedAthleteIds.has(doc.id.replace(/^ath_/, ''));
 
-    if (!isRecruited) {
-      profiles.push({
-        athlete_id: doc.id,
-        province: data.province || '',
-        sport_type: data.sport_type || '',
-        recruitment_status: data.recruitment_status || 'Available',
+        if (!isRecruited) {
+          profiles.push({
+            athlete_id: doc.id,
+            province: data.province || '',
+            sport_type: data.sport_type || '',
+            recruitment_status: data.recruitment_status || 'Available',
+          });
+        }
       });
-    }
-  });
 
-  const usersMap = new Map<string, any>();
-  usersSnapshot.docs.forEach((doc: any) => {
-    const data = doc.data();
-    usersMap.set(doc.id, {
-      first_name: data.first_name || '',
-      last_name: data.last_name || '',
-      email: data.email || '',
-    });
-  });
+      const users: Record<string, { first_name: string; last_name: string; email: string }> = {};
+      usersSnapshot.docs.forEach((doc: any) => {
+        const data = doc.data();
+        users[doc.id] = {
+          first_name: data.first_name || '',
+          last_name: data.last_name || '',
+          email: data.email || '',
+        };
+      });
+
+      const metricsList: Array<{ athlete_id: string; efficiency: number; sport_category: string }> = [];
+      metricsSnapshot.docs.forEach((doc: any) => {
+        const data = doc.data();
+        metricsList.push({
+          athlete_id: data.athlete_id,
+          efficiency: data.calculated_player_efficiency || 0,
+          sport_category: data.sport_category || '',
+        });
+      });
+
+      return { profiles, users, metricsList };
+    },
+    60,
+    ['scouting', 'athletes', 'teams']
+  );
+
+  const { profiles, users, metricsList } = basePool;
 
   const athleteEfficiencies = new Map<string, number[]>();
-  metricsSnapshot.docs.forEach((doc: any) => {
-    const data = doc.data();
-    const athleteId = data.athlete_id;
-    const efficiency = data.calculated_player_efficiency || 0;
-    const metricSport = data.sport_category || '';
+  metricsList.forEach((m) => {
+    const athleteId = m.athlete_id;
+    const efficiency = m.efficiency;
+    const metricSport = m.sport_category;
 
     // If sport is requested, filter metrics by sport category
     if (safeSport && metricSport.toLowerCase() !== safeSport.toLowerCase()) {
@@ -201,10 +221,10 @@ export async function searchRegionalAthletes(
     if (coachId && (excludedAthleteIds.has(profile.athlete_id) || excludedAthleteIds.has(profile.athlete_id.replace(/^ath_/, '')))) {
       continue;
     }
-    const user = usersMap.get(profile.athlete_id) || usersMap.get(profile.athlete_id.replace(/^ath_/, '')) || {
-      first_name: profile.first_name || 'Athlete',
-      last_name: profile.last_name || '',
-      email: profile.email || '',
+    const user = users[profile.athlete_id] || users[profile.athlete_id.replace(/^ath_/, '')] || {
+      first_name: (profile as any).first_name || 'Athlete',
+      last_name: (profile as any).last_name || '',
+      email: (profile as any).email || '',
     };
 
     // Filter by sport (case-insensitive)

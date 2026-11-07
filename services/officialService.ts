@@ -215,23 +215,10 @@ export async function registerOfficialService(data: RegisterOfficialDto) {
 export async function loginOfficialService(email: string, password: string) {
   const cleanEmail = (email || '').trim().toLowerCase();
 
-  // 1. Fetch user document by email from Firestore
+  // 1. Fetch user document by email from Firestore (targeted queries only)
   let userSnapshot = await db.collection('Users').where('email', '==', (email || '').trim()).limit(1).get();
   if (userSnapshot.empty && cleanEmail) {
     userSnapshot = await db.collection('Users').where('email', '==', cleanEmail).limit(1).get();
-  }
-  if (userSnapshot.empty) {
-    const allUsers = await db.collection('Users').get();
-    const match = allUsers.docs.find(d => {
-      const e = String(d.data().email || '').trim().toLowerCase();
-      return e === cleanEmail;
-    });
-    if (match) {
-      userSnapshot = {
-        empty: false,
-        docs: [match],
-      } as any;
-    }
   }
 
   // Typo recovery fallback (e.g. offcial1025 -> official1025)

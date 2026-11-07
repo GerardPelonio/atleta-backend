@@ -5,6 +5,7 @@ import { eventBus, EVENTS } from '../utils/eventBus';
 import { getAthleteWorkloadSummary } from './workloadService';
 import { getAthleteTeam, getAthletePastTeams } from './teamService';
 import { assertPhoneNumberUnique, normalizePhoneNumber } from './userService';
+import { serverCache } from '../utils/cache';
 
 /**
  * Calculate BMI = weight (kg) / height (m)²
@@ -600,22 +601,51 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
   let currentTeamSummary = profileData.team_summary || null;
   if (!currentTeamSummary && profileData.no_team !== true && profileData.has_no_team !== true) {
     try {
-      const teamsSnapshot = await db.collection('Teams').get();
-      for (const tDoc of teamsSnapshot.docs) {
-        const tData = tDoc.data();
-        if (Array.isArray(tData.roster_list)) {
-          const isMember = tData.roster_list.some((m: any) =>
-            typeof m === 'string' ? (m === athleteId || m === canonicalAthleteId || m === rawUid) : (m.athlete_id === athleteId || m.athlete_id === canonicalAthleteId || m.athlete_id === rawUid)
-          );
-          if (isMember) {
-            currentTeamSummary = {
-              team_id: tData.team_id || tDoc.id,
-              team_name: tData.team_name || '',
-              coach_name: tData.coach_name || '',
-              record: tData.record || '0 - 0',
-              jersey_number: profileData.jersey_number ?? null,
-            };
-            break;
+      // 1. Direct doc fetch if team_id is known (1 document read instead of entire collection)
+      if (profileData.team_id) {
+        const directTeam = await db.collection('Teams').doc(profileData.team_id).get().catch(() => null);
+        if (directTeam && directTeam.exists) {
+          const tData = directTeam.data() || {};
+          currentTeamSummary = {
+            team_id: tData.team_id || directTeam.id,
+            team_name: tData.team_name || '',
+            coach_name: tData.coach_name || '',
+            record: tData.record || '0 - 0',
+            jersey_number: profileData.jersey_number ?? null,
+          };
+        }
+      }
+
+      // 2. Cached teams pool fallback if not resolved directly
+      if (!currentTeamSummary) {
+        const cachedTeams = await serverCache.getOrSet(
+          'teams_all_raw_documents',
+          async () => {
+            const snapshotV1 = await db.collection('Teams').get().catch(() => ({ docs: [] } as any));
+            return snapshotV1.docs.map((d: any) => ({ id: d.id, data: d.data() }));
+          },
+          60,
+          ['teams']
+        );
+
+        for (const item of cachedTeams) {
+          const tData = item.data;
+          if (Array.isArray(tData.roster_list)) {
+            const isMember = tData.roster_list.some((m: any) =>
+              typeof m === 'string'
+                ? (m === athleteId || m === canonicalAthleteId || m === rawUid)
+                : (m.athlete_id === athleteId || m.athlete_id === canonicalAthleteId || m.athlete_id === rawUid)
+            );
+            if (isMember) {
+              currentTeamSummary = {
+                team_id: tData.team_id || item.id,
+                team_name: tData.team_name || '',
+                coach_name: tData.coach_name || '',
+                record: tData.record || '0 - 0',
+                jersey_number: profileData.jersey_number ?? null,
+              };
+              break;
+            }
           }
         }
       }

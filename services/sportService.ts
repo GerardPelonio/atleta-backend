@@ -194,14 +194,19 @@ export async function getAllSportsService(onlyActive: boolean = false): Promise<
   const allSports = await serverCache.getOrSet(
     'sports_configurations_catalog_all',
     async () => {
-      await seedDefaultSportsIfEmpty().catch(() => {});
-
       let rawSports: any[] = [];
 
       try {
         const snapshot = await primaryDb.collection('Sports_Configurations').get();
         if (!snapshot.empty) {
           rawSports = snapshot.docs.map((doc) => ({
+            sport_id: doc.id,
+            ...(doc.data() as object),
+          }));
+        } else {
+          await seedDefaultSportsIfEmpty().catch(() => {});
+          const seededSnap = await primaryDb.collection('Sports_Configurations').get();
+          rawSports = seededSnap.docs.map((doc) => ({
             sport_id: doc.id,
             ...(doc.data() as object),
           }));
@@ -245,7 +250,7 @@ export async function getAllSportsService(onlyActive: boolean = false): Promise<
 
       return normalizedSports;
     },
-    5, // 5s cache TTL
+    600, // 10 minutes cache TTL (invalidated automatically on admin updates)
     ['sports', 'catalog']
   );
 
