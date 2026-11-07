@@ -26,8 +26,10 @@ async function getOfficialIdFromUid(uid: string): Promise<string> {
 export async function getDashboardHandler(req: AuthRequest, res: Response): Promise<void> {
   const startTime = Date.now();
   try {
-    if (!req.user || req.user.role !== 'Official') {
-      res.status(401).json({ error: 'Access denied. Official role required.' });
+    const userRole = String(req.user?.role || '').toLowerCase();
+    const isOfficialOrAdmin = userRole.includes('official') || userRole.includes('admin');
+    if (!req.user || !isOfficialOrAdmin) {
+      res.status(403).json({ error: 'Access denied. Official role required.' });
       return;
     }
 
@@ -51,8 +53,10 @@ export async function getDashboardHandler(req: AuthRequest, res: Response): Prom
 export async function getSchedulesHandler(req: AuthRequest, res: Response): Promise<void> {
   const startTime = Date.now();
   try {
-    if (!req.user || req.user.role !== 'Official') {
-      res.status(401).json({ error: 'Access denied. Official role required.' });
+    const userRole = String(req.user?.role || '').toLowerCase();
+    const isOfficialOrAdmin = userRole.includes('official') || userRole.includes('admin');
+    if (!req.user || !isOfficialOrAdmin) {
+      res.status(403).json({ error: 'Access denied. Official role required.' });
       return;
     }
 
@@ -81,8 +85,10 @@ export async function getSchedulesHandler(req: AuthRequest, res: Response): Prom
 
 export async function getOfficialNotificationsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    if (!req.user || req.user.role !== 'Official') {
-      res.status(401).json({ error: 'Access denied. Official role required.' });
+    const userRole = String(req.user?.role || '').toLowerCase();
+    const isOfficialOrAdmin = userRole.includes('official') || userRole.includes('admin');
+    if (!req.user || !isOfficialOrAdmin) {
+      res.status(403).json({ error: 'Access denied. Official role required.' });
       return;
     }
 
@@ -107,8 +113,10 @@ export async function getOfficialNotificationsHandler(req: AuthRequest, res: Res
 
 export async function markAllOfficialNotificationsAsReadHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    if (!req.user || req.user.role !== 'Official') {
-      res.status(401).json({ error: 'Access denied. Official role required.' });
+    const userRole = String(req.user?.role || '').toLowerCase();
+    const isOfficialOrAdmin = userRole.includes('official') || userRole.includes('admin');
+    if (!req.user || !isOfficialOrAdmin) {
+      res.status(403).json({ error: 'Access denied. Official role required.' });
       return;
     }
 

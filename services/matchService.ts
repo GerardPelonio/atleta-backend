@@ -2167,6 +2167,21 @@ export async function scanScoresheetStandalone(file?: Express.Multer.File, custo
       };
     });
 
+    const raceResultsList = isIndividual
+      ? enrichedPlayers.map((p: any, idx: number) => ({
+          placement_rank: String(p.rank || p.place || p.placement_rank || idx + 1),
+          athlete_name: String(p.player_name || p.athlete_name || p.name || `Athlete ${idx + 1}`).toUpperCase(),
+          team_name: p.team_name || p.team || resolvedMatchInfo.home_team_name || 'Individual',
+          distance: p.event || p.event_name || p.distance || '100m',
+          finish_time: p.finish_time || p.time || p.formatted_time || '00:00.00',
+          seed_time: p.seed_time || p.seed || 'NT',
+          points: Number(p.points ?? p.pts ?? 0),
+          split_times: Array.isArray(p.splits || p.split_times) ? (p.splits || p.split_times) : [String(p.split_time || '—')],
+          efficiency: p.calculated_efficiency || p.efficiency || 100,
+          is_disqualified: Boolean(p.is_disqualified),
+        }))
+      : (Array.isArray(parsedData.race_results) ? parsedData.race_results : []);
+
     return {
       filename,
       file_size_bytes: file.size,
@@ -2178,10 +2193,12 @@ export async function scanScoresheetStandalone(file?: Express.Multer.File, custo
       player_summary: enrichedPlayers,
       player_stats: enrichedPlayers,
       playerStats: enrichedPlayers,
+      race_results: raceResultsList,
       injuries: Array.isArray(parsedData.injuries) ? parsedData.injuries : [],
       parsed_tables: {
         team_scores: teamScores,
         player_summary: enrichedPlayers,
+        race_results: raceResultsList,
         injuries: Array.isArray(parsedData.injuries) ? parsedData.injuries : [],
       },
     };
