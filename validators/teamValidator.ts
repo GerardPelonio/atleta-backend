@@ -58,13 +58,16 @@ export function validateUpdateRoster(data: Record<string, unknown> | any[]): Val
 
         if (item.jersey_number !== undefined && item.jersey_number !== null && item.jersey_number !== '') {
           const jersey = String(item.jersey_number).trim();
-          if (seenJerseys.has(jersey)) {
-            errors.push({
-              field: `roster[${i}].jersey_number`,
-              message: `Duplicate jersey number '${jersey}' found in roster.`,
-            });
+          // Allow multiple athletes with unassigned placeholder jersey ('0', '00', or empty)
+          if (jersey !== '0' && jersey !== '00') {
+            if (seenJerseys.has(jersey)) {
+              errors.push({
+                field: `roster[${i}].jersey_number`,
+                message: `Duplicate jersey number '${jersey}' found in roster.`,
+              });
+            }
+            seenJerseys.add(jersey);
           }
-          seenJerseys.add(jersey);
         }
       }
     }

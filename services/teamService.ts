@@ -759,10 +759,13 @@ export async function updateTeamRoster(
 
     if (item.jersey_number !== undefined && item.jersey_number !== null && !isNaN(Number(item.jersey_number))) {
       const jersey = String(item.jersey_number).trim();
-      if (seenJerseys.has(jersey)) {
-        throw new ServiceError(`Duplicate jersey number '${jersey}' assigned to multiple athletes.`, 400);
+      // Allow multiple athletes with unassigned placeholder jersey ('0', '00', or empty)
+      if (jersey !== '0' && jersey !== '00' && jersey !== '') {
+        if (seenJerseys.has(jersey)) {
+          throw new ServiceError(`Duplicate jersey number '${jersey}' assigned to multiple athletes.`, 400);
+        }
+        seenJerseys.add(jersey);
       }
-      seenJerseys.add(jersey);
     }
   }
 
