@@ -127,12 +127,16 @@ export async function searchAthletesHandler(req: AuthRequest, res: Response): Pr
   try {
     const query = (req.query.query || req.query.search || req.query.q) as string | undefined;
     const sport = (req.query.sport || req.query.sport_type || req.query.category) as string | undefined;
-    const athletes = await searchAthletes(query, sport);
+    const since = (req.query.since || req.query.last_sync) as string | undefined;
+    const athletes = await searchAthletes(query, sport, since);
+    const isDelta = Boolean((athletes as any).isDelta || since);
 
     res.status(200).json({
       total: athletes.length,
       query: query || null,
       sport: sport || null,
+      is_delta: isDelta,
+      sync_timestamp: Date.now(),
       athletes,
     });
   } catch (error: any) {

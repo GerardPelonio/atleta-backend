@@ -31,7 +31,7 @@ export async function getAllMatchesHandler(req: AuthRequest, res: Response): Pro
         match_id: doc.id,
         ...doc.data(),
       }));
-      serverCache.set(cacheKey, allMatches, 60, ['matches']);
+      serverCache.set(cacheKey, allMatches, 600, ['matches']);
     }
 
     let matches = allMatches;

@@ -30,9 +30,9 @@ import { cacheMiddleware, invalidateCacheMiddleware } from '../middlewares/cache
 router.post('/register-athlete', upload.single('eligible_documents'), invalidateCacheMiddleware(['athletes']), registerAthlete);
 router.post('/register', upload.single('eligible_documents'), invalidateCacheMiddleware(['athletes']), registerAthlete);
 router.post('/', upload.single('eligible_documents'), invalidateCacheMiddleware(['athletes']), registerAthlete);
-router.get('/search', optionalAuth, cacheMiddleware({ ttlSeconds: 60, tags: ['athletes'] }), searchAthletesHandler);
-router.get('/list', optionalAuth, cacheMiddleware({ ttlSeconds: 60, tags: ['athletes'] }), searchAthletesHandler);
-router.get('/', optionalAuth, cacheMiddleware({ ttlSeconds: 60, tags: ['athletes'] }), searchAthletesHandler);
+router.get('/search', optionalAuth, cacheMiddleware({ ttlSeconds: 300, tags: ['athletes'] }), searchAthletesHandler);
+router.get('/list', optionalAuth, cacheMiddleware({ ttlSeconds: 300, tags: ['athletes'] }), searchAthletesHandler);
+router.get('/', optionalAuth, cacheMiddleware({ ttlSeconds: 300, tags: ['athletes'] }), searchAthletesHandler);
 
 // Clean Token-Based Routes (No Athlete ID required in URL)
 router.get('/home', authenticate, getAthleteHome);

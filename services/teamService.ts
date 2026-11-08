@@ -1,4 +1,4 @@
-import { db } from '../utils/firebaseAdmin';
+import { db, Timestamp } from '../utils/firebaseAdmin';
 import { serverCache } from '../utils/cache';
 import {
   Team,
@@ -371,7 +371,7 @@ export async function browseTeamDirectory(
       const snapshotV1 = await db.collection('Teams').get().catch(() => ({ docs: [] } as any));
       return snapshotV1.docs.map((d: any) => ({ id: d.id, data: d.data() as Team }));
     },
-    60,
+    600,
     ['teams']
   );
 
@@ -1009,8 +1009,57 @@ export function matchesSportCategory(athleteSport?: string, athletePosition?: st
  * Optionally filtered by sportType.
  * GET /api/v1/athletes/search?query=&sport=
  */
-export async function searchAthletes(queryStr?: string, sportType?: string) {
+export async function searchAthletes(queryStr?: string, sportType?: string, since?: string) {
   const queryLower = (queryStr || '').trim().toLowerCase();
+
+  // If a 'since' timestamp is provided, do a lightweight delta query
+  let sinceDate: Date | null = null;
+  if (since) {
+    const num = Number(since);
+    if (!isNaN(num) && num > 0) {
+      sinceDate = new Date(num);
+    } else {
+      const parsed = new Date(since);
+      if (!isNaN(parsed.getTime())) {
+        sinceDate = parsed;
+      }
+    }
+  }
+
+  let isDelta = false;
+  let changedDocIds: Set<string> | null = null;
+
+  if (sinceDate) {
+    isDelta = true;
+    const sinceIso = sinceDate.toISOString();
+    const sinceTs = Timestamp.fromDate(sinceDate);
+
+    // Single-field inequalities run natively without requiring composite indexes
+    const [updatedProfiles, createdProfiles, updatedUsers, createdUsers] = await Promise.all([
+      db.collection('Athlete_Profiles').where('updated_at', '>=', sinceIso).get().catch(() => ({ docs: [] } as any)),
+      db.collection('Athlete_Profiles').where('created_at', '>=', sinceIso).get().catch(() => ({ docs: [] } as any)),
+      db.collection('Users').where('updated_at', '>=', sinceTs).get().catch(() => ({ docs: [] } as any)),
+      db.collection('Users').where('created_at', '>=', sinceTs).get().catch(() => ({ docs: [] } as any)),
+    ]);
+
+    changedDocIds = new Set<string>();
+    [...updatedProfiles.docs, ...createdProfiles.docs, ...updatedUsers.docs, ...createdUsers.docs].forEach((doc: any) => {
+      const id = doc.id;
+      changedDocIds!.add(id);
+      changedDocIds!.add(id.replace(/^ath_/, ''));
+      changedDocIds!.add(`ath_${id.replace(/^ath_/, '')}`);
+    });
+
+    if (changedDocIds.size === 0) {
+      // Zero documents modified! 0 Firestore document reads incurred!
+      const emptyDelta: RosterAthlete[] & { isDelta: boolean } = Object.assign([], { isDelta: true });
+      return emptyDelta;
+    }
+
+    // Changes were found, invalidate stale athlete cache pool
+    serverCache.delete('all_searchable_athletes_pool');
+    serverCache.invalidateTags(['athletes']);
+  }
 
   // In-memory cached pool to eliminate 5 full-collection queries on every search
   const allAthletesBase = await serverCache.getOrSet(
@@ -1512,11 +1561,20 @@ export async function searchAthletes(queryStr?: string, sportType?: string) {
 
   return allAthletes;
   },
-  60,
+  600,
   ['athletes', 'teams', 'users']
 );
 
   let results = allAthletesBase;
+
+  if (changedDocIds && changedDocIds.size > 0) {
+    results = results.filter((ath) => {
+      const aId = ath.athlete_id || '';
+      const uId = ath.user_id || '';
+      const cleanId = aId.replace(/^ath_/, '');
+      return changedDocIds!.has(aId) || changedDocIds!.has(uId) || changedDocIds!.has(cleanId);
+    });
+  }
 
   if (queryLower) {
     results = results.filter((ath) => {
@@ -1529,7 +1587,8 @@ export async function searchAthletes(queryStr?: string, sportType?: string) {
     results = results.filter((a) => matchesSportCategory(a.sport_type, a.position, sportType));
   }
 
-  return results.slice(0, 50);
+  const output: RosterAthlete[] & { isDelta: boolean } = Object.assign(results.slice(0, 50), { isDelta });
+  return output;
 }
 
 /**

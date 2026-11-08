@@ -1,5 +1,5 @@
 import { initializeApp, getApps, cert, App } from 'firebase-admin/app';
-import { getFirestore, Firestore } from 'firebase-admin/firestore';
+import { getFirestore, Firestore, Timestamp } from 'firebase-admin/firestore';
 import { getAuth, Auth } from 'firebase-admin/auth';
 import path from 'path';
 import fs from 'fs';
@@ -110,4 +110,5 @@ export const dbV2: Firestore = getFirestore(mainApp); // atleta-v1
 export const dbBackup: Firestore = getFirestore(mainApp); // atleta-v1
 export const v1App: App = mainApp;
 export const v2App: App = mainApp;
+export { Timestamp };
 
