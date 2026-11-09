@@ -894,6 +894,7 @@ export async function updateTeamRoster(
 
         await athDocRef.set(athUpdates, { merge: true });
         await db.collection('Athlete_Profiles').doc(rawAthUid).set(athUpdates, { merge: true }).catch(() => null);
+        await db.collection('Users').doc(rawAthUid).set(athUpdates, { merge: true }).catch(() => null);
 
         newTerminatedRecords.push({
           athlete_id: existingId,
@@ -1985,6 +1986,7 @@ export async function terminateAthleteFromTeam(
   await Promise.all([
     db.collection('Athlete_Profiles').doc(canonicalAthId).set(athleteUpdates, { merge: true }),
     db.collection('Athlete_Profiles').doc(cleanAthId).set(athleteUpdates, { merge: true }).catch(() => null),
+    db.collection('Users').doc(cleanAthId).set(athleteUpdates, { merge: true }).catch(() => null),
   ]);
 
   // 2. Update Team document
@@ -2050,6 +2052,7 @@ export async function deleteTeam(teamId: string, coachId?: string): Promise<bool
   // 1. Fetch team document
   const teamRef = db.collection('Teams').doc(cleanId);
   const teamDoc = await teamRef.get();
+  let targetTeamData: any = null;
 
   if (!teamDoc.exists) {
     // Try searching by team_id field if doc ID differs
@@ -2065,20 +2068,77 @@ export async function deleteTeam(teamId: string, coachId?: string): Promise<bool
         }
       });
       if (matchedDoc) {
+        targetTeamData = matchedDoc.data();
         await matchedDoc.ref.delete();
       } else {
         throw new ServiceError('Team not found.', 404);
       }
     } else {
+      targetTeamData = querySnap.docs[0].data();
       for (const d of querySnap.docs) {
         await d.ref.delete();
       }
     }
   } else {
+    targetTeamData = teamDoc.data();
     await teamRef.delete();
   }
 
-  // 2. Clear team reference from any athletes whose team_id equals cleanId
+  // 2. Archive team into each roster member's past_teams history
+  if (targetTeamData && Array.isArray(targetTeamData.roster_list) && targetTeamData.roster_list.length > 0) {
+    const nowIso = new Date().toISOString();
+    for (const member of targetTeamData.roster_list) {
+      const mId = typeof member === 'string' ? member : (member.athlete_id || member.user_id);
+      if (!mId) continue;
+      try {
+        const canonicalAthId = mId.startsWith('ath_') ? mId : `ath_${mId}`;
+        const cleanAthId = mId.replace(/^ath_/, '');
+        const statsSummary = await calculateAthleteStatsForTeam(mId, cleanId, targetTeamData.team_name);
+
+        const pastRecord: PastTeamAffiliation = {
+          team_id: cleanId,
+          team_name: targetTeamData.team_name || 'Team',
+          sport_type: targetTeamData.sport_type || 'BASKETBALL',
+          division: targetTeamData.division || 'Varsity',
+          logo_url: targetTeamData.logo_url || null,
+          coach_name: targetTeamData.coach_name || 'Coach',
+          coach_id: targetTeamData.coach_id,
+          jersey_number: typeof member !== 'string' ? member.jersey_number : null,
+          position: typeof member !== 'string' ? member.position : 'Unassigned',
+          joined_at: (typeof member !== 'string' && member.added_at) ? member.added_at : (targetTeamData.created_at || nowIso),
+          terminated_at: nowIso,
+          status: 'Terminated',
+          termination_reason: 'Team disbanded',
+          stats_summary: statsSummary,
+        };
+
+        const pDoc = await db.collection('Athlete_Profiles').doc(canonicalAthId).get();
+        const pData = pDoc.exists ? (pDoc.data() || {}) : {};
+        const existingPast: PastTeamAffiliation[] = Array.isArray(pData.past_teams) ? pData.past_teams : [];
+        const updatedPast = [
+          pastRecord,
+          ...existingPast.filter((pt: any) => pt.team_id !== cleanId),
+        ];
+
+        const athUpdates = {
+          past_teams: updatedPast,
+          team_id: null,
+          team_name: 'Unassigned',
+          updated_at: nowIso,
+        };
+
+        await Promise.all([
+          db.collection('Athlete_Profiles').doc(canonicalAthId).set(athUpdates, { merge: true }).catch(() => null),
+          db.collection('Athlete_Profiles').doc(cleanAthId).set(athUpdates, { merge: true }).catch(() => null),
+          db.collection('Users').doc(cleanAthId).set(athUpdates, { merge: true }).catch(() => null),
+        ]);
+      } catch (err) {
+        console.warn('deleteTeam past_teams archive note:', err);
+      }
+    }
+  }
+
+  // 3. Clear team reference from any athletes whose team_id equals cleanId
   try {
     const athletesSnap = await db.collection('Users').where('team_id', '==', cleanId).get();
     if (!athletesSnap.empty) {
