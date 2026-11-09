@@ -7,6 +7,7 @@ import {
   updateTeamHandler,
   updateRosterHandler,
   terminateRosterMemberHandler,
+  deleteTeamHandler,
 } from '../controllers/teamController';
 
 import { cacheMiddleware, invalidateCacheMiddleware } from '../middlewares/cacheMiddleware';
@@ -43,6 +44,8 @@ router.get('/details/:teamId', optionalAuth, teamCache, getTeam);
 router.get('/:teamId', optionalAuth, teamCache, getTeam);
 router.patch('/:teamId', authenticate, teamInvalidate, updateTeamHandler);
 router.put('/:teamId', authenticate, teamInvalidate, updateTeamHandler);
+router.delete('/:teamId', authenticate, teamInvalidate, deleteTeamHandler);
+
 
 export default router;
 

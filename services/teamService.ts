@@ -2040,3 +2040,63 @@ export async function suspendAthleteFromTeam(
 ) {
   return terminateAthleteFromTeam(coachId, teamId, athleteId, reason, 'Suspended');
 }
+
+export async function deleteTeam(teamId: string, coachId?: string): Promise<boolean> {
+  const cleanId = String(teamId || '').trim();
+  if (!cleanId) {
+    throw new ServiceError('Team ID is required.', 400);
+  }
+
+  // 1. Fetch team document
+  const teamRef = db.collection('Teams').doc(cleanId);
+  const teamDoc = await teamRef.get();
+
+  if (!teamDoc.exists) {
+    // Try searching by team_id field if doc ID differs
+    const querySnap = await db.collection('Teams').where('team_id', '==', cleanId).get();
+    if (querySnap.empty) {
+      // Also check lowercase or prefix variants
+      const allTeamsSnap = await db.collection('Teams').get();
+      let matchedDoc: any = null;
+      allTeamsSnap.forEach((d) => {
+        const data = d.data();
+        if (d.id === cleanId || data.team_id === cleanId || (cleanId.startsWith('team_') && d.id === cleanId.replace('team_', ''))) {
+          matchedDoc = d;
+        }
+      });
+      if (matchedDoc) {
+        await matchedDoc.ref.delete();
+      } else {
+        throw new ServiceError('Team not found.', 404);
+      }
+    } else {
+      for (const d of querySnap.docs) {
+        await d.ref.delete();
+      }
+    }
+  } else {
+    await teamRef.delete();
+  }
+
+  // 2. Clear team reference from any athletes whose team_id equals cleanId
+  try {
+    const athletesSnap = await db.collection('Users').where('team_id', '==', cleanId).get();
+    if (!athletesSnap.empty) {
+      const batch = db.batch();
+      athletesSnap.docs.forEach((docSnap) => {
+        batch.update(docSnap.ref, {
+          team_id: null,
+          team_name: 'Unassigned',
+          updated_at: new Date().toISOString(),
+        });
+      });
+      await batch.commit();
+    }
+  } catch (err) {
+    console.warn('deleteTeam athlete detachment note:', err);
+  }
+
+  invalidateTeamCache();
+  return true;
+}
+
