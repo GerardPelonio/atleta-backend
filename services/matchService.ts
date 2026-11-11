@@ -1072,10 +1072,12 @@ export function normalizeExtractedPlayer(item: any, idx: number, matchId?: strin
 
   // Timed / Individual Stats (Swimming / Track & Field)
   const eventName = String(item.event ?? item.event_name ?? item.discipline ?? item.race ?? item.stroke ?? '').trim();
-  const finishTime = String(item.finish_time ?? item.time ?? item.final_time ?? item.mark ?? item.result ?? item.best_time ?? '').trim();
+  const timeOrDistance = String(item.time_or_distance ?? item.time ?? item.distance ?? item.mark ?? item.finish_time ?? item.final_time ?? '').trim();
+  const qts = String(item.qts ?? item.qualifying_time ?? item.seed_time ?? item.seed ?? '').trim();
+  const finishTime = String(item.finish_time ?? item.time ?? item.final_time ?? item.mark ?? item.result ?? item.best_time ?? timeOrDistance).trim();
   const splitTime = String(item.split_time ?? item.split ?? item.split_1 ?? item.split_times ?? '').trim();
   const split2 = String(item.split_2 ?? item.split_second ?? '').trim();
-  const seedTime = String(item.seed_time ?? item.seed ?? item.entry_time ?? '').trim();
+  const seedTime = String(item.seed_time ?? item.seed ?? item.entry_time ?? qts).trim();
   const pace = String(item.pace ?? item.avg_pace ?? '').trim();
   const distanceM = parseStatNum(item.distance_m ?? item.distance ?? item.top_distance ?? item.dist, 0, 100000);
   const strokeCount = parseStatNum(item.stroke_count ?? item.strokes, 0, 500);
@@ -1128,13 +1130,14 @@ export function normalizeExtractedPlayer(item: any, idx: number, matchId?: strin
   const resolvedFgMade = fgMade > 0 ? fgMade : (kills > 0 ? kills : (goals > 0 ? goals : (hits > 0 ? hits : (smashWinners + netKills))));
   const resolvedFgAttempted = fgAttempted > 0 ? fgAttempted : (attackAttempts > 0 ? attackAttempts : (shots > 0 ? shots : (atBats > 0 ? atBats : resolvedFgMade)));
 
-  const teamName = item.team_name || item.team || defaultTeam || '';
+  const teamName = item.team_name || item.team || item.school || defaultTeam || '';
 
   return {
     index: item.index ?? (idx + 1),
     athlete_id: item.athlete_id || `ath_ocr_${matchId || 'scan'}_${idx + 1}`,
     player_name: rawName,
     team_name: teamName,
+    school: teamName,
     jersey_number: jerseyNum,
     position: item.position || item.pos || 'G',
     points,
@@ -1195,15 +1198,18 @@ export function normalizeExtractedPlayer(item: any, idx: number, matchId?: strin
     unforced_errors: unforcedErrors,
     service_faults: serviceFaults,
     games_won: gamesWon,
-    // Timed / Individual specific
+    // Timed / Individual specific (Track & Field / Swimming)
     event: eventName,
     event_name: eventName,
-    finish_time: finishTime,
-    time: finishTime,
+    time_or_distance: timeOrDistance || finishTime,
+    qts: qts || seedTime,
+    finish_time: finishTime || timeOrDistance,
+    time: finishTime || timeOrDistance,
+    distance: distanceM > 0 ? String(distanceM) : (timeOrDistance || ''),
     split_time: splitTime,
     split: splitTime,
     split_2: split2,
-    seed_time: seedTime,
+    seed_time: seedTime || qts,
     pace,
     distance_m: distanceM,
     stroke_count: strokeCount,
@@ -1236,10 +1242,10 @@ Do NOT omit any player rows or stat columns. If stats are written as tally marks
 
 SPORT IDENTIFICATION & VERIFICATION (MANDATORY):
 Examine the scoresheet column headers, terminology, and structure to definitively determine sport_type:
+- "TRACK AND FIELD": When document contains 100m/200m/400m/800m/1500m Dash (or 100MD, 200MD, 400MD, 800MD, 1500MD), Sprint, Long Jump, Shot Put, Discus, Javelin, Relay (4x100m, 4x400m), Hurdles, Track, Field, Distance, QTS (Qualifying Time/Standard), School/Team, Rank/Place.
+- "SWIMMING": ONLY when document explicitly pertains to water pool swimming and contains swim strokes (Freestyle / Free, Butterfly / Fly, Breaststroke / Breast, Backstroke / Back, IM / Medley, 50m Free, Pool). If the document contains Dash, Sprints, Run, Long Jump, Shot Put, Discus, Javelin, Relay, Track, or Field, it is NEVER Swimming; it is ALWAYS TRACK AND FIELD!
 - "VOLLEYBALL": When document contains Kills (K), Attacks (TA/E), Digs (D), Sets (SP), Blocks (BS/BA), Aces (SA/SE), Rotation numbers, or Libero (L).
 - "SOCCER": When document contains Goals (G), Shots (SH), SOG, Saves (SV), Fouls (FC), Offsides, Cards (YC/RC).
-- "SWIMMING": When document contains Stroke (Free, Fly, Breast, Back, IM), Heat, Lane, Splits, Finish Time, Seed Time.
-- "TRACK AND FIELD": When document contains Distance, 100m/200m/400m/Hurdles, Heat, Lane, Mark, Time.
 - "BADMINTON" / "PICKLEBALL" / "TENNIS": When document contains Smashes, Net Kills, Faults, Aces, Rallies.
 - "BASEBALL": When document contains AB, R, H, RBI, HR, BB, SO/K, IP, ER.
 - "BASKETBALL": When document contains FGM/FGA, 3PM/3PA, FTM/FTA, PTS, REB, AST, STL, BLK, TO, PF.
@@ -1256,11 +1262,14 @@ SPORT-SPECIFIC PARSING GUIDELINES:
 3. SOCCER / FOOTBALL:
    - Extract: jersey_number, player_name, team_name, goals (G), assists (A), shots (SH), shots_on_target (SOG), fouls_committed (FC), yellow_cards (YC), red_cards (RC), saves (SV), tackles (TKL), offsides (OFF), minutes (MIN).
    - Derivation: points = goals.
-4. SWIMMING & TRACK / FIELD:
-   - Extract: rank (Place), player_name, team_name (School/Club), event (e.g. 50m Free, 100m Dash, 4x100m Relay, Long Jump), heat, lane, finish_time (e.g. 00:24.35, 1:02.14, 10.42s), split_time, seed_time, distance_m, stroke_count, points (team points scored).
-5. BADMINTON, PICKLEBALL, TENNIS:
+4. TRACK & FIELD:
+   - Extract: rank (Place/Rank), player_name (Athlete Name), team_name (School / Team Name, e.g. "Morada-Ramos ES", "Grandview ES", "Minds That Matter"), event (e.g. 100m Dash, 100MD, 1500MD, Long Jump, Shot Put, Discus, Javelin, 4x100m Relay), time_or_distance (Time or Distance recorded, e.g. "10.12s", "3.28m", "6:31.71"), qts (Qualifying Time / Standard, e.g. "12.33", "5.0", "4:59.00", "25.79m"), points.
+   - Note: In official Track & Field scoresheets, the standard columns are: RANK (Place), NAME OF PLAYER, SCHOOL (Team), TIME / DISTANCE, QTS. Extract all of them faithfully!
+5. SWIMMING:
+   - Extract: rank (Place), player_name, team_name (School/Club), event (e.g. 50m Free, 100m Fly), heat, lane, finish_time (e.g. 00:24.35, 1:02.14), split_time, seed_time, points.
+6. BADMINTON, PICKLEBALL, TENNIS:
    - Extract: player_name, team_name, points (total rally points), smash_winners, net_kills, unforced_errors, service_faults, service_aces, games_won.
-6. BASEBALL / SOFTBALL:
+7. BASEBALL / SOFTBALL:
    - Extract: jersey_number, player_name, at_bats (AB), runs (R), hits (H), rbi (RBI), home_runs (HR), walks (BB), strikeouts (SO/K), innings_pitched (IP), earned_runs (ER).
 
 Return the extraction in this exact JSON structure:
@@ -1914,6 +1923,10 @@ export async function processScoresheetOCR(matchId: string, file?: Express.Multe
     });
 
     // Save scoresheet_url, scoresheet_data, and parsed_tables directly onto Match_Logs (without polluting Performance_Metrics)
+    const combinedContextMatch = `${aiParsed.match_info?.sport_type || matchData.sport_type || ''} ${aiParsed.match_info?.event_name || matchData.event_name || ''} ${rawPlayerSummary.map((p: any) => `${p.event || ''} ${p.event_name || ''} ${p.team_name || ''} ${p.player_name || ''}`).join(' ')}`.toUpperCase();
+    const isExplicitTrackMatch = /DASH|100MD|200MD|400MD|800MD|1500MD|RELAY|4X100|4X400|LONG\s*JUMP|LONGJUMP|SHOT\s*PUT|SHOTPUT|DISCUS|JAVELIN|HURDLE|TRACK|FIELD|RUNNERS?|ATHLETICS?|POLE\s*VAULT|TRIPLE\s*JUMP|HIGH\s*JUMP/i.test(combinedContextMatch);
+    const hasSwimStrokesMatch = /FREESTYLE|BUTTERFLY|BREASTSTROKE|BACKSTROKE|\bIM\b|MEDLEY|SWIM|POOL/i.test(combinedContextMatch);
+
     const updatePayload: any = {
       scoresheet_url: scoresheetUrl,
       scoresheetUrl: scoresheetUrl,
@@ -1933,6 +1946,13 @@ export async function processScoresheetOCR(matchId: string, file?: Express.Multe
       },
       updated_at: now,
     };
+
+    if (isExplicitTrackMatch && !hasSwimStrokesMatch) {
+      if (!aiParsed.match_info) aiParsed.match_info = {};
+      aiParsed.match_info.sport_type = 'TRACK AND FIELD';
+      updatePayload.sport_type = 'TRACK AND FIELD';
+      updatePayload.sportType = 'TRACK AND FIELD';
+    }
 
     if (teamScores.length >= 2) {
       updatePayload.home_score = Number(teamScores[0].score);
@@ -2133,11 +2153,22 @@ export async function scanScoresheetStandalone(file?: Express.Multer.File, custo
       }
     }
 
-    const detectedSport = parsedData.match_info?.sport_type || parsedData.sport_type || 'Basketball';
+    let detectedSport = parsedData.match_info?.sport_type || parsedData.sport_type || 'Basketball';
+    const combinedContextStandalone = `${detectedSport} ${parsedData.match_info?.event_name || ''} ${rawPlayerSummary.map((p: any) => `${p.event || ''} ${p.event_name || ''} ${p.team_name || ''} ${p.player_name || ''}`).join(' ')}`.toUpperCase();
+    const isExplicitTrackStandalone = /DASH|100MD|200MD|400MD|800MD|1500MD|RELAY|4X100|4X400|LONG\s*JUMP|LONGJUMP|SHOT\s*PUT|SHOTPUT|DISCUS|JAVELIN|HURDLE|TRACK|FIELD|RUNNERS?|ATHLETICS?|POLE\s*VAULT|TRIPLE\s*JUMP|HIGH\s*JUMP/i.test(combinedContextStandalone);
+    const hasSwimStrokesStandalone = /FREESTYLE|BUTTERFLY|BREASTSTROKE|BACKSTROKE|\bIM\b|MEDLEY|SWIM|POOL/i.test(combinedContextStandalone);
+    if (isExplicitTrackStandalone && !hasSwimStrokesStandalone) {
+      detectedSport = 'TRACK AND FIELD';
+      if (!parsedData.match_info) parsedData.match_info = {};
+      parsedData.match_info.sport_type = 'TRACK AND FIELD';
+      parsedData.sport_type = 'TRACK AND FIELD';
+    }
+
     const isBasketball = String(detectedSport).toLowerCase().includes('basket');
     const isIndividual = String(detectedSport).toLowerCase().includes('swim') || String(detectedSport).toLowerCase().includes('track') || String(detectedSport).toLowerCase().includes('field');
 
     const resolvedMatchInfo = parsedData.match_info || {};
+    resolvedMatchInfo.sport_type = detectedSport;
     if (!resolvedMatchInfo.final_score || resolvedMatchInfo.final_score === '0 - 0') {
       if (teamScores.length >= 2 && (teamScores[0].score > 0 || teamScores[1].score > 0)) {
         resolvedMatchInfo.final_score = `${teamScores[0].score} - ${teamScores[1].score}`;
@@ -2171,10 +2202,12 @@ export async function scanScoresheetStandalone(file?: Express.Multer.File, custo
       ? enrichedPlayers.map((p: any, idx: number) => ({
           placement_rank: String(p.rank || p.place || p.placement_rank || idx + 1),
           athlete_name: String(p.player_name || p.athlete_name || p.name || `Athlete ${idx + 1}`).toUpperCase(),
-          team_name: p.team_name || p.team || resolvedMatchInfo.home_team_name || 'Individual',
+          team_name: p.team_name || p.team || p.school || resolvedMatchInfo.home_team_name || 'Individual',
+          time_or_distance: p.time_or_distance || p.time || p.distance || p.finish_time || '00:00.00',
+          qts: p.qts || p.seed_time || p.seed || '—',
           distance: p.event || p.event_name || p.distance || '100m',
           finish_time: p.finish_time || p.time || p.formatted_time || '00:00.00',
-          seed_time: p.seed_time || p.seed || 'NT',
+          seed_time: p.seed_time || p.seed || p.qts || 'NT',
           points: Number(p.points ?? p.pts ?? 0),
           split_times: Array.isArray(p.splits || p.split_times) ? (p.splits || p.split_times) : [String(p.split_time || '—')],
           efficiency: p.calculated_efficiency || p.efficiency || 100,
