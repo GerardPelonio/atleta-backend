@@ -603,7 +603,7 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
     const dynamicRating = per > 0 ? Math.min(99, Math.max(65, Math.round(per * 2.8))) : (ppg > 0 ? Math.min(99, Math.max(65, Math.round(ppg * 3.5))) : (profileData.rating_score || 0));
 
     const scoutInfo = scoutedAthleteMap.get(aId) || scoutedAthleteMap.get(canonicalAthleteId) || scoutedAthleteMap.get(rawUid);
-    const isScouted = Boolean(scoutInfo || profileData.is_scouted);
+    const isScouted = Boolean(scoutInfo);
 
     return {
       athlete_id: canonicalAthleteId,
