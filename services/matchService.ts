@@ -1923,9 +1923,9 @@ export async function processScoresheetOCR(matchId: string, file?: Express.Multe
     });
 
     // Save scoresheet_url, scoresheet_data, and parsed_tables directly onto Match_Logs (without polluting Performance_Metrics)
-    const combinedContextMatch = `${aiParsed.match_info?.sport_type || matchData.sport_type || ''} ${aiParsed.match_info?.event_name || matchData.event_name || ''} ${rawPlayerSummary.map((p: any) => `${p.event || ''} ${p.event_name || ''} ${p.team_name || ''} ${p.player_name || ''}`).join(' ')}`.toUpperCase();
-    const isExplicitTrackMatch = /DASH|100MD|200MD|400MD|800MD|1500MD|RELAY|4X100|4X400|LONG\s*JUMP|LONGJUMP|SHOT\s*PUT|SHOTPUT|DISCUS|JAVELIN|HURDLE|TRACK|FIELD|RUNNERS?|ATHLETICS?|POLE\s*VAULT|TRIPLE\s*JUMP|HIGH\s*JUMP/i.test(combinedContextMatch);
-    const hasSwimStrokesMatch = /FREESTYLE|BUTTERFLY|BREASTSTROKE|BACKSTROKE|\bIM\b|MEDLEY|SWIM|POOL/i.test(combinedContextMatch);
+    const nonSportContextMatch = `${aiParsed.match_info?.event_name || matchData.event_name || ''} ${rawPlayerSummary.map((p: any) => `${p.event || ''} ${p.event_name || ''} ${p.team_name || ''} ${p.player_name || ''}`).join(' ')}`.toUpperCase();
+    const isExplicitTrackMatch = /DASH|100MD|200MD|400MD|800MD|1500MD|RELAY|4X100|4X400|LONG\s*JUMP|LONGJUMP|SHOT\s*PUT|SHOTPUT|DISCUS|JAVELIN|HURDLE|TRACK|FIELD|RUNNERS?|ATHLETICS?|POLE\s*VAULT|TRIPLE\s*JUMP|HIGH\s*JUMP/i.test(nonSportContextMatch);
+    const hasSwimStrokesMatch = /FREESTYLE|BUTTERFLY|BREASTSTROKE|BACKSTROKE|\bIM\b|MEDLEY|POOL|STROKE/i.test(nonSportContextMatch);
 
     const updatePayload: any = {
       scoresheet_url: scoresheetUrl,
@@ -2154,9 +2154,9 @@ export async function scanScoresheetStandalone(file?: Express.Multer.File, custo
     }
 
     let detectedSport = parsedData.match_info?.sport_type || parsedData.sport_type || 'Basketball';
-    const combinedContextStandalone = `${detectedSport} ${parsedData.match_info?.event_name || ''} ${rawPlayerSummary.map((p: any) => `${p.event || ''} ${p.event_name || ''} ${p.team_name || ''} ${p.player_name || ''}`).join(' ')}`.toUpperCase();
-    const isExplicitTrackStandalone = /DASH|100MD|200MD|400MD|800MD|1500MD|RELAY|4X100|4X400|LONG\s*JUMP|LONGJUMP|SHOT\s*PUT|SHOTPUT|DISCUS|JAVELIN|HURDLE|TRACK|FIELD|RUNNERS?|ATHLETICS?|POLE\s*VAULT|TRIPLE\s*JUMP|HIGH\s*JUMP/i.test(combinedContextStandalone);
-    const hasSwimStrokesStandalone = /FREESTYLE|BUTTERFLY|BREASTSTROKE|BACKSTROKE|\bIM\b|MEDLEY|SWIM|POOL/i.test(combinedContextStandalone);
+    const nonSportContextStandalone = `${parsedData.match_info?.event_name || ''} ${rawPlayerSummary.map((p: any) => `${p.event || ''} ${p.event_name || ''} ${p.team_name || ''} ${p.player_name || ''}`).join(' ')}`.toUpperCase();
+    const isExplicitTrackStandalone = /DASH|100MD|200MD|400MD|800MD|1500MD|RELAY|4X100|4X400|LONG\s*JUMP|LONGJUMP|SHOT\s*PUT|SHOTPUT|DISCUS|JAVELIN|HURDLE|TRACK|FIELD|RUNNERS?|ATHLETICS?|POLE\s*VAULT|TRIPLE\s*JUMP|HIGH\s*JUMP/i.test(nonSportContextStandalone);
+    const hasSwimStrokesStandalone = /FREESTYLE|BUTTERFLY|BREASTSTROKE|BACKSTROKE|\bIM\b|MEDLEY|POOL|STROKE/i.test(nonSportContextStandalone);
     if (isExplicitTrackStandalone && !hasSwimStrokesStandalone) {
       detectedSport = 'TRACK AND FIELD';
       if (!parsedData.match_info) parsedData.match_info = {};
