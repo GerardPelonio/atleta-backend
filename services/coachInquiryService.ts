@@ -333,21 +333,35 @@ export async function submitRecruitmentInquiry(
   // 5. Create new inquiry document in Scouting_Registry
   const scoutId = `inq_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const now = new Date().toISOString();
+  const rawCoachUid = coachId.replace(/^coach_/, '');
+  const canonicalCoachId = coachId.startsWith('coach_') ? coachId : `coach_${rawCoachUid}`;
 
-  const inquiry: RecruitmentInquiry = {
+  const inquiry: any = {
     scout_id: scoutId,
     inquiry_id: scoutId,
     athlete_id: athleteId,
+    athleteId: athleteId,
     coach_scout_id: coachId,
+    coachId: canonicalCoachId,
+    coach_id: canonicalCoachId,
+    raw_coach_id: rawCoachUid,
+    coach_name: coachProfile.full_name,
+    current_institution: coachProfile.current_institution,
+    sport_type: coachProfile.sport_type,
     initiated_by: athleteId, // Athlete sent the inquiry
     offer_message: message ? message.trim() : null,
+    message: message ? message.trim() : null,
     offer_status: 'Sent', // Default status matches manuscript
+    status: 'Sent',
     decline_reason: null,
     date_initiated: now,
     updated_at: now,
   };
 
-  await db.collection('Scouting_Registry').doc(scoutId).set(inquiry);
+  await Promise.all([
+    db.collection('Scouting_Registry').doc(scoutId).set(inquiry),
+    db.collection('inquiries').doc(scoutId).set(inquiry).catch(() => null),
+  ]);
 
   // 6. Resolve athlete name and create in-app notification
   let athleteName = 'An athlete';
@@ -453,6 +467,112 @@ export async function getAthleteInquiries(athleteId: string): Promise<EnrichedIn
   // Sort descending by date_initiated / updated_at
   return enrichedInquiries.sort(
     (a, b) => new Date(b.date_initiated || b.updated_at).getTime() - new Date(a.date_initiated || a.updated_at).getTime(),
+  );
+}
+
+/**
+ * Retrieve incoming recruitment inquiries and sent proposals for a Coach.
+ * Guarantees resolution for both raw Auth UIDs and canonical 'coach_' prefixed IDs,
+ * supporting third-party OAuth (Google/Facebook) and standard email/password logins.
+ */
+export async function getCoachInquiries(coachId: string): Promise<any[]> {
+  const rawId = coachId.replace(/^coach_/, '');
+  const canonicalCoachId = coachId.startsWith('coach_') ? coachId : `coach_${rawId}`;
+  const possibleCoachIds = Array.from(new Set([coachId, canonicalCoachId, rawId].filter(Boolean)));
+
+  // Query Scouting_Registry, Inquiries, and inquiries across coachId and coach_scout_id
+  const [snapScout, snapCoachId, snapSnakeCoachId, snapInquiries, snapLowerInquiries] = await Promise.all([
+    db.collection('Scouting_Registry').where('coach_scout_id', 'in', possibleCoachIds).get().catch(() => null),
+    db.collection('Scouting_Registry').where('coachId', 'in', possibleCoachIds).get().catch(() => null),
+    db.collection('Scouting_Registry').where('coach_id', 'in', possibleCoachIds).get().catch(() => null),
+    db.collection('Inquiries').where('coachId', 'in', possibleCoachIds).get().catch(() => null),
+    db.collection('inquiries').where('coachId', 'in', possibleCoachIds).get().catch(() => null),
+  ]);
+
+  const docMap = new Map<string, any>();
+  [snapScout, snapCoachId, snapSnakeCoachId, snapInquiries, snapLowerInquiries].forEach((snap) => {
+    if (snap && !snap.empty) {
+      snap.forEach((d) => {
+        if (!docMap.has(d.id)) {
+          docMap.set(d.id, { id: d.id, scout_id: d.id, ...d.data() });
+        }
+      });
+    }
+  });
+
+  if (docMap.size === 0) {
+    return [];
+  }
+
+  const rawInquiries = Array.from(docMap.values());
+
+  // Enrich with athlete details (first_name, last_name, avatar_url, sport_type, position, etc.)
+  const athleteIds = Array.from(new Set(rawInquiries.map((inq) => inq.athlete_id || inq.athleteId).filter(Boolean)));
+  const athleteMap = new Map<string, any>();
+
+  await Promise.all(
+    athleteIds.map(async (athId) => {
+      const rawAth = String(athId).replace(/^ath_/, '');
+      const [uDoc, aDoc] = await Promise.all([
+        db.collection('Users').doc(rawAth).get().catch(() => null),
+        db.collection('Athlete_Profiles').doc(`ath_${rawAth}`).get().catch(() => null),
+      ]);
+      const uData = uDoc && uDoc.exists ? uDoc.data() : {};
+      const aData = aDoc && aDoc.exists ? aDoc.data() : {};
+      const firstName = uData?.first_name || aData?.first_name || 'Athlete';
+      const lastName = uData?.last_name || aData?.last_name || '';
+      const fullName = uData?.full_name || aData?.full_name || `${firstName} ${lastName}`.trim();
+      athleteMap.set(athId, {
+        athlete_id: athId,
+        user_id: rawAth,
+        first_name: firstName,
+        last_name: lastName,
+        full_name: fullName,
+        email: uData?.email || aData?.email || '',
+        avatar_url: aData?.avatar_url || uData?.avatar_url || '',
+        sport_type: aData?.sport_type || uData?.sport_type || 'Basketball',
+        position: aData?.position || 'Player',
+        province: aData?.province || uData?.province || 'Camarines Sur',
+        current_institution: aData?.current_institution || uData?.current_institution || 'Varsity',
+      });
+    })
+  );
+
+  const enriched = rawInquiries.map((inq) => {
+    const athId = inq.athlete_id || inq.athleteId;
+    const ath = athleteMap.get(athId) || {};
+    const athleteName = ath.full_name || inq.athlete_name || 'Athlete';
+    const sport = inq.sport_type || inq.sport_category || ath.sport_type || 'Basketball';
+    const isSentByCoach = inq.initiated_by === coachId || inq.initiated_by === rawId || inq.initiated_by === canonicalCoachId;
+
+    return {
+      ...inq,
+      inquiry_id: inq.scout_id || inq.inquiry_id || inq.id,
+      scout_id: inq.scout_id || inq.inquiry_id || inq.id,
+      coachId: canonicalCoachId,
+      coach_id: canonicalCoachId,
+      coach_scout_id: inq.coach_scout_id || canonicalCoachId,
+      athlete_id: athId,
+      athleteId: athId,
+      athlete_name: athleteName,
+      athlete_details: ath,
+      sport_category: sport,
+      sport_type: sport,
+      is_sender: isSentByCoach,
+      sender_role: isSentByCoach ? 'Coach' : 'Athlete',
+      title: isSentByCoach ? `Recruitment Proposal to ${athleteName}` : `Inquiry from ${athleteName}`,
+      headline: isSentByCoach ? `Proposal Sent to ${athleteName}` : `New Inquiry from ${athleteName}`,
+      message: inq.offer_message || inq.message || (isSentByCoach ? `Recruitment offer submitted.` : `${athleteName} is interested in joining your team.`),
+      message_body: inq.offer_message || inq.message || (isSentByCoach ? `Recruitment offer submitted.` : `${athleteName} is interested in joining your team.`),
+      status: (inq.offer_status || inq.status || 'Sent').toUpperCase(),
+      offer_status: (inq.offer_status || inq.status || 'Sent').toUpperCase(),
+      date_initiated: inq.date_initiated || inq.created_at || inq.updated_at || new Date().toISOString(),
+      actionable: !isSentByCoach,
+    };
+  });
+
+  return enriched.sort(
+    (a, b) => new Date(b.date_initiated || b.updated_at).getTime() - new Date(a.date_initiated || a.updated_at).getTime()
   );
 }
 

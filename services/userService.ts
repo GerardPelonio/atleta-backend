@@ -53,6 +53,11 @@ export function generateToken(uid: string, email: string, role: string, isApprov
   const isSystemAdmin = String(role || '').toLowerCase().includes('admin');
   const payload = {
     uid,
+    user_id: uid,
+    coach_id: role === 'Coach' ? (uid.startsWith('coach_') ? uid : `coach_${uid}`) : undefined,
+    coachId: role === 'Coach' ? (uid.startsWith('coach_') ? uid : `coach_${uid}`) : undefined,
+    athlete_id: role === 'Athlete' ? (uid.startsWith('ath_') ? uid : `ath_${uid}`) : undefined,
+    athleteId: role === 'Athlete' ? (uid.startsWith('ath_') ? uid : `ath_${uid}`) : undefined,
     email,
     role,
     is_approved: isApproved,
@@ -1303,6 +1308,7 @@ export async function socialLoginService(
         if (coachDoc.exists) {
           userRole = 'Coach';
           const cData = coachDoc.data()!;
+          uid = cData.user_id || cData.uid || coachDoc.id.replace(/^coach_/, '');
           firstName = cData.first_name || firstName;
           lastName = cData.last_name || lastName;
           avatarUrl = cData.avatar_url || avatarUrl;
@@ -1312,6 +1318,7 @@ export async function socialLoginService(
         if (coachPrefixed.exists) {
           userRole = 'Coach';
           const cData = coachPrefixed.data()!;
+          uid = cData.user_id || cData.uid || coachPrefixed.id.replace(/^coach_/, '');
           firstName = cData.first_name || firstName;
           lastName = cData.last_name || lastName;
           avatarUrl = cData.avatar_url || avatarUrl;
@@ -1324,6 +1331,7 @@ export async function socialLoginService(
         if (!coachEmailSnap.empty) {
           userRole = 'Coach';
           const cData = coachEmailSnap.docs[0].data();
+          uid = cData.user_id || cData.uid || coachEmailSnap.docs[0].id.replace(/^coach_/, '');
           firstName = cData.first_name || firstName;
           lastName = cData.last_name || lastName;
           avatarUrl = cData.avatar_url || avatarUrl;
@@ -1584,6 +1592,9 @@ export async function socialLoginService(
   const resolvedIsApproved = finalRole === 'Coach' ? isApprovedCandidate : true;
   const resolvedAccountStatus = isApprovedCandidate || finalRole !== 'Coach' ? 'Active' : 'Pending';
 
+  const cleanUid = uid.replace(/^(coach_|ath_)/, '');
+  const canonicalCoachId = finalRole === 'Coach' ? (uid.startsWith('coach_') ? uid : `coach_${cleanUid}`) : undefined;
+
   return {
     account_exists: true,
     require_signup: false,
@@ -1593,6 +1604,12 @@ export async function socialLoginService(
     refreshToken: tokenData.refreshToken,
     user: sanitizeUser({
       user_id: uid,
+      uid: uid,
+      clean_uid: cleanUid,
+      coach_id: canonicalCoachId,
+      coachId: canonicalCoachId,
+      athlete_id: finalRole === 'Athlete' ? (uid.startsWith('ath_') ? uid : `ath_${cleanUid}`) : undefined,
+      athleteId: finalRole === 'Athlete' ? (uid.startsWith('ath_') ? uid : `ath_${cleanUid}`) : undefined,
       first_name: firstName,
       last_name: lastName,
       email: cleanEmail,

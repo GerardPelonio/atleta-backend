@@ -470,21 +470,33 @@ export async function dispatchRecruitmentProposal(
   // 4. Create Scouting Proposal
   const scoutId = crypto.randomUUID();
   const now = new Date().toISOString();
+  const rawCoachUid = coachId.replace(/^coach_/, '');
+  const canonicalCoachId = coachId.startsWith('coach_') ? coachId : `coach_${rawCoachUid}`;
 
   const proposalData: Record<string, any> = {
     scout_id: scoutId,
+    inquiry_id: scoutId,
     coach_scout_id: coachId,
+    coachId: canonicalCoachId,
+    coach_id: canonicalCoachId,
+    raw_coach_id: rawCoachUid,
     coach_name: coachName,
     current_institution: coachInstitution,
     athlete_id: athleteId,
+    athleteId: athleteId,
     initiated_by: coachId, // Coach initiated
     offer_status: 'Sent',
+    status: 'Sent',
     offer_message: offerDetails || undefined,
+    message: offerDetails || undefined,
     date_initiated: now,
     updated_at: now,
   };
 
-  await db.collection('Scouting_Registry').doc(scoutId).set(proposalData);
+  await Promise.all([
+    db.collection('Scouting_Registry').doc(scoutId).set(proposalData),
+    db.collection('inquiries').doc(scoutId).set(proposalData).catch(() => null),
+  ]);
 
   const userData = userDoc?.exists ? userDoc.data() : {};
   const athleteProfileData = athleteDoc?.exists ? athleteDoc.data() : {};
@@ -532,24 +544,28 @@ export const submitRecruitmentProposal = dispatchRecruitmentProposal;
  */
 export async function getRecruitmentProposals(coachId: string): Promise<any[]> {
   const cleanId = coachId.replace(/^coach_/, '');
-  const possibleCoachIds = Array.from(new Set([coachId, `coach_${cleanId}`, cleanId].filter(Boolean)));
+  const canonicalCoachId = coachId.startsWith('coach_') ? coachId : `coach_${cleanId}`;
+  const possibleCoachIds = Array.from(new Set([coachId, canonicalCoachId, cleanId].filter(Boolean)));
 
-  let proposalsSnapshot = await db
-    .collection('Scouting_Registry')
-    .where('coach_scout_id', 'in', possibleCoachIds)
-    .get()
-    .catch(() => null);
+  const [snapScout, snapCoachId, snapSnake] = await Promise.all([
+    db.collection('Scouting_Registry').where('coach_scout_id', 'in', possibleCoachIds).get().catch(() => null),
+    db.collection('Scouting_Registry').where('coachId', 'in', possibleCoachIds).get().catch(() => null),
+    db.collection('Scouting_Registry').where('coach_id', 'in', possibleCoachIds).get().catch(() => null),
+  ]);
 
-  if ((!proposalsSnapshot || proposalsSnapshot.empty) && dbV1) {
-    proposalsSnapshot = await dbV1
-      .collection('Scouting_Registry')
-      .where('coach_scout_id', 'in', possibleCoachIds)
-      .get()
-      .catch(() => null);
-  }
+  const docMap = new Map<string, any>();
+  [snapScout, snapCoachId, snapSnake].forEach((snap) => {
+    if (snap && !snap.empty) {
+      snap.forEach((d) => {
+        if (!docMap.has(d.id)) {
+          docMap.set(d.id, d);
+        }
+      });
+    }
+  });
 
+  const docs = Array.from(docMap.values());
   const proposals: any[] = [];
-  const docs = proposalsSnapshot ? proposalsSnapshot.docs : [];
 
   for (const doc of docs) {
     const data = doc.data() as any;

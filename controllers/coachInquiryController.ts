@@ -6,6 +6,7 @@ import {
   getPublicCoachProfile,
   submitRecruitmentInquiry,
   getAthleteInquiries,
+  getCoachInquiries,
   respondToRecruitmentInquiry,
   getActiveCoachSportsService,
   ServiceError,
@@ -100,20 +101,47 @@ export async function submitInquiryHandler(req: AuthRequest, res: Response): Pro
 
 export async function getAthleteInquiriesHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const athleteId = req.user!.uid;
+    const userId = req.user!.uid;
+    const userRole = (req.user as any)?.role;
+    const isCoach = userRole === 'Coach' || String(userId).startsWith('coach_');
     const startTime = Date.now();
 
-    const inquiries = await getAthleteInquiries(athleteId);
+    const inquiries = isCoach
+      ? await getCoachInquiries(userId)
+      : await getAthleteInquiries(userId);
+
     const responseTimeMs = Date.now() - startTime;
 
     res.set('X-Response-Time-Ms', String(responseTimeMs));
     res.status(200).json({
-      athlete_id: athleteId,
+      user_id: userId,
+      athlete_id: userId,
+      coach_id: userId,
       total_inquiries: inquiries.length,
       inquiries,
     });
   } catch (error: any) {
     console.error('getAthleteInquiriesHandler error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function getCoachInquiriesHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const coachId = req.user!.uid;
+    const startTime = Date.now();
+
+    const inquiries = await getCoachInquiries(coachId);
+    const responseTimeMs = Date.now() - startTime;
+
+    res.set('X-Response-Time-Ms', String(responseTimeMs));
+    res.status(200).json({
+      coach_id: coachId,
+      total_inquiries: inquiries.length,
+      inquiries,
+    });
+  } catch (error: any) {
+    console.error('getCoachInquiriesHandler error:', error);
     res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
   }
 }
