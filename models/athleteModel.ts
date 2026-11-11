@@ -165,6 +165,37 @@ export interface PastTeamStatsSummary {
   events_participated?: number;
 }
 
+export interface BasketballAdvancedStats {
+  true_shooting_pct: number;
+  usage_rate_pct: number;
+  off_def_rebound_ratio: string;
+  points_off_turnovers: number;
+  plus_minus: string;
+}
+
+export interface VolleyballAdvancedStats {
+  kill_pct: number;
+  passing_accuracy_pct: number;
+  aces_to_errors_ratio: string;
+  dig_to_kill_conversion_pct: number;
+}
+
+export interface GeneralSportAdvancedStats {
+  consistency_pct: number;
+  srpe_correlation: string;
+  coach_rating_trend: string;
+  rating_score: number;
+}
+
+export interface AdvancedCoachStats {
+  has_coach_logs: boolean;
+  total_matches_logged: number;
+  sport: string;
+  basketball?: BasketballAdvancedStats;
+  volleyball?: VolleyballAdvancedStats;
+  general?: GeneralSportAdvancedStats;
+}
+
 export interface PastTeamAffiliation {
   team_id: string;
   team_name: string;
