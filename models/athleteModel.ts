@@ -136,6 +136,8 @@ export interface AthleteFullProfile {
   excelTags?: string[];
   specialties?: string[];
   past_teams?: PastTeamAffiliation[];
+  match_progression?: any[];
+  advanced_coach_stats?: AdvancedCoachStats;
   created_at?: Date;
   updated_at?: Date;
 }

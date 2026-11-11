@@ -956,6 +956,30 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
   const lastName = userData.last_name || profileData.last_name || '';
   const fullName = userData.full_name || profileData.full_name || `${firstName} ${lastName}`.trim();
 
+  const matchProgressionTrend = (sortedMetrics.length > 0 ? sortedMetrics : [])
+    .slice(0, 7)
+    .reverse()
+    .map((m: any, idx: number) => {
+      const rawDate = m.timestamp || m.created_at || m.date;
+      const d = rawDate ? new Date(rawDate) : null;
+      const dateStr = d && !isNaN(d.getTime())
+        ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        : `G${idx + 1}`;
+      const s = m.sport_stats || {};
+      const pts = Number(s.points !== undefined ? s.points : (m.calculated_player_efficiency || 0));
+      const srpe = Number(m.sRPE || m.srpe || m.rpe || s.rpe || (pts > 15 ? 8.2 : 7.0));
+      return {
+        id: m.match_id || m.id || `m_${idx}`,
+        label: `G${idx + 1}`,
+        date: dateStr,
+        opponent: m.match_name || m.custom_game_title || m.opponent || `Game ${idx + 1}`,
+        score: pts,
+        points: pts,
+        workload_intensity: srpe,
+        efficiency: Number(m.calculated_player_efficiency || 0),
+      };
+    });
+
   const summary: AthleteHomeSummary = {
     athlete_id: canonicalAthleteId,
     user_id: rawUid,
@@ -996,6 +1020,7 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
     current_team_summary: currentTeamSummary,
     workload_summary: workloadSummary,
     past_teams: Array.isArray(profileData.past_teams) ? profileData.past_teams : (await getAthletePastTeams(canonicalAthleteId).catch(() => [])),
+    match_progression: matchProgressionTrend,
     advanced_coach_stats: buildAdvancedCoachStats(sportCategory, stats, sortedMetrics || [], workloadSummary),
   } as any;
 
@@ -1179,6 +1204,26 @@ export async function getAthleteExpandedCareerStats(athleteId: string): Promise<
     historical_per_trend: perList,
     last_5_games_scores: last5,
     recent_scores: last5,
+    match_progression: metrics.slice(0, 7).reverse().map((m: any, idx: number) => {
+      const rawDate = m.timestamp || m.created_at || m.date;
+      const d = rawDate ? new Date(rawDate) : null;
+      const dateStr = d && !isNaN(d.getTime())
+        ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        : `G${idx + 1}`;
+      const s = m.sport_stats || {};
+      const pts = Number(s.points !== undefined ? s.points : (m.calculated_player_efficiency || 0));
+      const srpe = Number(m.sRPE || m.srpe || m.rpe || s.rpe || (pts > 15 ? 8.2 : 7.0));
+      return {
+        id: m.match_id || m.id || `m_${idx}`,
+        label: `G${idx + 1}`,
+        date: dateStr,
+        opponent: m.match_name || m.custom_game_title || m.opponent || `Game ${idx + 1}`,
+        score: pts,
+        points: pts,
+        workload_intensity: srpe,
+        efficiency: Number(m.calculated_player_efficiency || 0),
+      };
+    }),
     workload_analytics: profileData.workload_analytics || profileData.workload || (await getAthleteWorkloadSummary(athleteId).catch(() => undefined)),
     workload: profileData.workload_analytics || profileData.workload || (await getAthleteWorkloadSummary(athleteId).catch(() => undefined)),
     workload_target: profileData.workload_target || undefined,

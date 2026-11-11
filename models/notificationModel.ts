@@ -107,6 +107,7 @@ export interface AthleteHomeSummary {
   };
   shooting_efficiency: ShootingEfficiency;
   five_game_trend: FiveGameTrendItem[];
+  match_progression?: any[];
   current_team_summary: CurrentTeamSummary | null; // Omitted (null) if no team assignment
   workload_summary?: {
     latest_daily_load: number;
