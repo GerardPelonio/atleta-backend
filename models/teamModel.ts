@@ -7,6 +7,9 @@ export interface TeamRosterMember {
   last_name?: string;             // Athlete Last Name
   position?: string;              // Optional
   jersey_number?: number;         // Optional
+  event_type?: string;
+  event_distance?: string;
+  stroke_style?: string;
   added_at: string;               // ISO DateTime, Required
   eligibility_documents?: string[];
   is_eligibility_verified?: boolean;
@@ -60,6 +63,9 @@ export interface RosterAthlete {
   full_name?: string;
   position: string;
   jersey_number?: number | null;
+  event_type?: string;
+  event_distance?: string;
+  stroke_style?: string;
   sport_type: string;
   sport_category?: string;
   avatar_url?: string;
@@ -71,6 +77,8 @@ export interface RosterAthlete {
   height_cm?: number | null;
   weight_kg?: number | null;
   wingspan_cm?: number | null;
+  vertical_cm?: number | null;
+  vertical_jump_in?: string | null;
   stats?: Record<string, any>;
   averages?: Record<string, any>;
   calculated_per?: number;
@@ -79,6 +87,8 @@ export interface RosterAthlete {
     height_cm?: number;
     weight_kg?: number;
     wingspan_cm?: number;
+    vertical_cm?: number;
+    vertical_jump_in?: string;
   };
   team_id?: string;
   team_name?: string;
@@ -110,6 +120,9 @@ export interface UpdateRosterItem {
   athlete_id: string;
   position?: string;
   jersey_number?: number;
+  event_type?: string;
+  event_distance?: string;
+  stroke_style?: string;
 }
 
 export interface UpdateRosterDto {

@@ -188,6 +188,8 @@ async function enrichRoster(rosterList: (string | TeamRosterMember)[]): Promise<
     const statusVal = profileData.player_status || profileData.playerStatus || userData.player_status || userData.playerStatus || 'Active';
     const notesVal = profileData.injury_notes || profileData.injuryNotes || userData.injury_notes || userData.injuryNotes || '';
     const tagsVal = profileData.excel_tags || profileData.excelTags || profileData.specialties || userData.excel_tags || userData.excelTags || userData.specialties || [];
+    const eventTypeOverride = typeof item === 'object' ? ((item as any).event_type || (item as any).event_distance) : undefined;
+    const resolvedEvent = eventTypeOverride || profileData.event_type || profileData.event_distance || positionOverride || profileData.position;
 
     const athResult: RosterAthlete = {
       athlete_id: canonicalAthleteId,
@@ -197,6 +199,9 @@ async function enrichRoster(rosterList: (string | TeamRosterMember)[]): Promise<
       full_name: fullName,
       position: positionOverride || profileData.position || 'Unassigned',
       jersey_number: jerseyOverride !== undefined ? jerseyOverride : (profileData.jersey_number ?? null),
+      event_type: resolvedEvent,
+      event_distance: resolvedEvent,
+      stroke_style: typeof item === 'object' ? (item as any).stroke_style : profileData.stroke_style,
       sport_type: profileData.sport_type || '',
       avatar_url: profileData.avatar_url || undefined,
       eligibility_documents: eligDocs || [],
@@ -766,7 +771,12 @@ export async function updateTeamRoster(
     );
   }
 
-  // Enforce no duplicate athlete IDs or jersey numbers
+  // Enforce no duplicate athlete IDs or jersey numbers (jersey uniqueness only for team ball sports)
+  const isIndividualSport =
+    String(teamData.sport_type || '').toUpperCase().includes('SWIM') ||
+    String(teamData.sport_type || '').toUpperCase().includes('TRACK') ||
+    String(teamData.sport_type || '').toUpperCase().includes('FIELD');
+
   const seenAthletes = new Set<string>();
   const seenJerseys = new Set<string>();
   for (const item of rosterItems) {
@@ -776,7 +786,7 @@ export async function updateTeamRoster(
     }
     seenAthletes.add(athId);
 
-    if (item.jersey_number !== undefined && item.jersey_number !== null && !isNaN(Number(item.jersey_number))) {
+    if (!isIndividualSport && item.jersey_number !== undefined && item.jersey_number !== null && !isNaN(Number(item.jersey_number))) {
       const jersey = String(item.jersey_number).trim();
       // Allow multiple athletes with unassigned placeholder jersey ('0', '00', or empty)
       if (jersey !== '0' && jersey !== '00' && jersey !== '') {
@@ -823,10 +833,15 @@ export async function updateTeamRoster(
       unverifiedAthletes.push(`${firstName} ${lastName}`.trim() || athleteId);
     }
 
-    // Update position and jersey_number on Athlete_Profiles, and set active team_id
+    // Update position, event_type, and jersey_number on Athlete_Profiles, and set active team_id
     const athleteUpdates: Record<string, any> = { updated_at: new Date(), team_id: teamId };
     if (item.position) athleteUpdates.position = item.position.trim();
     if (item.jersey_number !== undefined) athleteUpdates.jersey_number = Number(item.jersey_number);
+    const resolvedItemEvent = item.event_type || item.event_distance;
+    if (resolvedItemEvent) {
+      athleteUpdates.event_type = resolvedItemEvent.trim();
+      athleteUpdates.event_distance = resolvedItemEvent.trim();
+    }
 
     if (profileDoc.exists) {
       await db.collection('Athlete_Profiles').doc(athleteId).set(athleteUpdates, { merge: true });
@@ -841,6 +856,9 @@ export async function updateTeamRoster(
       last_name: lastName || '',
       position: item.position ? item.position.trim() : (profileData.position || 'Unassigned'),
       jersey_number: item.jersey_number !== undefined ? Number(item.jersey_number) : (profileData.jersey_number ?? undefined),
+      event_type: resolvedItemEvent || profileData.event_type || profileData.event_distance || item.position,
+      event_distance: resolvedItemEvent || profileData.event_distance || profileData.event_type || item.position,
+      stroke_style: item.stroke_style || profileData.stroke_style,
       added_at: new Date().toISOString(),
       eligibility_documents: docs,
       is_eligibility_verified: isVerified,
@@ -1339,6 +1357,7 @@ export async function searchAthletes(queryStr?: string, sportType?: string, sinc
       const heightCm = phys.height_cm ?? p.height_cm ?? uData.height_cm ?? null;
       const weightKg = phys.weight_kg ?? p.weight_kg ?? uData.weight_kg ?? null;
       const wingspanCm = phys.wingspan_cm ?? p.wingspan_cm ?? uData.wingspan_cm ?? null;
+      const verticalCm = phys.vertical_cm ?? phys.vertical_jump_cm ?? p.vertical_cm ?? p.vertical_jump_cm ?? uData.vertical_cm ?? uData.vertical_jump_cm ?? null;
 
       const { ppg, per, eff, stats, averages } = buildAthleteStats(athleteId, p, uData);
 
@@ -1361,10 +1380,12 @@ export async function searchAthletes(queryStr?: string, sportType?: string, sinc
         height_cm: heightCm ? Number(heightCm) : null,
         weight_kg: weightKg ? Number(weightKg) : null,
         wingspan_cm: wingspanCm ? Number(wingspanCm) : null,
+        vertical_cm: verticalCm ? Number(verticalCm) : null,
         physical_attributes: {
           height_cm: heightCm ? Number(heightCm) : undefined,
           weight_kg: weightKg ? Number(weightKg) : undefined,
           wingspan_cm: wingspanCm ? Number(wingspanCm) : undefined,
+          vertical_cm: verticalCm ? Number(verticalCm) : undefined,
         },
         stats,
         averages,
@@ -1403,6 +1424,7 @@ export async function searchAthletes(queryStr?: string, sportType?: string, sinc
       const heightCm = phys.height_cm ?? p.height_cm ?? u.height_cm ?? null;
       const weightKg = phys.weight_kg ?? p.weight_kg ?? u.weight_kg ?? null;
       const wingspanCm = phys.wingspan_cm ?? p.wingspan_cm ?? u.wingspan_cm ?? null;
+      const verticalCm = phys.vertical_cm ?? phys.vertical_jump_cm ?? p.vertical_cm ?? p.vertical_jump_cm ?? u.vertical_cm ?? u.vertical_jump_cm ?? null;
 
       const { per, eff, stats, averages } = buildAthleteStats(athleteId, p, u);
 
@@ -1425,10 +1447,12 @@ export async function searchAthletes(queryStr?: string, sportType?: string, sinc
         height_cm: heightCm ? Number(heightCm) : null,
         weight_kg: weightKg ? Number(weightKg) : null,
         wingspan_cm: wingspanCm ? Number(wingspanCm) : null,
+        vertical_cm: verticalCm ? Number(verticalCm) : null,
         physical_attributes: {
           height_cm: heightCm ? Number(heightCm) : undefined,
           weight_kg: weightKg ? Number(weightKg) : undefined,
           wingspan_cm: wingspanCm ? Number(wingspanCm) : undefined,
+          vertical_cm: verticalCm ? Number(verticalCm) : undefined,
         },
         stats,
         averages,

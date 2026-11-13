@@ -38,6 +38,7 @@ export function validateUpdateRoster(data: Record<string, unknown> | any[]): Val
   } else {
     const seenAthletes = new Set<string>();
     const seenJerseys = new Set<string | number>();
+    const isIndividualOrTimed = roster.some((it: any) => Boolean(it?.event_type || it?.event_distance || it?.stroke_style));
 
     for (let i = 0; i < roster.length; i++) {
       const item = roster[i];
@@ -56,7 +57,7 @@ export function validateUpdateRoster(data: Record<string, unknown> | any[]): Val
         }
         seenAthletes.add(athleteId);
 
-        if (item.jersey_number !== undefined && item.jersey_number !== null && item.jersey_number !== '') {
+        if (!isIndividualOrTimed && item.jersey_number !== undefined && item.jersey_number !== null && item.jersey_number !== '') {
           const jersey = String(item.jersey_number).trim();
           // Allow multiple athletes with unassigned placeholder jersey ('0', '00', or empty)
           if (jersey !== '0' && jersey !== '00') {
