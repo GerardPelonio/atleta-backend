@@ -600,22 +600,25 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
     const stats = profileData.stats || profileData.averages || {};
     const per = Number(stats.efficiency_rating ?? stats.per ?? stats.calculated_per ?? stats.per_score ?? 0);
     const ppg = Number(stats.ppg ?? stats.points_per_game ?? 0);
-    let dynamicRating = per > 0 ? Math.min(99, Math.max(65, Math.round(per * 2.8))) : (ppg > 0 ? Math.min(99, Math.max(65, Math.round(ppg * 3.5))) : (profileData.rating_score || 0));
-    if (!dynamicRating || dynamicRating === 85 || dynamicRating === 75) {
-      const fnLower = fullName.toLowerCase();
-      if (fnLower.includes('kayla sanchez') || fnLower.includes('ej obiena') || fnLower.includes('ernest obiena')) {
-        dynamicRating = 99;
-      } else if (fnLower.includes('eric cray') || fnLower.includes('kristina knott')) {
-        dynamicRating = 96;
-      } else if (fnLower.includes('luke gebbie') || fnLower.includes('jasmine alkhaldi') || fnLower.includes('jarod hatch')) {
-        dynamicRating = 94;
-      } else if (fnLower.includes('xiandi chua') || fnLower.includes('janry ubas')) {
-        dynamicRating = 93;
-      } else if (primaryTeam?.sport_type?.toUpperCase().includes('SWIM') || primaryTeam?.sport_type?.toUpperCase().includes('TRACK')) {
-        dynamicRating = 90;
-      } else {
-        dynamicRating = dynamicRating || 85;
-      }
+    const gp = Number(stats.games_played ?? stats.meets_count ?? 0);
+    const pb50 = stats.pb_50m_free || stats.pb_50m;
+    const pb100 = stats.pb_100m_free || stats.pb_100m;
+    const pb50Sec = typeof pb50 === 'number' ? pb50 : (typeof pb50 === 'string' ? parseFloat(pb50.replace(/[^\d.]/g, '')) : 0);
+    const pb100Sec = typeof pb100 === 'number' ? pb100 : (typeof pb100 === 'string' ? parseFloat(pb100.replace(/[^\d.]/g, '')) : 0);
+
+    let dynamicRating = 0;
+    if (per > 0) {
+      dynamicRating = Math.min(99, Math.max(65, Math.round(per * 2.8)));
+    } else if (ppg > 0) {
+      dynamicRating = Math.min(99, Math.max(65, Math.round(ppg * 3.5)));
+    } else if (pb50Sec > 0) {
+      dynamicRating = pb50Sec <= 25.5 ? 99 : (pb50Sec <= 26.5 ? 95 : (pb50Sec <= 28.0 ? 91 : (pb50Sec <= 30.0 ? 86 : 81)));
+    } else if (pb100Sec > 0) {
+      dynamicRating = pb100Sec <= 54.5 ? 99 : (pb100Sec <= 56.5 ? 95 : (pb100Sec <= 59.0 ? 91 : (pb100Sec <= 63.0 ? 86 : 81)));
+    } else if (gp > 0 && profileData.rating_score && profileData.rating_score !== 85 && profileData.rating_score !== 75) {
+      dynamicRating = Math.min(99, Math.max(50, Math.round(Number(profileData.rating_score))));
+    } else {
+      dynamicRating = 0;
     }
 
     const scoutInfo = scoutedAthleteMap.get(aId) || scoutedAthleteMap.get(canonicalAthleteId) || scoutedAthleteMap.get(rawUid);
