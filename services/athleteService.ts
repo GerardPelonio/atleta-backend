@@ -1724,59 +1724,21 @@ export async function getMetricProgressionHistory(
     });
   }
 
-  // 3. Ensure rich baseline progression if records are sparse
-  // Builds authentic historical progression leading to the athlete's personal best mark
-  if (rawExtracted.length < 4 && defaultNumeric > 0) {
-    const baseVal = defaultNumeric;
-    const now = Date.now();
-    const dayMs = 24 * 60 * 60 * 1000;
-
-    // Variance helper to simulate prior meets progressing to personal best
-    const milestones = isLowerBetter
-      ? [
-          { delta: 0, daysAgo: 2, meet: '2026 Inter-School Championship', loc: 'Metro Naga Sports Complex', rank: 1 },
-          { delta: 0.35, daysAgo: 16, meet: 'UAAP Regional Qualifiers', loc: 'PhilSports Complex', rank: 2 },
-          { delta: 0.72, daysAgo: 38, meet: 'National Open Invitationals', loc: 'Rizal Memorial Stadium', rank: 2 },
-          { delta: 1.15, daysAgo: 65, meet: 'Pre-Season Time Trials', loc: 'University Athletics Oval', rank: 3 },
-        ]
-      : [
-          { delta: 0, daysAgo: 2, meet: '2026 Inter-School Championship', loc: 'Metro Naga Sports Complex', rank: 1 },
-          { delta: -0.15, daysAgo: 16, meet: 'UAAP Regional Qualifiers', loc: 'PhilSports Complex', rank: 2 },
-          { delta: -0.32, daysAgo: 38, meet: 'National Open Invitationals', loc: 'Rizal Memorial Stadium', rank: 3 },
-          { delta: -0.55, daysAgo: 65, meet: 'Pre-Season Time Trials', loc: 'University Athletics Oval', rank: 4 },
-        ];
-
-    milestones.forEach((m, idx) => {
-      // Only add if not already captured
-      const calculatedVal = Math.max(0.01, +(baseVal + m.delta).toFixed(2));
-      const recordDate = new Date(now - m.daysAgo * dayMs);
-      const displayDate = recordDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-
-      // Check for duplicate date/meet
-      const exists = rawExtracted.some((r) => r.meet_name.toLowerCase() === m.meet.toLowerCase());
-      if (!exists) {
-        let valFormatted = `${calculatedVal.toFixed(2)}${unit}`;
-        if (eventTitle === '200m Freestyle' && calculatedVal > 60) {
-          const mins = Math.floor(calculatedVal / 60);
-          const secs = (calculatedVal % 60).toFixed(2);
-          valFormatted = `${mins}:${secs.padStart(5, '0')}`;
-        }
-
-        rawExtracted.push({
-          id: `seed_hist_${idx}_${athleteId}`,
-          meet_name: m.meet,
-          location: m.loc,
-          date: recordDate.toISOString(),
-          display_date: displayDate,
-          formatted_value: valFormatted,
-          numeric_value: calculatedVal,
-          unit,
-          is_lower_better: isLowerBetter,
-          rank: m.rank,
-          is_official: true,
-        });
-      }
-    });
+  // Strictly real data: if no matches or metrics logged in Firestore for this event, return empty records
+  if (rawExtracted.length === 0) {
+    return {
+      athlete_id: athleteId,
+      athlete_name: athleteName,
+      sport,
+      metric_key: metricKey,
+      event_title: eventTitle,
+      current_mark: targetMark || 'N/A',
+      personal_best: targetMark || 'N/A',
+      is_lower_better: isLowerBetter,
+      total_records: 0,
+      records: [],
+      sparkline_points: [],
+    };
   }
 
   // Sort chronological: oldest to newest first to calculate deltas
