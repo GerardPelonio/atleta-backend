@@ -1466,62 +1466,62 @@ export async function getMetricProgressionHistory(
       eventTitle = '50m Freestyle';
       unit = 's';
       isLowerBetter = true;
-      targetMark = profileData.averages?.pb_50m_free || profileData.stats?.times_50m_free || '24.82s';
-      defaultNumeric = parseMetricToNumeric(targetMark) || 24.82;
+      targetMark = profileData.averages?.pb_50m_free || profileData.stats?.times_50m_free || '';
+      defaultNumeric = parseMetricToNumeric(targetMark) || 0;
     } else if (normKey.includes('200') || normKey.includes('200m')) {
       eventTitle = '200m Freestyle';
       unit = 's';
       isLowerBetter = true;
-      targetMark = profileData.averages?.avg_200m_free || profileData.averages?.pb_200m || profileData.stats?.times_200m || '1:58.20';
-      defaultNumeric = parseMetricToNumeric(targetMark) || 118.2;
+      targetMark = profileData.averages?.avg_200m_free || profileData.averages?.pb_200m || profileData.stats?.times_200m || '';
+      defaultNumeric = parseMetricToNumeric(targetMark) || 0;
     } else if (normKey.includes('fly') || normKey.includes('butterfly')) {
       eventTitle = '100m Butterfly';
       unit = 's';
       isLowerBetter = true;
-      targetMark = profileData.averages?.pb_100m_fly || profileData.stats?.times_100m_fly || '58.40s';
-      defaultNumeric = parseMetricToNumeric(targetMark) || 58.40;
+      targetMark = profileData.averages?.pb_100m_fly || profileData.stats?.times_100m_fly || '';
+      defaultNumeric = parseMetricToNumeric(targetMark) || 0;
     } else if (normKey.includes('back') || normKey.includes('backstroke')) {
       eventTitle = '100m Backstroke';
       unit = 's';
       isLowerBetter = true;
-      targetMark = profileData.averages?.pb_100m_back || profileData.stats?.times_100m_back || '1:01.20';
-      defaultNumeric = parseMetricToNumeric(targetMark) || 61.20;
+      targetMark = profileData.averages?.pb_100m_back || profileData.stats?.times_100m_back || '';
+      defaultNumeric = parseMetricToNumeric(targetMark) || 0;
     } else if (normKey.includes('breast') || normKey.includes('breaststroke')) {
       eventTitle = '100m Breaststroke';
       unit = 's';
       isLowerBetter = true;
-      targetMark = profileData.averages?.pb_100m_breast || profileData.stats?.times_100m_breast || '1:09.15';
-      defaultNumeric = parseMetricToNumeric(targetMark) || 69.15;
+      targetMark = profileData.averages?.pb_100m_breast || profileData.stats?.times_100m_breast || '';
+      defaultNumeric = parseMetricToNumeric(targetMark) || 0;
     } else if (normKey.includes('im') || normKey.includes('medley')) {
       eventTitle = '200m Individual Medley';
       unit = 's';
       isLowerBetter = true;
-      targetMark = profileData.averages?.pb_200m_im || profileData.stats?.times_200m_im || '2:12.80';
-      defaultNumeric = parseMetricToNumeric(targetMark) || 132.80;
+      targetMark = profileData.averages?.pb_200m_im || profileData.stats?.times_200m_im || '';
+      defaultNumeric = parseMetricToNumeric(targetMark) || 0;
     } else if (normKey.includes('flip') || normKey.includes('turn')) {
       eventTitle = 'Flip Turn Time';
       unit = 's';
       isLowerBetter = true;
-      targetMark = profileData.averages?.flip_turn_s || '0.48s';
-      defaultNumeric = parseMetricToNumeric(targetMark) || 0.48;
+      targetMark = profileData.averages?.flip_turn_s || '';
+      defaultNumeric = parseMetricToNumeric(targetMark) || 0;
     } else if (normKey.includes('index')) {
       eventTitle = 'Swim Index';
       unit = 'pts';
       isLowerBetter = false;
-      targetMark = String(profileData.averages?.swim_index_score || profileData.stats?.swim_index || '920');
-      defaultNumeric = parseFloat(targetMark) || 920;
+      targetMark = (profileData.averages?.swim_index_score || profileData.stats?.swim_index) ? String(profileData.averages?.swim_index_score || profileData.stats?.swim_index) : '';
+      defaultNumeric = parseFloat(targetMark) || 0;
     } else if (normKey.includes('rate')) {
       eventTitle = 'Stroke Rate';
       unit = '/min';
       isLowerBetter = false;
-      targetMark = `${profileData.averages?.stroke_rate_pm || profileData.averages?.stroke_rate || '44'}/min`;
-      defaultNumeric = parseFloat(targetMark) || 44;
+      targetMark = (profileData.averages?.stroke_rate_pm || profileData.averages?.stroke_rate) ? `${profileData.averages?.stroke_rate_pm || profileData.averages?.stroke_rate}/min` : '';
+      defaultNumeric = parseFloat(targetMark) || 0;
     } else {
       eventTitle = '100m Freestyle';
       unit = 's';
       isLowerBetter = true;
-      targetMark = profileData.averages?.pb_100m_free || profileData.averages?.avg_100m_free || profileData.stats?.times_100m || '53.64s';
-      defaultNumeric = parseMetricToNumeric(targetMark) || 53.64;
+      targetMark = profileData.averages?.pb_100m_free || profileData.averages?.avg_100m_free || profileData.stats?.times_100m || '';
+      defaultNumeric = parseMetricToNumeric(targetMark) || 0;
     }
   } else {
     // Track & Field
@@ -1529,80 +1529,80 @@ export async function getMetricProgressionHistory(
       eventTitle = '200m Dash';
       unit = 's';
       isLowerBetter = true;
-      targetMark = profileData.averages?.pb_200m || profileData.averages?.avg_200m || profileData.stats?.times_200m || '20.90s';
-      defaultNumeric = parseMetricToNumeric(targetMark) || 20.90;
+      targetMark = profileData.averages?.pb_200m || profileData.averages?.avg_200m || profileData.stats?.times_200m || '';
+      defaultNumeric = parseMetricToNumeric(targetMark) || 0;
     } else if (normKey.includes('400') || normKey.includes('400m')) {
       eventTitle = '400m Dash';
       unit = 's';
       isLowerBetter = true;
-      targetMark = profileData.averages?.pb_400m || profileData.stats?.times_400m || '47.50s';
-      defaultNumeric = parseMetricToNumeric(targetMark) || 47.50;
+      targetMark = profileData.averages?.pb_400m || profileData.stats?.times_400m || '';
+      defaultNumeric = parseMetricToNumeric(targetMark) || 0;
     } else if (normKey.includes('800') || normKey.includes('800m')) {
       eventTitle = '800m Run';
       unit = 's';
       isLowerBetter = true;
-      targetMark = profileData.averages?.pb_800m || profileData.stats?.times_800m || '1:52.30';
-      defaultNumeric = parseMetricToNumeric(targetMark) || 112.30;
+      targetMark = profileData.averages?.pb_800m || profileData.stats?.times_800m || '';
+      defaultNumeric = parseMetricToNumeric(targetMark) || 0;
     } else if (normKey.includes('1500') || normKey.includes('1500m')) {
       eventTitle = '1500m Run';
       unit = 's';
       isLowerBetter = true;
-      targetMark = profileData.averages?.pb_1500m || profileData.stats?.times_1500m || '3:54.10';
-      defaultNumeric = parseMetricToNumeric(targetMark) || 234.10;
+      targetMark = profileData.averages?.pb_1500m || profileData.stats?.times_1500m || '';
+      defaultNumeric = parseMetricToNumeric(targetMark) || 0;
     } else if (normKey.includes('relay') || normKey.includes('4x100')) {
       eventTitle = '4x100m Relay';
       unit = 's';
       isLowerBetter = true;
-      targetMark = profileData.averages?.pb_4x100 || profileData.stats?.times_4x100 || '40.85s';
-      defaultNumeric = parseMetricToNumeric(targetMark) || 40.85;
+      targetMark = profileData.averages?.pb_4x100 || profileData.stats?.times_4x100 || '';
+      defaultNumeric = parseMetricToNumeric(targetMark) || 0;
     } else if (normKey.includes('reaction') || normKey.includes('react')) {
       eventTitle = 'Reaction Time';
       unit = 's';
       isLowerBetter = true;
-      targetMark = profileData.averages?.reaction_time_s || profileData.stats?.reaction_time || '0.138s';
-      defaultNumeric = parseMetricToNumeric(targetMark) || 0.138;
+      targetMark = profileData.averages?.reaction_time_s || profileData.stats?.reaction_time || '';
+      defaultNumeric = parseMetricToNumeric(targetMark) || 0;
     } else if (normKey.includes('long jump') || normKey.includes('jump')) {
       eventTitle = 'Long Jump';
       unit = 'm';
       isLowerBetter = false;
-      targetMark = profileData.averages?.pb_long_jump || profileData.stats?.long_jump || '7.85m';
-      defaultNumeric = parseMetricToNumeric(targetMark) || 7.85;
+      targetMark = profileData.averages?.pb_long_jump || profileData.stats?.long_jump || '';
+      defaultNumeric = parseMetricToNumeric(targetMark) || 0;
     } else if (normKey.includes('shot put') || normKey.includes('shotput')) {
       eventTitle = 'Shot Put';
       unit = 'm';
       isLowerBetter = false;
-      targetMark = profileData.averages?.pb_shot_put || profileData.stats?.shot_put || '16.40m';
-      defaultNumeric = parseMetricToNumeric(targetMark) || 16.40;
+      targetMark = profileData.averages?.pb_shot_put || profileData.stats?.shot_put || '';
+      defaultNumeric = parseMetricToNumeric(targetMark) || 0;
     } else if (normKey.includes('discus')) {
       eventTitle = 'Discus Throw';
       unit = 'm';
       isLowerBetter = false;
-      targetMark = profileData.averages?.pb_discus || profileData.stats?.discus || '48.50m';
-      defaultNumeric = parseMetricToNumeric(targetMark) || 48.50;
+      targetMark = profileData.averages?.pb_discus || profileData.stats?.discus || '';
+      defaultNumeric = parseMetricToNumeric(targetMark) || 0;
     } else if (normKey.includes('javelin')) {
       eventTitle = 'Javelin Throw';
       unit = 'm';
       isLowerBetter = false;
-      targetMark = profileData.averages?.pb_javelin || profileData.stats?.javelin || '65.20m';
-      defaultNumeric = parseMetricToNumeric(targetMark) || 65.20;
+      targetMark = profileData.averages?.pb_javelin || profileData.stats?.javelin || '';
+      defaultNumeric = parseMetricToNumeric(targetMark) || 0;
     } else if (normKey.includes('speed')) {
       eventTitle = 'Top Speed';
       unit = 'km/h';
       isLowerBetter = false;
-      targetMark = `${profileData.averages?.top_speed_kmh || '38.5'} km/h`;
-      defaultNumeric = parseFloat(targetMark) || 38.5;
+      targetMark = profileData.averages?.top_speed_kmh ? `${profileData.averages.top_speed_kmh} km/h` : '';
+      defaultNumeric = parseFloat(targetMark) || 0;
     } else if (normKey.includes('stride')) {
       eventTitle = 'Stride Frequency';
       unit = 'Hz';
       isLowerBetter = false;
-      targetMark = `${profileData.averages?.stride_freq_hz || '4.4'} Hz`;
-      defaultNumeric = parseFloat(targetMark) || 4.4;
+      targetMark = profileData.averages?.stride_freq_hz ? `${profileData.averages.stride_freq_hz} Hz` : '';
+      defaultNumeric = parseFloat(targetMark) || 0;
     } else {
       eventTitle = '100m Dash';
       unit = 's';
       isLowerBetter = true;
-      targetMark = profileData.averages?.pb_100m || profileData.averages?.avg_100m || profileData.stats?.times_100m || '10.28s';
-      defaultNumeric = parseMetricToNumeric(targetMark) || 10.28;
+      targetMark = profileData.averages?.pb_100m || profileData.averages?.avg_100m || profileData.stats?.times_100m || '';
+      defaultNumeric = parseMetricToNumeric(targetMark) || 0;
     }
   }
 

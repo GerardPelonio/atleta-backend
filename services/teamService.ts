@@ -1257,13 +1257,13 @@ export async function searchAthletes(queryStr?: string, sportType?: string, sinc
       rawStats.efficiency_rating ??
       p?.calculated_per ??
       p?.career_per ??
-      (ppg > 0 ? Math.round(ppg * 1.3 + 12) : 25)
+      (ppg > 0 ? Math.round(ppg * 1.3 + 12) : 0)
     );
 
     const eff = Number(
       p?.efficiency_pct ??
       rawStats.efficiency_pct ??
-      (ppg > 0 ? Math.min(99, Math.round(ppg * 3.5 + 20)) : 75)
+      (ppg > 0 ? Math.min(99, Math.round(ppg * 3.5 + 20)) : 0)
     );
 
     const mergedStats = {
