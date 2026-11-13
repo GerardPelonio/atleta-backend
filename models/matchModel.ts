@@ -129,6 +129,8 @@ export interface BasketballStats {
 
 export interface IndividualSportStats {
   event_name: string;
+  eventType: string;
+  event_type?: string;
   distance_meters: number;
   finish_time_ms: number;
   split_times_ms: number[];
@@ -153,6 +155,8 @@ export interface BasketballMetricStats {
 }
 
 export interface SwimmingMetricStats {
+  eventType?: string;
+  event_type?: string;
   target_distance?: number;
   stroke_count?: number;
   stroke_rate?: number;
@@ -164,6 +168,7 @@ export interface SwimmingMetricStats {
 }
 
 export interface TrackAndFieldMetricStats {
+  eventType?: string;
   event_type?: string;
   target_distance?: number;
   lap_time?: number;
@@ -202,6 +207,8 @@ export interface PerformanceMetric {
   team?: string;                  // Optional Team Name alias
   jersey_number?: number | string | null;  // Jersey Number
   position?: string;              // Position
+  eventType?: string;             // Explicit Event Type (e.g. "100m Dash", "50m Freestyle", "Long Jump")
+  event_type?: string;            // Snake_case alias for eventType
   sport_category: string;         // Required ("BASKETBALL" | "SWIMMING" | "TRACK_AND_FIELD")
   calculated_player_efficiency: number; // Computed Float
   sport_stats: SportStatsPayload; // Map / JSON Object with standardized nested sub-properties

@@ -104,7 +104,7 @@ export function calculateIndividualSportMetrics(stats: Record<string, any>): {
   const secs = ((finishTimeMs % 60000) / 1000).toFixed(2);
   const formattedTime = stats.formatted_time || stats.time || (finishTimeMs > 0 ? `${mins > 0 ? mins + ':' : ''}${Number(secs) < 10 && mins > 0 ? '0' : ''}${secs}s` : '00:00.00');
 
-  const eventName = String(stats.event_name || stats.event || `${distanceMeters}m Event`).trim();
+  const eventName = String(stats.eventType || stats.event_type || stats.event_name || stats.event || `${distanceMeters}m Event`).trim();
   const splitTimesMs = Array.isArray(stats.split_times_ms)
     ? stats.split_times_ms.map(Number)
     : Array.isArray(stats.split_times)
@@ -127,6 +127,8 @@ export function calculateIndividualSportMetrics(stats: Record<string, any>): {
 
   const enrichedStats: any = {
     ...stats,
+    eventType: eventName,
+    event_type: eventName,
     event_name: eventName,
     distance_meters: distanceMeters,
     distance: distance,
@@ -434,6 +436,8 @@ export async function submitMatchSession(
       };
     } else if (sportLower.includes('swim')) {
       structuredSportStats.swimming = {
+        eventType: String(eventName || rawStats.eventType || rawStats.event_type || '50m Freestyle'),
+        event_type: String(eventName || rawStats.eventType || rawStats.event_type || '50m Freestyle'),
         target_distance: Number(rawStats.target_distance ?? rawStats.distance ?? 0),
         stroke_count: Number(rawStats.stroke_count ?? 0),
         stroke_rate: Number(rawStats.stroke_rate ?? 0),
@@ -444,7 +448,8 @@ export async function submitMatchSession(
       };
     } else if (sportLower.includes('track') || sportLower.includes('field') || sportLower.includes('run')) {
       structuredSportStats.track_and_field = {
-        event_type: String(eventName || rawStats.event_type || 'Sprint'),
+        eventType: String(eventName || rawStats.eventType || rawStats.event_type || '100m Dash'),
+        event_type: String(eventName || rawStats.eventType || rawStats.event_type || '100m Dash'),
         target_distance: Number(rawStats.target_distance ?? rawStats.distance ?? 0),
         lap_time: Number(rawStats.lap_time ?? 0),
         finish_time: Number(rawStats.finish_time ?? 0),
@@ -459,6 +464,8 @@ export async function submitMatchSession(
       team_name: pTeam,
       jersey_number: (item as any).jersey_number ?? null,
       sport_category: payload.sport_type,
+      eventType: eventName,
+      event_type: eventName,
       event: eventName,
       event_id: eventId,
       heat: heatVal,
@@ -485,6 +492,9 @@ export async function submitMatchSession(
       player_name: pName,
       team_name: pTeam,
       jersey_number: (item as any).jersey_number ?? null,
+      eventType: eventName,
+      event_type: eventName,
+      event_name: eventName,
       event: eventName,
       event_id: eventId,
       heat: heatVal,

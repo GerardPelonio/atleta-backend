@@ -888,7 +888,11 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
         matchQuery.docs.forEach((d) => {
           const m = d.data();
           const pStats = (m.player_stats || []).find(
-            (p: any) => p.athlete_id === athleteId || p.athlete_id === rawUid || p.athlete_id === canonicalAthleteId
+            (p: any) =>
+              p.athlete_id === athleteId ||
+              p.athlete_id === rawUid ||
+              p.athlete_id === canonicalAthleteId ||
+              (fullName && (p.player_name || p.name || "").toLowerCase() === fullName.toLowerCase())
           );
           if (pStats) {
             const pts = Number(pStats.pts ?? pStats.points ?? pStats.stats?.points ?? 0);
@@ -900,6 +904,30 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
             totalMatchFga += Number(s.fg_attempted || 0);
             totalMatchFtm += Number(s.ft_made || 0);
             totalMatchFta += Number(s.ft_attempted || 0);
+
+            const mEvent = pStats.eventType || pStats.event_type || pStats.event || pStats.event_name || m.eventType || m.event_type || m.event_name || '';
+            const mRawVal = pStats.finish_time || pStats.time || pStats.time_or_distance || pStats.mark || pStats.distance || '';
+
+            sortedMetrics.push({
+              id: d.id,
+              match_id: d.id,
+              match_name: m.match_name || m.custom_game_title || m.opponent_team || 'Certified Meet',
+              date: m.match_date || m.date,
+              timestamp: m.match_date || m.date,
+              sport_category: m.sport_type || m.sport_category,
+              eventType: mEvent,
+              event_type: mEvent,
+              time: pStats.time || pStats.finish_time,
+              mark: pStats.mark || pStats.distance,
+              calculated_player_efficiency: pStats.per || pStats.calculated_player_efficiency || 0,
+              sport_stats: {
+                ...pStats,
+                eventType: mEvent,
+                event_type: mEvent,
+                finish_time: pStats.finish_time || pStats.time,
+                mark: pStats.mark || pStats.distance,
+              },
+            });
           }
         });
       }
@@ -960,12 +988,15 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
     .slice(0, 7)
     .reverse()
     .map((m: any, idx: number) => {
-      const rawDate = m.timestamp || m.created_at || m.date;
+      const rawDate = m.timestamp || m.created_at || m.date || m.match_date;
       const d = rawDate ? new Date(rawDate) : null;
       const dateStr = d && !isNaN(d.getTime())
         ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
         : `G${idx + 1}`;
       const s = m.sport_stats || {};
+      const eventType = String(m.eventType || m.event_type || s.eventType || s.event_type || s.event_name || s.event || m.event_name || m.event || '').trim();
+      const rawVal = s.finish_time || s.time || s.formatted_time || s.time_or_distance || s.distance || s.mark || m.time || m.finish_time || m.mark || m.time_or_distance || '';
+      const numVal = parseMetricToNumeric(rawVal);
       const pts = Number(s.points !== undefined ? s.points : (m.calculated_player_efficiency || 0));
       const srpe = Number(m.sRPE || m.srpe || m.rpe || s.rpe || (pts > 15 ? 8.2 : 7.0));
       return {
@@ -973,8 +1004,12 @@ export async function getAthleteHomeSummary(athleteId: string): Promise<AthleteH
         label: `G${idx + 1}`,
         date: dateStr,
         opponent: m.match_name || m.custom_game_title || m.opponent || `Game ${idx + 1}`,
-        score: pts,
+        score: numVal > 0 ? numVal : pts,
         points: pts,
+        eventType,
+        event_type: eventType,
+        raw_value: rawVal ? String(rawVal) : '',
+        numeric_value: numVal,
         workload_intensity: srpe,
         efficiency: Number(m.calculated_player_efficiency || 0),
       };
@@ -1205,12 +1240,15 @@ export async function getAthleteExpandedCareerStats(athleteId: string): Promise<
     last_5_games_scores: last5,
     recent_scores: last5,
     match_progression: metrics.slice(0, 7).reverse().map((m: any, idx: number) => {
-      const rawDate = m.timestamp || m.created_at || m.date;
+      const rawDate = m.timestamp || m.created_at || m.date || m.match_date;
       const d = rawDate ? new Date(rawDate) : null;
       const dateStr = d && !isNaN(d.getTime())
         ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
         : `G${idx + 1}`;
       const s = m.sport_stats || {};
+      const eventType = String(m.eventType || m.event_type || s.eventType || s.event_type || s.event_name || s.event || m.event_name || m.event || '').trim();
+      const rawVal = s.finish_time || s.time || s.formatted_time || s.time_or_distance || s.distance || s.mark || m.time || m.finish_time || m.mark || m.time_or_distance || '';
+      const numVal = parseMetricToNumeric(rawVal);
       const pts = Number(s.points !== undefined ? s.points : (m.calculated_player_efficiency || 0));
       const srpe = Number(m.sRPE || m.srpe || m.rpe || s.rpe || (pts > 15 ? 8.2 : 7.0));
       return {
@@ -1218,8 +1256,12 @@ export async function getAthleteExpandedCareerStats(athleteId: string): Promise<
         label: `G${idx + 1}`,
         date: dateStr,
         opponent: m.match_name || m.custom_game_title || m.opponent || `Game ${idx + 1}`,
-        score: pts,
+        score: numVal > 0 ? numVal : pts,
         points: pts,
+        eventType,
+        event_type: eventType,
+        raw_value: rawVal ? String(rawVal) : '',
+        numeric_value: numVal,
         workload_intensity: srpe,
         efficiency: Number(m.calculated_player_efficiency || 0),
       };
@@ -1366,6 +1408,8 @@ export interface MetricProgressionRecord {
   location: string;
   date: string;
   display_date: string;
+  eventType?: string;
+  event_type?: string;
   formatted_value: string;
   numeric_value: number;
   unit: string;
@@ -1657,7 +1701,7 @@ export async function getMetricProgressionHistory(
         );
 
         if (matchesAthlete) {
-          const rowEvent = p.event || p.event_name || m.event_name || '';
+          const rowEvent = p.eventType || p.event_type || p.event || p.event_name || m.event_name || '';
           if (isTargetEvent(rowEvent)) {
             const rawVal = p.time || p.finish_time || p.time_or_distance || p.distance || '';
             const numVal = parseMetricToNumeric(rawVal);
@@ -1673,6 +1717,8 @@ export async function getMetricProgressionHistory(
                 location,
                 date: mDate,
                 display_date: displayDate,
+                eventType: eventTitle,
+                event_type: eventTitle,
                 formatted_value: String(rawVal).trim().endsWith(unit) ? String(rawVal).trim() : `${rawVal}${unit}`,
                 numeric_value: numVal,
                 unit,
@@ -1695,7 +1741,7 @@ export async function getMetricProgressionHistory(
       const pm = doc.data();
       const pmDate = pm.timestamp || pm.created_at || new Date().toISOString();
       const s = pm.sport_stats || {};
-      const rowEvent = s.event_name || s.event || pm.event_name || '';
+      const rowEvent = s.eventType || s.event_type || s.event_name || s.event || pm.eventType || pm.event_type || pm.event_name || '';
 
       if (isTargetEvent(rowEvent)) {
         const rawVal = s.finish_time || s.time || s.formatted_time || s.distance || s.target_distance || '';
@@ -1712,6 +1758,8 @@ export async function getMetricProgressionHistory(
             location: pm.location || 'Coliseum Sports Arena',
             date: pmDate,
             display_date: displayDate,
+            eventType: eventTitle,
+            event_type: eventTitle,
             formatted_value: String(rawVal).trim().endsWith(unit) ? String(rawVal).trim() : `${rawVal}${unit}`,
             numeric_value: numVal,
             unit,
