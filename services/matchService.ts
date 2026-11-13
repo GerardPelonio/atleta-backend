@@ -216,13 +216,21 @@ export async function submitMatchSession(
   const matchId = explicitMatchId || (await generateStandardId('MATCH'));
   const now = new Date().toISOString();
 
+  const isTimedSport = String(payload.sport_type || '').toUpperCase().includes('SWIM') || 
+                       String(payload.sport_type || '').toUpperCase().includes('TRACK') || 
+                       String(payload.sport_type || '').toUpperCase().includes('FIELD');
+
   // Resolve Home Team and Away Team names
-  const homeTeamName = ((payload as any).home_team_name || (payload as any).home_team || payload.team_id || 'CELTICS').trim();
-  const oppTeamName = ((payload as any).away_team_name || (payload as any).away_team || payload.opponent_team_name || 'HAWKS').trim();
+  const homeTeamName = ((payload as any).home_team_name || (payload as any).home_team || payload.team_id || (isTimedSport ? 'ATLETA' : 'CELTICS')).trim();
+  const oppTeamName = ((payload as any).away_team_name || (payload as any).away_team || payload.opponent_team_name || (isTimedSport ? '' : 'HAWKS')).trim();
 
   // Resolve Home and Away Scores
-  const homeScore = (payload as any).home_score !== undefined ? Number((payload as any).home_score) : 107;
-  const awayScore = (payload as any).away_score !== undefined ? Number((payload as any).away_score) : 103;
+  const homeScore = (payload as any).home_score !== undefined && (payload as any).home_score !== null
+    ? Number((payload as any).home_score)
+    : (isTimedSport ? null : 107);
+  const awayScore = (payload as any).away_score !== undefined && (payload as any).away_score !== null
+    ? Number((payload as any).away_score)
+    : (isTimedSport ? null : 103);
 
   // Resolve or create Home Team doc in Teams collection
   let homeTeamId = payload.team_id;
@@ -241,7 +249,7 @@ export async function submitMatchSession(
       sport_type: payload.sport_type,
       division: 'Varsity Division',
       coach_id: coachId,
-      season_record: { wins: homeScore >= awayScore ? 1 : 0, losses: homeScore < awayScore ? 1 : 0 },
+      season_record: { wins: (homeScore ?? 0) >= (awayScore ?? 0) ? 1 : 0, losses: (homeScore ?? 0) < (awayScore ?? 0) ? 1 : 0 },
       roster_list: [],
       created_at: now,
     });
@@ -264,7 +272,7 @@ export async function submitMatchSession(
       sport_type: payload.sport_type,
       division: 'Varsity Division',
       coach_id: coachId,
-      season_record: { wins: awayScore > homeScore ? 1 : 0, losses: awayScore <= homeScore ? 1 : 0 },
+      season_record: { wins: (awayScore ?? 0) > (homeScore ?? 0) ? 1 : 0, losses: (awayScore ?? 0) <= (homeScore ?? 0) ? 1 : 0 },
       roster_list: [],
       created_at: now,
     });
@@ -759,6 +767,8 @@ export async function submitMatchSession(
     }
   }
 
+  const defaultMatchTitle = isTimedSport ? `${homeTeamName} Meet` : `${homeTeamName} vs ${oppTeamName}`;
+
   const matchLog: any = {
     match_id: matchId,
     team_id: homeTeamId,
@@ -775,7 +785,7 @@ export async function submitMatchSession(
     match_type: payload.match_type.trim(),
     match_date: payload.match_date,
     location: payload.location.trim(),
-    game_result: homeScore >= awayScore ? 'WIN' : 'LOSS',
+    game_result: payload.game_result || (homeScore !== null && awayScore !== null ? (homeScore >= awayScore ? 'WIN' : 'LOSS') : (isTimedSport ? 'COMPLETED' : 'WIN')),
     home_roster_athletes: homeRosterIds,
     away_roster_athletes: awayRosterIds,
     roster_athletes: (payload.roster_athletes && payload.roster_athletes.length > 0) ? payload.roster_athletes : [...homeRosterIds, ...awayRosterIds],
@@ -793,10 +803,10 @@ export async function submitMatchSession(
     scoresheetUrl: payload.scoresheetUrl || payload.scoresheet_url || '',
     customGameTitle: (((payload as any).customGameTitle || (payload as any).custom_game_title || (payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || undefined,
     custom_game_title: (((payload as any).customGameTitle || (payload as any).custom_game_title || (payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || undefined,
-    matchName: (((payload as any).customGameTitle || (payload as any).custom_game_title || (payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || `${homeTeamName} vs ${oppTeamName}`,
-    match_name: (((payload as any).customGameTitle || (payload as any).custom_game_title || (payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || `${homeTeamName} vs ${oppTeamName}`,
-    gameName: (((payload as any).customGameTitle || (payload as any).custom_game_title || (payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || `${homeTeamName} vs ${oppTeamName}`,
-    game_name: (((payload as any).customGameTitle || (payload as any).custom_game_title || (payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || `${homeTeamName} vs ${oppTeamName}`,
+    matchName: (((payload as any).customGameTitle || (payload as any).custom_game_title || (payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || defaultMatchTitle,
+    match_name: (((payload as any).customGameTitle || (payload as any).custom_game_title || (payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || defaultMatchTitle,
+    gameName: (((payload as any).customGameTitle || (payload as any).custom_game_title || (payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || defaultMatchTitle,
+    game_name: (((payload as any).customGameTitle || (payload as any).custom_game_title || (payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || defaultMatchTitle,
     gameReferenceId: (((payload as any).gameReferenceId || (payload as any).matchName || '') as string).trim() || undefined,
     tournament_id: payload.tournament_id || null,
     assigned_coaches: payload.assigned_coaches || (coachId ? [coachId] : []),
