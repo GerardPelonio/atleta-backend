@@ -1652,20 +1652,23 @@ export async function getMetricProgressionHistory(
 
   // Helper to test if a match log row matches our target event
   const isTargetEvent = (eventStr: string): boolean => {
-    const e = (eventStr || '').toUpperCase();
-    if (eventTitle === '50m Freestyle') return e.includes('50') && (e.includes('FREE') || e.includes('SWIM'));
-    if (eventTitle === '100m Freestyle') return e.includes('100') && (e.includes('FREE') || e.includes('SWIM'));
-    if (eventTitle === '200m Freestyle') return e.includes('200') && (e.includes('FREE') || e.includes('SWIM'));
-    if (eventTitle === '100m Butterfly') return e.includes('FLY') || e.includes('BUTTERFLY');
-    if (eventTitle === '100m Backstroke') return e.includes('BACK');
-    if (eventTitle === '100m Breaststroke') return e.includes('BREAST');
-    if (eventTitle === '200m Individual Medley') return e.includes('IM') || e.includes('MEDLEY');
+    const e = (eventStr || '').toUpperCase().trim();
+    if (!e) return false;
+    if (e === eventTitle.toUpperCase() || e.includes(eventTitle.toUpperCase())) return true;
+
+    if (eventTitle === '50m Freestyle') return (e.includes('50') && (e.includes('FREE') || e.includes('SWIM') || e.includes('FR'))) || e === '50M' || e === '50 M';
+    if (eventTitle === '100m Freestyle') return (e.includes('100') && (e.includes('FREE') || e.includes('SWIM') || e.includes('FR'))) || e === '100M FREE';
+    if (eventTitle === '200m Freestyle') return (e.includes('200') && (e.includes('FREE') || e.includes('SWIM') || e.includes('FR'))) || e === '200M FREE';
+    if (eventTitle === '100m Butterfly') return (e.includes('100') && (e.includes('FLY') || e.includes('BUTTERFLY'))) || e.includes('BUTTERFLY');
+    if (eventTitle === '100m Backstroke') return (e.includes('100') && e.includes('BACK')) || e.includes('BACKSTROKE');
+    if (eventTitle === '100m Breaststroke') return (e.includes('100') && e.includes('BREAST')) || e.includes('BREASTSTROKE');
+    if (eventTitle === '200m Individual Medley') return e.includes('IM') || e.includes('MEDLEY') || e.includes('INDIVIDUAL MEDLEY');
     if (eventTitle === 'Flip Turn Time') return e.includes('TURN') || e.includes('FLIP');
-    if (eventTitle === '100m Dash') return e.includes('100') && (e.includes('DASH') || e.includes('MD') || e.includes('RUN') || e.includes('SPRINT'));
-    if (eventTitle === '200m Dash') return e.includes('200') && (e.includes('DASH') || e.includes('MD') || e.includes('RUN') || e.includes('SPRINT'));
-    if (eventTitle === '400m Dash') return e.includes('400') && (e.includes('DASH') || e.includes('MD') || e.includes('RUN'));
-    if (eventTitle === '800m Run') return e.includes('800') && (e.includes('MD') || e.includes('RUN'));
-    if (eventTitle === '1500m Run') return e.includes('1500') && (e.includes('MD') || e.includes('RUN'));
+    if (eventTitle === '100m Dash') return (e.includes('100') && (e.includes('DASH') || e.includes('MD') || e.includes('RUN') || e.includes('SPRINT'))) || e === '100M' || e === '100 M' || e === '100M DASH';
+    if (eventTitle === '200m Dash') return (e.includes('200') && (e.includes('DASH') || e.includes('MD') || e.includes('RUN') || e.includes('SPRINT'))) || e === '200M' || e === '200 M' || e === '200M DASH';
+    if (eventTitle === '400m Dash') return (e.includes('400') && (e.includes('DASH') || e.includes('MD') || e.includes('RUN'))) || e === '400M' || e === '400 M' || e === '400M DASH';
+    if (eventTitle === '800m Run') return (e.includes('800') && (e.includes('MD') || e.includes('RUN'))) || e === '800M' || e === '800 M';
+    if (eventTitle === '1500m Run') return (e.includes('1500') && (e.includes('MD') || e.includes('RUN'))) || e === '1500M' || e === '1500 M';
     if (eventTitle === '4x100m Relay') return e.includes('4X100') || e.includes('RELAY');
     if (eventTitle === 'Reaction Time') return e.includes('REACTION') || e.includes('START');
     if (eventTitle === 'Long Jump') return e.includes('LONG') && e.includes('JUMP');

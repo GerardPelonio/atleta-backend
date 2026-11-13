@@ -23,6 +23,7 @@ router.use('/admin', adminRoutes);
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
 router.use('/athletes', athleteRoutes);
+router.use('/athlete', athleteRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/analytics', analyticsRoutes);
 router.use('/teams', teamRoutes);
