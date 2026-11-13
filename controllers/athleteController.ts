@@ -7,6 +7,7 @@ import {
   getAthleteHomeSummary,
   getAthleteExpandedCareerStats,
   getAthleteDateGroupedMatches,
+  getMetricProgressionHistory,
 } from '../services/athleteService';
 import { searchAthletes, getAthletePastTeams } from '../services/teamService';
 import { registerUserService } from '../services/userService';
@@ -231,3 +232,24 @@ export async function getAthletePastTeamsHandler(req: Request, res: Response): P
     res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
   }
 }
+
+export async function getMetricProgressionHistoryHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const rawParam = req.params.athleteId || req.query.athleteId || req.query.athlete_id;
+    const athleteId = (Array.isArray(rawParam) ? rawParam[0] : rawParam) || (req as any).user?.uid;
+    if (!athleteId) {
+      res.status(400).json({ error: 'Athlete ID is required.' });
+      return;
+    }
+
+    const metricKey = String(req.query.metric || req.query.metricKey || req.query.statType || req.query.stat_type || '100m');
+    const sport = req.query.sport ? String(req.query.sport) : undefined;
+
+    const progression = await getMetricProgressionHistory(String(athleteId), metricKey, sport);
+    res.status(200).json(progression);
+  } catch (error: any) {
+    console.error('getMetricProgressionHistoryHandler error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+

@@ -11,6 +11,7 @@ import {
   getAthleteAllStatsHandler,
   getAthleteMatchHistoryHandler,
   getAthletePastTeamsHandler,
+  getMetricProgressionHistoryHandler,
 } from '../controllers/athleteController';
 import { uploadAvatarHandler } from '../controllers/userController';
 import { getAthleteTeamHandler } from '../controllers/teamController';
@@ -41,6 +42,7 @@ router.get('/past-teams', authenticate, getAthletePastTeamsHandler);
 router.get('/stats/all', authenticate, getAthleteAllStatsHandler);
 router.get('/stats', authenticate, getAthleteAllStatsHandler);
 router.get('/matches', authenticate, getAthleteMatchHistoryHandler);
+router.get('/progression-history', optionalAuth, getMetricProgressionHistoryHandler);
 router.get('/workload', authenticate, getAthleteWorkloadHandler);
 router.post('/workload', authenticate, postSrpeLog);
 router.put('/workload/target', authenticate, setWorkloadTargetHandler);
@@ -62,6 +64,7 @@ router.get('/:athleteId/past-teams', authenticate, getAthletePastTeamsHandler);
 router.get('/:athleteId/stats/all', authenticate, getAthleteAllStatsHandler);
 router.get('/:athleteId/stats', authenticate, getAthleteAllStatsHandler);
 router.get('/:athleteId/matches', authenticate, getAthleteMatchHistoryHandler);
+router.get('/:athleteId/progression-history', optionalAuth, getMetricProgressionHistoryHandler);
 router.get('/:athleteId/workload', authenticate, getAthleteWorkloadHandler);
 router.post('/:athleteId/workload', authenticate, postSrpeLog);
 router.put('/:athleteId/workload/target', authenticate, setWorkloadTargetHandler);
