@@ -227,12 +227,16 @@ export async function submitMatchSession(
   const oppTeamName = ((payload as any).away_team_name || (payload as any).away_team || payload.opponent_team_name || (isTimedSport ? '' : 'HAWKS')).trim();
 
   // Resolve Home and Away Scores
-  const homeScore = (payload as any).home_score !== undefined && (payload as any).home_score !== null
-    ? Number((payload as any).home_score)
-    : (isTimedSport ? null : 107);
-  const awayScore = (payload as any).away_score !== undefined && (payload as any).away_score !== null
-    ? Number((payload as any).away_score)
-    : (isTimedSport ? null : 103);
+  const homeScore = isTimedSport
+    ? null
+    : ((payload as any).home_score !== undefined && (payload as any).home_score !== null
+        ? Number((payload as any).home_score)
+        : 107);
+  const awayScore = isTimedSport
+    ? null
+    : ((payload as any).away_score !== undefined && (payload as any).away_score !== null
+        ? Number((payload as any).away_score)
+        : 103);
 
   // Resolve or create Home Team doc in Teams collection
   let homeTeamId = payload.team_id;
@@ -378,7 +382,13 @@ export async function submitMatchSession(
       : `metric_${matchId}_${athleteId}_${idx}`;
     const pName = (item as any).player_name || 'Athlete';
     const rawTeam = ((item as any).team_name || (item as any).team || homeTeamName).trim();
-    const isHomePlayer = rawTeam.toUpperCase() === homeTeamName.toUpperCase();
+    const isTeamMatch = rawTeam.toUpperCase() === homeTeamName.toUpperCase();
+    const isRosterMatch = homeTeamRosterProfiles.some((p) => {
+      const pFullName = `${p.data?.first_name || ''} ${p.data?.last_name || ''}`.trim().toLowerCase();
+      const athName = String((item as any).player_name || '').trim().toLowerCase();
+      return athName && (pFullName === athName || pFullName.includes(athName) || athName.includes(pFullName));
+    });
+    const isHomePlayer = isTeamMatch || isRosterMatch;
     const pTeam = isHomePlayer ? homeTeamName : oppTeamName;
 
     const sportLower = String(payload.sport_type || '').toLowerCase();
@@ -805,11 +815,11 @@ export async function submitMatchSession(
     home_team_id: homeTeamId,
     away_team_id: oppTeamId,
     home_team_name: homeTeamName,
-    away_team_name: oppTeamName,
-    opponent_team_name: oppTeamName,
-    teams: [homeTeamName, oppTeamName],
-    home_score: homeScore,
-    away_score: awayScore,
+    away_team_name: isTimedSport ? '' : oppTeamName,
+    opponent_team_name: isTimedSport ? '' : oppTeamName,
+    teams: isTimedSport ? [homeTeamName] : [homeTeamName, oppTeamName],
+    home_score: isTimedSport ? null : homeScore,
+    away_score: isTimedSport ? null : awayScore,
     logged_by_coach_id: coachId,
     sport_type: payload.sport_type,
     match_type: payload.match_type.trim(),
@@ -1994,7 +2004,9 @@ export async function processScoresheetOCR(matchId: string, file?: Express.Multe
       updatePayload.sportType = 'TRACK AND FIELD';
     }
 
-    if (teamScores.length >= 2) {
+    const currentSportUpper = String(updatePayload.sport_type || matchData.sport_type || '').toUpperCase();
+    const isTimedSportLocal = isExplicitTrackMatch || currentSportUpper.includes('SWIM') || currentSportUpper.includes('TRACK') || currentSportUpper.includes('FIELD');
+    if (teamScores.length >= 2 && !isTimedSportLocal) {
       updatePayload.home_score = Number(teamScores[0].score);
       updatePayload.away_score = Number(teamScores[1].score);
       updatePayload.game_result = Number(teamScores[0].score) >= Number(teamScores[1].score) ? 'WIN' : 'LOSS';

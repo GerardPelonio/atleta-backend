@@ -568,13 +568,23 @@ export async function getCoachOfflineSnapshotService(coachId: string): Promise<C
 
       // Fetch upcoming / recent matches
       const matchMap = new Map<string, any>();
+      const sanitizeMatchDoc = (d: any) => {
+        const data = { ...d.data(), match_id: d.id, id: d.id };
+        const sportUpper = String(data.sport_type || data.sport_category || '').toUpperCase();
+        const isTimed = sportUpper.includes('SWIM') || sportUpper.includes('TRACK') || sportUpper.includes('FIELD');
+        if (isTimed) {
+          delete data.home_score;
+          delete data.away_score;
+        }
+        return data;
+      };
       const matchSnap = await db.collection('Match_Logs').where('logged_by_coach_id', '==', coachId).get().catch(() => null);
       if (matchSnap) {
-        matchSnap.docs.forEach(d => matchMap.set(d.id, d.data()));
+        matchSnap.docs.forEach(d => matchMap.set(d.id, sanitizeMatchDoc(d)));
       }
       const allMatchesSnap = await db.collection('Match_Logs').limit(30).get().catch(() => null);
       if (allMatchesSnap) {
-        allMatchesSnap.docs.forEach(d => matchMap.set(d.id, d.data()));
+        allMatchesSnap.docs.forEach(d => matchMap.set(d.id, sanitizeMatchDoc(d)));
       }
       const scheduledMatches = Array.from(matchMap.values());
 
