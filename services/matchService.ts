@@ -381,6 +381,15 @@ export async function submitMatchSession(
     const isHomePlayer = rawTeam.toUpperCase() === homeTeamName.toUpperCase();
     const pTeam = isHomePlayer ? homeTeamName : oppTeamName;
 
+    const sportLower = String(payload.sport_type || '').toLowerCase();
+    const isTimedSport = sportLower.includes('swim') || sportLower.includes('track') || sportLower.includes('field') || sportLower.includes('run');
+
+    // In swimming and track & field, only record athletes from coach's team; no need to mention other athletes
+    if (isTimedSport && !isHomePlayer) {
+      console.log(`[MATCH SERVICE] Skipping other team's athlete for timed individual sport: ${pName} (${rawTeam})`);
+      continue;
+    }
+
     if (isHomePlayer) {
       if (!homeRosterIds.includes(athleteId)) homeRosterIds.push(athleteId);
     } else {
@@ -404,11 +413,21 @@ export async function submitMatchSession(
       enrichedStats = computed.enrichedStats;
     }
 
-    const finishTime = (item as any).finish_time || (item as any).time || rawStats.finish_time || rawStats.time || null;
-    const splitTime = (item as any).split || (item as any).split_time || rawStats.split || rawStats.split_time || null;
+    const rawFinishTime = (item as any).finish_time || (item as any).time || rawStats.finish_time || rawStats.time || null;
+    const rawSplitTime = (item as any).split || (item as any).split_time || rawStats.split || rawStats.split_time || null;
     const placementRank = (item as any).placement_rank ?? (item as any).rank ?? rawStats.placement_rank ?? rawStats.rank ?? null;
     const heatVal = (item as any).heat ?? rawStats.heat ?? null;
     const laneVal = (item as any).lane ?? rawStats.lane ?? null;
+
+    const parsedRank = placementRank !== null && placementRank !== undefined && !isNaN(Number(String(placementRank).replace(/[^\d]/g, '')))
+      ? Number(String(placementRank).replace(/[^\d]/g, ''))
+      : null;
+    const isTop3 = parsedRank !== null ? (parsedRank >= 1 && parsedRank <= 3) : true;
+
+    // In swimming and track & field, only record performances if in top 3; if not, just add the place!
+    const finishTime = (isTimedSport && !isTop3) ? null : rawFinishTime;
+    const splitTime = (isTimedSport && !isTop3) ? null : rawSplitTime;
+    const displayTime = (isTimedSport && !isTop3) ? '-' : (rawFinishTime || '-');
 
     const structuredSportStats: any = {
       pts: Number(rawStats.points ?? rawStats.pts ?? (item as any).pts ?? (item as any).points ?? 0),
@@ -418,7 +437,6 @@ export async function submitMatchSession(
       ...enrichedStats,
     };
 
-    const sportLower = String(payload.sport_type || '').toLowerCase();
     if (sportLower.includes('basket')) {
       structuredSportStats.basketball = {
         total_field_goals_made: Number(rawStats.fg_made ?? rawStats.fgm ?? 0),
@@ -443,16 +461,16 @@ export async function submitMatchSession(
         stroke_rate: Number(rawStats.stroke_rate ?? 0),
         distance_per_stroke: Number(rawStats.distance_per_stroke ?? 0),
         reaction_time: Number(rawStats.reaction_time ?? 0),
-        lap_time: Number(rawStats.lap_time ?? 0),
-        finish_time: Number(rawStats.finish_time ?? 0),
+        lap_time: isTop3 ? Number(rawStats.lap_time ?? 0) : 0,
+        finish_time: isTop3 ? Number(rawStats.finish_time ?? 0) : 0,
       };
     } else if (sportLower.includes('track') || sportLower.includes('field') || sportLower.includes('run')) {
       structuredSportStats.track_and_field = {
         eventType: String(eventName || rawStats.eventType || rawStats.event_type || '100m Dash'),
         event_type: String(eventName || rawStats.eventType || rawStats.event_type || '100m Dash'),
         target_distance: Number(rawStats.target_distance ?? rawStats.distance ?? 0),
-        lap_time: Number(rawStats.lap_time ?? 0),
-        finish_time: Number(rawStats.finish_time ?? 0),
+        lap_time: isTop3 ? Number(rawStats.lap_time ?? 0) : 0,
+        finish_time: isTop3 ? Number(rawStats.finish_time ?? 0) : 0,
       };
     }
 
@@ -473,7 +491,7 @@ export async function submitMatchSession(
       rank: placementRank,
       placement_rank: placementRank,
       finish_time: finishTime,
-      time: finishTime,
+      time: displayTime,
       split: splitTime,
       sport_stats: structuredSportStats,
       custom_stats: {
@@ -500,7 +518,9 @@ export async function submitMatchSession(
       heat: heatVal,
       lane: laneVal,
       placement_rank: placementRank,
+      rank: placementRank,
       finish_time: finishTime,
+      time: displayTime,
       split: splitTime,
       pts: Number(rawStats.points ?? rawStats.pts ?? (item as any).pts ?? (item as any).points ?? 0),
       points: Number(rawStats.points ?? rawStats.pts ?? (item as any).pts ?? (item as any).points ?? 0),
@@ -553,9 +573,9 @@ export async function submitMatchSession(
     const gameAst = Number(rawStats.assists ?? rawStats.ast ?? (item as any).ast ?? (item as any).assists ?? 0);
     const gameReb = Number(rawStats.rebounds ?? rawStats.reb ?? (item as any).reb ?? (item as any).rebounds ?? 0);
 
-    // Dynamic metrics for individual sports / athlete portfolio
+    // Dynamic metrics for individual sports / athlete portfolio (top 3 athletes only)
     const dynamicAverages: Record<string, any> = {};
-    if (finishTime) {
+    if (finishTime && (!isTimedSport || isTop3)) {
       if (eventSlug.includes('50') && (eventSlug.includes('free') || payload.sport_type.toLowerCase().includes('swim'))) {
         dynamicAverages.pb_50m_free = finishTime;
       }
@@ -569,7 +589,7 @@ export async function submitMatchSession(
         dynamicAverages.pb_200m = finishTime;
       }
     }
-    if (rawStats.reaction_time_s || rawStats.reaction_sec || rawStats.reaction_time_ms) {
+    if ((!isTimedSport || isTop3) && (rawStats.reaction_time_s || rawStats.reaction_sec || rawStats.reaction_time_ms)) {
       dynamicAverages.reaction_time_s = rawStats.reaction_time_s || rawStats.reaction_sec || rawStats.reaction_time_ms;
     }
 
