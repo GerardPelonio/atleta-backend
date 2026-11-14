@@ -606,24 +606,46 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
     const per = Number(stats.efficiency_rating ?? stats.per ?? stats.calculated_per ?? stats.per_score ?? 0);
     const ppg = Number(stats.ppg ?? stats.points_per_game ?? 0);
     const gp = Number(stats.games_played ?? stats.meets_count ?? 0);
-    const pb50 = stats.pb_50m_free || stats.pb_50m;
-    const pb100 = stats.pb_100m_free || stats.pb_100m;
+    const pb50 = stats.pb_50m_free || stats.pb_50m || stats.times_50m_free;
+    const pb100 = stats.pb_100m_free || stats.pb_100m || stats.times_100m_free;
     const pb50Sec = typeof pb50 === 'number' ? pb50 : (typeof pb50 === 'string' ? parseFloat(pb50.replace(/[^\d.]/g, '')) : 0);
     const pb100Sec = typeof pb100 === 'number' ? pb100 : (typeof pb100 === 'string' ? parseFloat(pb100.replace(/[^\d.]/g, '')) : 0);
 
+    const explicitProfileRating = Number(profileData.rating_score || profileData.rating || profileData.overall_rating || userData.rating_score || userData.rating || 0);
+    const resolvedSport = (primaryTeam?.sport_type || profileData.sport_type || profileData.sport || userData.sport_type || userData.sport || 'Basketball');
+    const sportTypeUpper = String(resolvedSport).toUpperCase();
+
     let dynamicRating = 0;
-    if (per > 0) {
-      dynamicRating = Math.min(99, Math.max(65, Math.round(per * 2.8)));
-    } else if (ppg > 0) {
-      dynamicRating = Math.min(99, Math.max(65, Math.round(ppg * 3.5)));
-    } else if (pb50Sec > 0) {
-      dynamicRating = pb50Sec <= 25.5 ? 99 : (pb50Sec <= 26.5 ? 95 : (pb50Sec <= 28.0 ? 91 : (pb50Sec <= 30.0 ? 86 : 81)));
-    } else if (pb100Sec > 0) {
-      dynamicRating = pb100Sec <= 54.5 ? 99 : (pb100Sec <= 56.5 ? 95 : (pb100Sec <= 59.0 ? 91 : (pb100Sec <= 63.0 ? 86 : 81)));
-    } else if (gp > 0 && profileData.rating_score && profileData.rating_score !== 85 && profileData.rating_score !== 75) {
-      dynamicRating = Math.min(99, Math.max(50, Math.round(Number(profileData.rating_score))));
-    } else {
-      dynamicRating = 0;
+    if (explicitProfileRating > 0) {
+      dynamicRating = Math.min(99, Math.max(50, Math.round(explicitProfileRating)));
+    } else if (sportTypeUpper.includes('BASKET')) {
+      if (per > 0) {
+        dynamicRating = Math.min(99, Math.max(50, Math.round(54 + per * 1.45)));
+      } else if (ppg > 0) {
+        dynamicRating = Math.min(99, Math.max(50, Math.round(58 + ppg * 2.2)));
+      }
+    } else if (sportTypeUpper.includes('VOLLEY')) {
+      const vKills = Number(stats.spike_kills ?? stats.kills ?? 0);
+      const vBlocks = Number(stats.block_points ?? stats.blocks ?? 0);
+      const vAces = Number(stats.service_aces ?? stats.aces ?? 0);
+      const vDigs = Number(stats.digs ?? 0);
+      if (vKills > 0 || vBlocks > 0 || vAces > 0 || vDigs > 0) {
+        const vEff = (vKills * 1.5) + (vBlocks * 2.5) + (vAces * 2.0) + (vDigs * 0.8);
+        dynamicRating = Math.min(99, Math.max(50, Math.round(62 + vEff * 0.85)));
+      }
+    } else if (sportTypeUpper.includes('SWIM')) {
+      if (pb50Sec > 0) {
+        dynamicRating = pb50Sec <= 25.5 ? 99 : (pb50Sec <= 26.5 ? 95 : (pb50Sec <= 28.0 ? 91 : (pb50Sec <= 30.0 ? 86 : 81)));
+      } else if (pb100Sec > 0) {
+        dynamicRating = pb100Sec <= 54.5 ? 99 : (pb100Sec <= 56.5 ? 95 : (pb100Sec <= 59.0 ? 91 : (pb100Sec <= 63.0 ? 86 : 81)));
+      }
+    } else if (sportTypeUpper.includes('TRACK') || sportTypeUpper.includes('FIELD')) {
+      const pv = Number(parseFloat(String(stats.pole_vault || stats.pole_vault_pb || stats.personal_best || '').replace(/[^\d.]/g, '')) || 0);
+      if (pv >= 5.80) {
+        dynamicRating = 99;
+      } else if (pb100Sec > 0) {
+        dynamicRating = pb100Sec <= 10.3 ? 99 : (pb100Sec <= 10.8 ? 95 : (pb100Sec <= 11.4 ? 90 : 85));
+      }
     }
 
     const scoutInfo = scoutedAthleteMap.get(aId) || scoutedAthleteMap.get(canonicalAthleteId) || scoutedAthleteMap.get(rawUid);
@@ -639,8 +661,9 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
       full_name: fullName,
       position: (primaryTeam?.position && primaryTeam.position !== 'Unassigned' ? primaryTeam.position : (profileData.position && profileData.position !== 'Unassigned' ? profileData.position : (userData.position && userData.position !== 'Unassigned' ? userData.position : (primaryTeam?.sport_type || profileData.sport_type || userData.sport_type || 'Basketball')))),
       jersey_number: primaryTeam?.jersey_number ?? profileData.jersey_number ?? userData.jersey_number ?? null,
-      sport_type: primaryTeam?.sport_type || profileData.sport_type || userData.sport_type || 'Basketball',
-      sport_category: (primaryTeam?.sport_type || profileData.sport_type || userData.sport_type || 'Basketball').toUpperCase(),
+      sport_type: resolvedSport,
+      sport_category: sportTypeUpper,
+      sport: resolvedSport,
       team_id: primaryTeam?.team_id || null,
       team_name: combinedTeamName,
       team_ids: teamIds,
@@ -667,6 +690,8 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
       vertical_jump_cm: verticalCm,
       vertical_leap_in: verticalInches,
       stats: {
+        ...(profileData.stats || {}),
+        ...(userData.stats || {}),
         ppg: Number(stats.ppg ?? stats.points_per_game ?? 0),
         rpg: Number(stats.rpg ?? stats.rebounds_per_game ?? 0),
         apg: Number(stats.apg ?? stats.assists_per_game ?? 0),
@@ -674,14 +699,12 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
         per: per,
         games_played: Number(stats.games_played ?? 0),
       },
-      averages: profileData.averages || {
-        ppg: Number(stats.ppg ?? stats.points_per_game ?? 0),
-        rpg: Number(stats.rpg ?? stats.rebounds_per_game ?? 0),
-        apg: Number(stats.apg ?? stats.assists_per_game ?? 0),
-        fg_percentage: Number(stats.fg_pct ?? stats.field_goal_percentage ?? 0),
-        per_score: per,
-        games_played: Number(stats.games_played ?? 0),
+      averages: {
+        ...(profileData.averages || {}),
+        ...(profileData.stats || {}),
+        ...(userData.averages || {}),
       },
+      radar_competencies: profileData.radar_competencies || profileData.radar || userData.radar_competencies || userData.radar || undefined,
       scoring_trends_last_10: profileData.scoring_trends_last_10 || [],
       biometrics: profileData.biometrics || undefined,
       workload_analytics: profileData.workload_analytics || profileData.workload || undefined,
