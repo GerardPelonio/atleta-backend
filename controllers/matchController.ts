@@ -20,9 +20,10 @@ export async function getAllMatchesHandler(req: AuthRequest, res: Response): Pro
 
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
 
-    // Check fast server cache for all matches
+    // Check fast server cache for all matches (bypass if client requests fresh)
     const cacheKey = `all_matches_raw`;
-    let allMatches = serverCache.get<any[]>(cacheKey);
+    const noCacheRequested = req.headers['cache-control']?.includes('no-cache') || req.headers.pragma?.includes('no-cache') || req.query.fresh === 'true';
+    let allMatches = !noCacheRequested ? serverCache.get<any[]>(cacheKey) : null;
 
     if (!allMatches) {
       const snap = await db.collection('Match_Logs').get();
@@ -31,7 +32,7 @@ export async function getAllMatchesHandler(req: AuthRequest, res: Response): Pro
         match_id: doc.id,
         ...doc.data(),
       }));
-      serverCache.set(cacheKey, allMatches, 600, ['matches']);
+      serverCache.set(cacheKey, allMatches, 5, ['matches']);
     }
 
     let matches = allMatches;
@@ -149,6 +150,7 @@ export async function submitMatch(req: AuthRequest, res: Response): Promise<void
     }
 
     const result = await submitMatchSession(coachId, payload, idempotencyKey);
+    serverCache.delete('all_matches_raw');
     serverCache.invalidateTags(['matches', 'dashboard', 'validations']);
     res.status(201).json(result);
   } catch (error: any) {
