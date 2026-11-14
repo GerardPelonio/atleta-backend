@@ -40,11 +40,31 @@ export async function getAllMatchesHandler(req: AuthRequest, res: Response): Pro
       const possibleCoachIds = [coachId, `coach_${coachId}`, coachId.replace('coach_', '')];
       // Find teams managed by this coach
       const teamsCacheKey = `coach_teams_${coachId}`;
-      let coachTeamIds = serverCache.get<Set<string>>(teamsCacheKey);
-      if (!coachTeamIds) {
+      let coachTeamInfo = serverCache.get<{ ids: Set<string>; names: Set<string> }>(teamsCacheKey);
+      if (!coachTeamInfo) {
         const teamsSnap = await db.collection('Teams').where('coach_id', 'in', possibleCoachIds).get();
-        coachTeamIds = new Set(teamsSnap.docs.map((d) => d.id));
-        serverCache.set(teamsCacheKey, coachTeamIds, 60, ['teams']);
+        const ids = new Set(teamsSnap.docs.map((d) => d.id));
+        const names = new Set(teamsSnap.docs.map((d) => String(d.data().team_name || '').toLowerCase().trim()).filter(Boolean));
+        coachTeamInfo = { ids, names };
+        serverCache.set(teamsCacheKey, coachTeamInfo, 60, ['teams']);
+      }
+      const coachTeamIds = coachTeamInfo.ids;
+      const coachTeamNames = coachTeamInfo.names;
+
+      // Find athletes managed by this coach
+      const athletesCacheKey = `coach_athletes_${coachId}`;
+      let coachAthleteIds = serverCache.get<Set<string>>(athletesCacheKey);
+      if (!coachAthleteIds) {
+        const athSnap = await db.collection('Athlete_Profiles').where('coach_id', 'in', possibleCoachIds).get().catch(() => null);
+        const aIds = new Set<string>();
+        if (athSnap) {
+          athSnap.docs.forEach((d) => {
+            aIds.add(d.id.toLowerCase());
+            aIds.add(d.id.replace(/^ath_/, '').toLowerCase());
+          });
+        }
+        coachAthleteIds = aIds;
+        serverCache.set(athletesCacheKey, coachAthleteIds, 60, ['athletes']);
       }
 
       const coachMatches = allMatches.filter((m: any) => {
@@ -58,10 +78,25 @@ export async function getAllMatchesHandler(req: AuthRequest, res: Response): Pro
         if (possibleCoachIds.includes(m.requested_by_coach_id)) return true;
         // Assigned coaches array (OCR submissions often populate this)
         if (Array.isArray(m.assigned_coaches) && m.assigned_coaches.some((c: string) => possibleCoachIds.includes(c))) return true;
-        // Team-based association
+        if (Array.isArray(m.coaching_staff) && m.coaching_staff.some((c: string) => possibleCoachIds.includes(c))) return true;
+        // Team-based association (by ID or team name)
         if (m.team_id && coachTeamIds.has(m.team_id)) return true;
         if (m.home_team_id && coachTeamIds.has(m.home_team_id)) return true;
         if (m.away_team_id && coachTeamIds.has(m.away_team_id)) return true;
+        const hName = String(m.home_team_name || m.home_team || '').toLowerCase().trim();
+        const aName = String(m.away_team_name || m.away_team || m.opponent_team_name || '').toLowerCase().trim();
+        if (hName && coachTeamNames.has(hName)) return true;
+        if (aName && coachTeamNames.has(aName)) return true;
+
+        // Athlete-based association: match if any athlete from coach's roster participated
+        const mAthletes = [
+          ...(Array.isArray(m.roster_athletes) ? m.roster_athletes : []),
+          ...(Array.isArray(m.rosterAthletes) ? m.rosterAthletes : []),
+          ...(Array.isArray(m.athlete_ids) ? m.athlete_ids : []),
+          ...(Array.isArray(m.player_stats) ? m.player_stats.map((p: any) => p.athlete_id) : []),
+        ].map((id: any) => String(id || '').toLowerCase());
+        if (mAthletes.some((id: string) => coachAthleteIds?.has(id) || coachAthleteIds?.has(id.replace(/^ath_/, '')))) return true;
+
         return false;
       });
 
@@ -77,13 +112,12 @@ export async function getAllMatchesHandler(req: AuthRequest, res: Response): Pro
 
 export async function submitMatch(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const coachId = req.user?.uid || 'coach_default';
-    let idempotencyKey = (req.headers['idempotency-key'] || req.headers['x-idempotency-key'] || req.body?.idempotency_key) as string | undefined;
+    const raw = req.body || {};
+    const coachId = req.user?.uid || raw.coach_id || raw.logged_by_coach_id || 'coach_default';
+    let idempotencyKey = (req.headers['idempotency-key'] || req.headers['x-idempotency-key'] || raw.idempotency_key) as string | undefined;
     if (!idempotencyKey || typeof idempotencyKey !== 'string' || idempotencyKey.trim().length === 0) {
       idempotencyKey = `idemp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     }
-
-    const raw = req.body || {};
     const normalizedSport = String(raw.sport_type || 'Basketball').trim();
     const isTimedSport = /SWIM|TRACK|FIELD|RUN|RACE|ATHLETIC/i.test(normalizedSport);
     const playerStats = Array.isArray(raw.player_stats)

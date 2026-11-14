@@ -843,7 +843,7 @@ export async function submitMatchSession(
     }
   }
 
-  let finalGameResult = payload.game_result;
+  let finalGameResult: any = payload.game_result;
   if (!finalGameResult) {
     if (isTimedSport) {
       if (bestRankSession === 1) finalGameResult = '1st Place';
@@ -867,7 +867,10 @@ export async function submitMatchSession(
     teams: isTimedSport ? [homeTeamName] : [homeTeamName, oppTeamName],
     home_score: isTimedSport ? null : homeScore,
     away_score: isTimedSport ? null : awayScore,
+    coach_id: coachId,
     logged_by_coach_id: coachId,
+    coaching_staff: payload.coaching_staff || (coachId ? [coachId] : []),
+    assigned_coaches: payload.assigned_coaches || (coachId ? [coachId] : []),
     sport_type: payload.sport_type,
     match_type: payload.match_type.trim(),
     match_date: payload.match_date,
@@ -901,7 +904,6 @@ export async function submitMatchSession(
     game_name: (((payload as any).customGameTitle || (payload as any).custom_game_title || (payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || defaultMatchTitle,
     gameReferenceId: (((payload as any).gameReferenceId || (payload as any).matchName || '') as string).trim() || undefined,
     tournament_id: payload.tournament_id || null,
-    assigned_coaches: payload.assigned_coaches || (coachId ? [coachId] : []),
     official_id: payload.official_id || null,
     reference_id: payload.reference_id || matchId,
     ocr_extracted_data_url: payload.ocr_extracted_data_url || null,
