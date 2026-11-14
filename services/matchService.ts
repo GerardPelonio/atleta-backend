@@ -2962,7 +2962,7 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
   }
 
   // Fallback to matchData.player_stats or scoresheet_data if Performance_Metrics were not queried or written yet
-  const detailsFallbackList: any[] = Array.isArray(matchData.player_stats) && matchData.player_stats.length > 0
+  let detailsFallbackList: any[] = Array.isArray(matchData.player_stats) && matchData.player_stats.length > 0
     ? matchData.player_stats
     : (Array.isArray(matchData.scoresheet_data?.player_summary) && matchData.scoresheet_data.player_summary.length > 0
       ? matchData.scoresheet_data.player_summary
@@ -2971,6 +2971,20 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
   const sportType = matchData.sport_type || 'Basketball';
   const sportLower = String(sportType).toLowerCase();
   const isTimedSport = sportLower.includes('swim') || sportLower.includes('track') || sportLower.includes('field') || sportLower.includes('run');
+
+  if (isTimedSport) {
+    const homeTeamUpper = String(matchData.home_team_name || teamName || '').trim().toUpperCase();
+    const homeRosterSet = new Set((matchData.home_roster_athletes || matchData.roster_athletes || []).map((id: string) => String(id).toLowerCase()));
+
+    // Filter fallback list so opposing or external athletes are never returned for coach meet results
+    detailsFallbackList = detailsFallbackList.filter((item: any) => {
+      const aId = String(item.athlete_id || item.user_id || '').toLowerCase();
+      if (aId && homeRosterSet.has(aId)) return true;
+      const t = String(item.team_name || item.team || '').trim().toUpperCase();
+      if (homeTeamUpper && t) return t === homeTeamUpper;
+      return homeRosterSet.size === 0;
+    });
+  }
 
   // Check if playerMetrics consists entirely of dummy placeholder records (e.g. "Player 1", "Player 2" or missing timing stats for timed sports)
   const isDummyMetrics = playerMetrics.length > 0 && playerMetrics.every((p) => {
