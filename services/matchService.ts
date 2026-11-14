@@ -809,6 +809,53 @@ export async function submitMatchSession(
 
   const defaultMatchTitle = isTimedSport ? `${homeTeamName} Meet` : `${homeTeamName} vs ${oppTeamName}`;
 
+  let bestRankSession: number | null = null;
+  if ((payload as any).rank !== undefined && (payload as any).rank !== null && !isNaN(Number((payload as any).rank))) {
+    bestRankSession = Number((payload as any).rank);
+  } else if ((payload as any).place !== undefined && (payload as any).place !== null && !isNaN(Number((payload as any).place))) {
+    bestRankSession = Number((payload as any).place);
+  } else if ((payload as any).placement_rank !== undefined && (payload as any).placement_rank !== null && !isNaN(Number((payload as any).placement_rank))) {
+    bestRankSession = Number((payload as any).placement_rank);
+  }
+  if (bestRankSession === null && Array.isArray(enrichedPlayerStats) && enrichedPlayerStats.length > 0) {
+    const validRanks = enrichedPlayerStats
+      .map((p: any) => {
+        const r = p.rank ?? p.place ?? p.placement_rank ?? p.stats?.rank ?? p.stats?.place ?? p.sport_stats?.rank ?? p.sport_stats?.place;
+        const num = Number(r);
+        return !isNaN(num) && num > 0 ? num : null;
+      })
+      .filter((r): r is number => r !== null);
+    if (validRanks.length > 0) {
+      bestRankSession = Math.min(...validRanks);
+    }
+  }
+
+  let finalBadgeText = (payload as any).result_badge_text || (payload as any).resultBadgeText || '';
+  if (!finalBadgeText) {
+    if (isTimedSport) {
+      if (bestRankSession === 1) finalBadgeText = '1ST PLACE';
+      else if (bestRankSession === 2) finalBadgeText = '2ND PLACE';
+      else if (bestRankSession === 3) finalBadgeText = '3RD PLACE';
+      else if (bestRankSession !== null && bestRankSession > 3) finalBadgeText = `${bestRankSession}TH PLACE`;
+      else finalBadgeText = 'COMPLETED';
+    } else {
+      finalBadgeText = (homeScore !== null && awayScore !== null ? (homeScore >= awayScore ? 'RESULT WIN' : 'RESULT LOSS') : 'RESULT WIN');
+    }
+  }
+
+  let finalGameResult = payload.game_result;
+  if (!finalGameResult) {
+    if (isTimedSport) {
+      if (bestRankSession === 1) finalGameResult = '1st Place';
+      else if (bestRankSession === 2) finalGameResult = '2nd Place';
+      else if (bestRankSession === 3) finalGameResult = '3rd Place';
+      else if (bestRankSession !== null && bestRankSession > 3) finalGameResult = `${bestRankSession}th Place`;
+      else finalGameResult = 'COMPLETED';
+    } else {
+      finalGameResult = (homeScore !== null && awayScore !== null ? (homeScore >= awayScore ? 'WIN' : 'LOSS') : 'WIN');
+    }
+  }
+
   const matchLog: any = {
     match_id: matchId,
     team_id: homeTeamId,
@@ -825,7 +872,12 @@ export async function submitMatchSession(
     match_type: payload.match_type.trim(),
     match_date: payload.match_date,
     location: payload.location.trim(),
-    game_result: payload.game_result || (homeScore !== null && awayScore !== null ? (homeScore >= awayScore ? 'WIN' : 'LOSS') : (isTimedSport ? 'COMPLETED' : 'WIN')),
+    rank: bestRankSession !== null ? bestRankSession : ((payload as any).rank ?? null),
+    place: bestRankSession !== null ? bestRankSession : ((payload as any).place ?? null),
+    placement_rank: bestRankSession !== null ? bestRankSession : ((payload as any).placement_rank ?? null),
+    result_badge_text: finalBadgeText,
+    resultBadgeText: finalBadgeText,
+    game_result: finalGameResult,
     home_roster_athletes: homeRosterIds,
     away_roster_athletes: awayRosterIds,
     roster_athletes: (payload.roster_athletes && payload.roster_athletes.length > 0) ? payload.roster_athletes : [...homeRosterIds, ...awayRosterIds],

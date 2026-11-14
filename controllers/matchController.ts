@@ -85,7 +85,7 @@ export async function submitMatch(req: AuthRequest, res: Response): Promise<void
 
     const raw = req.body || {};
     const normalizedSport = String(raw.sport_type || 'Basketball').trim();
-    const normalizedGameResult = String(raw.game_result || 'WIN').toUpperCase().includes('LO') ? 'LOSS' : 'WIN';
+    const isTimedSport = /SWIM|TRACK|FIELD|RUN|RACE|ATHLETIC/i.test(normalizedSport);
     const playerStats = Array.isArray(raw.player_stats)
       ? raw.player_stats
       : Array.isArray(raw.player_metrics)
@@ -104,6 +104,70 @@ export async function submitMatch(req: AuthRequest, res: Response): Promise<void
     const playerStatsList = Array.isArray(raw.playerStats) && raw.playerStats.length > 0
       ? raw.playerStats
       : (Array.isArray(raw.player_stats) ? raw.player_stats : playerStats);
+
+    let bestRank: number | null = null;
+    if (raw.rank !== undefined && raw.rank !== null && !isNaN(Number(raw.rank))) {
+      bestRank = Number(raw.rank);
+    } else if (raw.place !== undefined && raw.place !== null && !isNaN(Number(raw.place))) {
+      bestRank = Number(raw.place);
+    } else if (raw.placement_rank !== undefined && raw.placement_rank !== null && !isNaN(Number(raw.placement_rank))) {
+      bestRank = Number(raw.placement_rank);
+    }
+
+    if (bestRank === null && Array.isArray(playerStatsList) && playerStatsList.length > 0) {
+      const validRanks = playerStatsList
+        .map((p: any) => {
+          const r = p.rank ?? p.place ?? p.placement_rank ?? p.stats?.rank ?? p.stats?.place ?? p.sport_stats?.rank ?? p.sport_stats?.place;
+          const num = Number(r);
+          return !isNaN(num) && num > 0 ? num : null;
+        })
+        .filter((r): r is number => r !== null);
+      if (validRanks.length > 0) {
+        bestRank = Math.min(...validRanks);
+      }
+    }
+
+    let normalizedGameResult: string;
+    let resultBadgeText: string = raw.result_badge_text || raw.resultBadgeText || '';
+
+    if (isTimedSport) {
+      if (bestRank !== null) {
+        if (bestRank === 1) {
+          normalizedGameResult = '1st Place';
+          resultBadgeText = resultBadgeText || '1ST PLACE';
+        } else if (bestRank === 2) {
+          normalizedGameResult = '2nd Place';
+          resultBadgeText = resultBadgeText || '2ND PLACE';
+        } else if (bestRank === 3) {
+          normalizedGameResult = '3rd Place';
+          resultBadgeText = resultBadgeText || '3RD PLACE';
+        } else {
+          normalizedGameResult = `${bestRank}th Place`;
+          resultBadgeText = resultBadgeText || `${bestRank}TH PLACE`;
+        }
+      } else if (raw.game_result) {
+        normalizedGameResult = String(raw.game_result).trim();
+        resultBadgeText = resultBadgeText || normalizedGameResult.toUpperCase();
+      } else {
+        normalizedGameResult = 'COMPLETED';
+        resultBadgeText = resultBadgeText || 'COMPLETED';
+      }
+    } else {
+      const rawResUpper = String(raw.game_result || '').toUpperCase();
+      if (rawResUpper.includes('LO')) {
+        normalizedGameResult = 'LOSS';
+        resultBadgeText = resultBadgeText || 'RESULT LOSS';
+      } else if (rawResUpper.includes('TIE') || rawResUpper.includes('DRAW')) {
+        normalizedGameResult = 'TIE';
+        resultBadgeText = resultBadgeText || 'RESULT TIE';
+      } else if (raw.home_score !== undefined && raw.away_score !== undefined && !isNaN(Number(raw.home_score)) && !isNaN(Number(raw.away_score))) {
+        normalizedGameResult = Number(raw.home_score) >= Number(raw.away_score) ? 'WIN' : 'LOSS';
+        resultBadgeText = resultBadgeText || (Number(raw.home_score) >= Number(raw.away_score) ? 'RESULT WIN' : 'RESULT LOSS');
+      } else {
+        normalizedGameResult = 'WIN';
+        resultBadgeText = resultBadgeText || 'RESULT WIN';
+      }
+    }
 
     const rosterAthletesList = Array.isArray(raw.rosterAthletes)
       ? raw.rosterAthletes
@@ -128,8 +192,13 @@ export async function submitMatch(req: AuthRequest, res: Response): Promise<void
       match_type: raw.match_type || raw.game_type || 'Practice',
       match_date: raw.match_date || raw.date_time || new Date().toISOString(),
       location: raw.location || 'Stadium',
-      opponent_team_name: raw.opponent_team_name || raw.away_team_name || 'OPPONENT',
+      opponent_team_name: raw.opponent_team_name || raw.away_team_name || (isTimedSport ? '' : 'OPPONENT'),
       game_result: normalizedGameResult as any,
+      rank: bestRank !== null ? bestRank : (raw.rank !== undefined ? raw.rank : undefined),
+      place: bestRank !== null ? bestRank : (raw.place !== undefined ? raw.place : undefined),
+      placement_rank: bestRank !== null ? bestRank : (raw.placement_rank !== undefined ? raw.placement_rank : undefined),
+      result_badge_text: resultBadgeText,
+      resultBadgeText: resultBadgeText,
       home_score: raw.home_score !== undefined ? Number(raw.home_score) : undefined,
       away_score: raw.away_score !== undefined ? Number(raw.away_score) : undefined,
       notes: raw.notes || '',
