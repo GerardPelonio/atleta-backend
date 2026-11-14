@@ -822,10 +822,10 @@ export async function seedAllAthletesComprehensive() {
 }
 
 function mergedTeamId(sport: string): string {
-  if (sport === 'Swimming') return 'TEAM-014';
-  if (sport === 'Track and Field') return 'TEAM-024';
-  if (sport === 'Volleyball') return 'TEAM-013';
-  return 't_green_archers';
+  if (sport === 'Swimming') return 't_1793614272692_gcl2';
+  if (sport === 'Track and Field') return 't_ateneo_track_field';
+  if (sport === 'Volleyball') return 't_1793613253217_cv8f';
+  return 't_1793612015475_cw40';
 }
 
 function mergedTeamName(sport: string): string {
@@ -1073,3 +1073,4 @@ if (require.main === module) {
       process.exit(1);
     });
 }
+
