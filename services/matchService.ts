@@ -193,6 +193,9 @@ export async function submitMatchSession(
 ) {
   const key = idempotencyKey.trim();
 
+  const cleanCoachRawId = String(coachId || (payload as any).coach_id || (payload as any).logged_by_coach_id || '').replace(/^coach_/, '') || 'coach_default';
+  const canonicalCoachId = cleanCoachRawId !== 'coach_default' ? `coach_${cleanCoachRawId}` : 'coach_default';
+
   // Check idempotency cache in Firestore
   const idempotencyDoc = await db.collection('Idempotency_Keys').doc(key).get();
   if (idempotencyDoc.exists) {
@@ -200,21 +203,7 @@ export async function submitMatchSession(
     return idempotencyDoc.data()!.response;
   }
 
-  // Check if match_id was explicitly supplied and already exists in Match_Logs
   const explicitMatchId = (payload as any).match_id;
-  if (explicitMatchId) {
-    const existingMatch = await db.collection('Match_Logs').doc(explicitMatchId).get();
-    if (existingMatch.exists) {
-      console.log(`ℹ️ [DEDUPLICATION] Match '${explicitMatchId}' already exists. Returning existing record.`);
-      return {
-        message: 'Match log already recorded (duplicate eliminated).',
-        match: existingMatch.data(),
-        total_players_logged: 0,
-        performance_metrics: [],
-      };
-    }
-  }
-
   const matchId = explicitMatchId || (await generateStandardId('MATCH'));
   const now = new Date().toISOString();
 
@@ -225,6 +214,7 @@ export async function submitMatchSession(
   // Resolve Home Team and Away Team names
   const homeTeamName = ((payload as any).home_team_name || (payload as any).home_team || payload.team_id || (isTimedSport ? 'ATLETA' : 'CELTICS')).trim();
   const oppTeamName = ((payload as any).away_team_name || (payload as any).away_team || payload.opponent_team_name || (isTimedSport ? '' : 'HAWKS')).trim();
+  const defaultMatchTitle = isTimedSport ? `${homeTeamName} Meet` : `${homeTeamName} vs ${oppTeamName}`;
 
   // Resolve Home and Away Scores
   const homeScore = isTimedSport
@@ -813,8 +803,6 @@ export async function submitMatchSession(
     }
   }
 
-  const defaultMatchTitle = isTimedSport ? `${homeTeamName} Meet` : `${homeTeamName} vs ${oppTeamName}`;
-
   let bestRankSession: number | null = null;
   if ((payload as any).rank !== undefined && (payload as any).rank !== null && !isNaN(Number((payload as any).rank))) {
     bestRankSession = Number((payload as any).rank);
@@ -873,10 +861,10 @@ export async function submitMatchSession(
     teams: isTimedSport ? [homeTeamName] : [homeTeamName, oppTeamName],
     home_score: isTimedSport ? null : homeScore,
     away_score: isTimedSport ? null : awayScore,
-    coach_id: coachId,
-    logged_by_coach_id: coachId,
-    coaching_staff: payload.coaching_staff || (coachId ? [coachId] : []),
-    assigned_coaches: payload.assigned_coaches || (coachId ? [coachId] : []),
+    coach_id: canonicalCoachId,
+    logged_by_coach_id: cleanCoachRawId,
+    coaching_staff: [cleanCoachRawId, canonicalCoachId].filter(Boolean),
+    assigned_coaches: [cleanCoachRawId, canonicalCoachId].filter(Boolean),
     sport_type: payload.sport_type,
     match_type: payload.match_type.trim(),
     match_date: payload.match_date,
@@ -961,16 +949,15 @@ export async function submitMatchSession(
   });
 
   // Increment coach's matches_logged and total_matches_logged
-  if (coachId && coachId !== 'coach_default') {
-    const rawCoachId = coachId.replace(/^coach_/, '');
-    const canonicalCoachId = `coach_${rawCoachId}`;
+  if (cleanCoachRawId && cleanCoachRawId !== 'coach_default') {
     const incData = {
+      metric_logs: FieldValue.increment(1),
       matches_logged: FieldValue.increment(1),
       total_matches_logged: FieldValue.increment(1),
       updated_at: now,
     };
     batch.set(db.collection('Coach_Profiles').doc(canonicalCoachId), incData, { merge: true });
-    batch.set(db.collection('Coach_Profiles').doc(rawCoachId), incData, { merge: true });
+    batch.set(db.collection('Coach_Profiles').doc(cleanCoachRawId), incData, { merge: true });
   }
 
   await batch.commit();

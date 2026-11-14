@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import jwt from 'jsonwebtoken';
 import { AuthRequest } from '../middlewares/authMiddleware';
 import { db } from '../utils/firebaseAdmin';
 import { serverCache } from '../utils/cache';
@@ -15,7 +16,19 @@ import { MatchSubmissionPayload } from '../models/matchModel';
 
 export async function getAllMatchesHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const coachId = req.user?.uid || (typeof req.query.coach_id === 'string' ? req.query.coach_id : undefined);
+    let coachId = req.user?.uid || (typeof req.query.coach_id === 'string' ? req.query.coach_id : undefined);
+    if (!coachId) {
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        try {
+          const tokenStr = authHeader.split(' ')[1];
+          const decoded: any = jwt.decode(tokenStr);
+          if (decoded && (decoded.uid || decoded.user_id || decoded.coach_id || decoded.sub)) {
+            coachId = decoded.uid || decoded.user_id || decoded.coach_id || decoded.sub;
+          }
+        } catch (_) {}
+      }
+    }
     const showAll = req.query.all === 'true';
 
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
@@ -113,7 +126,24 @@ export async function getAllMatchesHandler(req: AuthRequest, res: Response): Pro
 export async function submitMatch(req: AuthRequest, res: Response): Promise<void> {
   try {
     const raw = req.body || {};
-    const coachId = req.user?.uid || raw.coach_id || raw.logged_by_coach_id || 'coach_default';
+    let coachId = req.user?.uid || (typeof req.query.coach_id === 'string' ? req.query.coach_id : undefined) || raw.coach_id || raw.logged_by_coach_id;
+    if (!coachId || coachId === 'coach_default') {
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        try {
+          const tokenStr = authHeader.split(' ')[1];
+          const decoded: any = jwt.decode(tokenStr);
+          if (decoded && (decoded.uid || decoded.user_id || decoded.coach_id || decoded.sub)) {
+            coachId = decoded.uid || decoded.user_id || decoded.coach_id || decoded.sub;
+          }
+        } catch (_) {}
+      }
+    }
+    if (!coachId) {
+      coachId = 'coach_default';
+    }
+    const cleanCoachRawId = String(coachId).replace(/^coach_/, '');
+    const canonicalCoachId = `coach_${cleanCoachRawId}`;
     let idempotencyKey = (req.headers['idempotency-key'] || req.headers['x-idempotency-key'] || raw.idempotency_key) as string | undefined;
     if (!idempotencyKey || typeof idempotencyKey !== 'string' || idempotencyKey.trim().length === 0) {
       idempotencyKey = `idemp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -217,6 +247,10 @@ export async function submitMatch(req: AuthRequest, res: Response): Promise<void
 
     const payload: MatchSubmissionPayload = {
       ...raw,
+      coach_id: canonicalCoachId,
+      logged_by_coach_id: cleanCoachRawId,
+      coaching_staff: [cleanCoachRawId, canonicalCoachId],
+      assigned_coaches: [cleanCoachRawId, canonicalCoachId],
       team_id: raw.team_id || raw.team_name || raw.home_team_name || 'team_home',
       sport_type: normalizedSport as any,
       matchName: resolvedMatchName,

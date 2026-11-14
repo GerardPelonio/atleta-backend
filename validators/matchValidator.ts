@@ -59,10 +59,11 @@ export function validateSubmitMatch(
     errors.push({ field: 'location', message: 'Location is required.' });
   }
 
-  // opponent_team_name (Required)
+  // opponent_team_name (Required for team vs team ball games; optional for individual/timed sports)
+  const isTimed = /SWIM|TRACK|FIELD|RUN|RACE|ATHLETIC/i.test(String(data.sport_type || ''));
   const opponent = typeof data.opponent_team_name === 'string' ? data.opponent_team_name.trim() : '';
-  if (!opponent && !data.away_team_name) {
-    errors.push({ field: 'opponent_team_name', message: 'Opponent team name (opponent_team_name) is required.' });
+  if (!isTimed && !opponent && !data.away_team_name) {
+    errors.push({ field: 'opponent_team_name', message: 'Opponent team name (opponent_team_name) is required for team ball games.' });
   }
 
   // game_result (Required: Enum "WIN" | "LOSS")
