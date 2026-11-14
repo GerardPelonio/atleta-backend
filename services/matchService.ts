@@ -2936,43 +2936,100 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
       ? matchData.scoresheet_data.player_summary
       : (Array.isArray(matchData.parsed_tables?.player_summary) ? matchData.parsed_tables.player_summary : []));
 
-  if (playerMetrics.length === 0 && detailsFallbackList.length > 0) {
-    for (const item of detailsFallbackList) {
-      const pName = String(item.player_name || 'Athlete');
-      const nameParts = pName.split(/\s+/);
-      const rawStats = item.stats || item.sport_stats || {
-        points: Number(item.points ?? item.pts ?? 0),
-        rebounds: Number(((item.offensive_rebounds || 0) + (item.defensive_rebounds || 0)) || (item.rebounds ?? item.reb ?? 0)),
-        assists: Number(item.assists ?? item.ast ?? 0),
-        steals: Number(item.steals ?? item.stl ?? 0),
-        blocks: Number(item.blocks ?? item.blk ?? 0),
-        turnovers: Number(item.turnovers ?? item.to ?? 0),
-        fouls: Number(item.fouls ?? item.pf ?? 0),
-        fg_made: Number(item.fg_made ?? item.fgm ?? 0),
-        fg_attempted: Number(item.fg_attempted ?? item.fga ?? 0),
-        ft_made: Number(item.ft_made ?? item.ftm ?? 0),
-        ft_attempted: Number(item.ft_attempted ?? item.fta ?? 0),
-      };
+  const sportType = matchData.sport_type || 'Basketball';
+  const sportLower = String(sportType).toLowerCase();
+  const isTimedSport = sportLower.includes('swim') || sportLower.includes('track') || sportLower.includes('field') || sportLower.includes('run');
 
-      const computed = calculateBasketballMetrics(rawStats);
+  // Check if playerMetrics consists entirely of dummy placeholder records (e.g. "Player 1", "Player 2" or missing timing stats for timed sports)
+  const isDummyMetrics = playerMetrics.length > 0 && playerMetrics.every((p) => {
+    const isPlaceholderName = /^Player\s*\d+$/i.test(p.player_name || '') || /^Player\s*\d+$/i.test(p.first_name || '');
+    const missingTime = isTimedSport && !p.sport_stats?.time && !p.sport_stats?.finish_time && !p.sport_stats?.formatted_time && !p.sport_stats?.finish_time_ms;
+    return isPlaceholderName || missingTime;
+  });
+
+  if ((playerMetrics.length === 0 || isDummyMetrics) && detailsFallbackList.length > 0) {
+    if (isDummyMetrics) {
+      playerMetrics.length = 0; // Clear dummy metrics in favor of authentic match player_stats
+    }
+    for (let idx = 0; idx < detailsFallbackList.length; idx++) {
+      const item = detailsFallbackList[idx];
+      const pName = String(item.player_name || item.name || item.athlete_name || item.full_name || `Athlete ${idx + 1}`);
+      const nameParts = pName.split(/\s+/);
+      const athleteId = item.athlete_id || `ath_${matchId}_${idx + 1}`;
+      const pTeam = item.team_name || item.team || teamName;
+
+      let enrichedSportStats: any;
+      let efficiency = 0;
+
+      if (isTimedSport) {
+        const timeVal = item.time || item.finish_time || item.formatted_time || item.sport_stats?.time || item.sport_stats?.finish_time || item.sport_stats?.formatted_time || null;
+        const rankVal = item.rank ?? item.place ?? item.placement_rank ?? item.sport_stats?.rank ?? item.sport_stats?.placement_rank ?? (idx + 1);
+        const eventVal = item.event || item.event_name || item.sport_stats?.event || item.sport_stats?.event_name || matchData.event_name || null;
+        const splitVal = item.split_time || item.split || item.sport_stats?.split_time || item.sport_stats?.split || null;
+        const distVal = item.distance_m || item.distance_meters || item.distance || item.sport_stats?.distance_meters || item.sport_stats?.distance || null;
+
+        let timeMs = Number(item.finish_time_ms || item.sport_stats?.finish_time_ms || 0);
+        if (!timeMs && timeVal) {
+          const parts = String(timeVal).replace(/s$/i, '').split(':');
+          if (parts.length === 2) {
+            timeMs = Math.round((parseFloat(parts[0]) * 60 + parseFloat(parts[1])) * 1000);
+          } else if (parts.length === 1 && !isNaN(parseFloat(parts[0]))) {
+            timeMs = Math.round(parseFloat(parts[0]) * 1000);
+          }
+        }
+
+        enrichedSportStats = {
+          time: timeVal,
+          finish_time: timeVal,
+          formatted_time: timeVal,
+          finish_time_ms: timeMs,
+          event_name: eventVal,
+          event: eventVal,
+          rank: rankVal,
+          placement_rank: rankVal,
+          split_time: splitVal,
+          distance_meters: distVal,
+          lane: item.lane ?? item.sport_stats?.lane ?? 0,
+          heat: item.heat ?? item.sport_stats?.heat ?? 0,
+          ...(item.sport_stats || item.stats || {}),
+        };
+        efficiency = item.calculated_efficiency || item.calculated_player_efficiency || 0;
+      } else {
+        const rawStats = item.stats || item.sport_stats || {
+          points: Number(item.points ?? item.pts ?? 0),
+          rebounds: Number(((item.offensive_rebounds || 0) + (item.defensive_rebounds || 0)) || (item.rebounds ?? item.reb ?? 0)),
+          assists: Number(item.assists ?? item.ast ?? 0),
+          steals: Number(item.steals ?? item.stl ?? 0),
+          blocks: Number(item.blocks ?? item.blk ?? 0),
+          turnovers: Number(item.turnovers ?? item.to ?? 0),
+          fouls: Number(item.fouls ?? item.pf ?? 0),
+          fg_made: Number(item.fg_made ?? item.fgm ?? 0),
+          fg_attempted: Number(item.fg_attempted ?? item.fga ?? 0),
+          ft_made: Number(item.ft_made ?? item.ftm ?? 0),
+          ft_attempted: Number(item.ft_attempted ?? item.fta ?? 0),
+        };
+
+        const computed = calculateBasketballMetrics(rawStats);
+        enrichedSportStats = computed.enrichedStats;
+        efficiency = item.calculated_efficiency || item.calculated_player_efficiency || computed.efficiency || 0;
+      }
 
       playerMetrics.push({
-        metric_id: `metric_${matchId}_${item.athlete_id || item.jersey_number || 'player'}`,
-        athlete_id: item.athlete_id || 'athlete_id',
-        user_id: item.athlete_id || 'user_id',
+        metric_id: `metric_${matchId}_${athleteId}`,
+        athlete_id: athleteId,
+        user_id: item.user_id || athleteId,
         first_name: nameParts[0] || 'Athlete',
         last_name: nameParts.slice(1).join(' ') || '',
         player_name: pName,
-        team_name: item.team_name || item.team || '',
-        position: item.position || 'Player',
+        team_name: pTeam,
+        position: item.position || (isTimedSport ? (sportLower.includes('swim') ? 'Swimmer' : 'Runner') : 'Player'),
         jersey_number: item.jersey_number !== undefined ? Number(item.jersey_number) : null,
-        sport_stats: computed.enrichedStats,
-        calculated_player_efficiency: item.calculated_efficiency || item.calculated_player_efficiency || computed.efficiency || 0,
+        sport_stats: enrichedSportStats,
+        calculated_player_efficiency: efficiency,
       });
     }
   }
 
-  const sportType = matchData.sport_type || 'Basketball';
   let sportSpecificDetails: any;
 
   if (sportType === 'Basketball') {
@@ -3041,7 +3098,7 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
       },
       box_score: boxScore,
     };
-  } else if (sportType === 'Swimming' || sportType === 'Track & Field') {
+  } else if (isTimedSport || sportType === 'Swimming' || sportType === 'Track & Field' || sportType === 'Track and Field') {
     const raceResults = playerMetrics.map((p, idx) => {
       const s = p.sport_stats || {};
       let timeMs = Number(s.finish_time_ms || 0);
@@ -3051,18 +3108,18 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
       const distance = `${distanceMeters}m`;
       const mins = Math.floor(timeMs / 60000);
       const secs = ((timeMs % 60000) / 1000).toFixed(2);
-      const formattedTime = s.formatted_time || s.time || (timeMs > 0 ? `${mins > 0 ? mins + ':' : ''}${Number(secs) < 10 && mins > 0 ? '0' : ''}${secs}s` : '00:00.00');
+      const formattedTime = s.formatted_time || s.time || s.finish_time || (timeMs > 0 ? `${mins > 0 ? mins + ':' : ''}${Number(secs) < 10 && mins > 0 ? '0' : ''}${secs}s` : '-');
 
       return {
         athlete_id: p.athlete_id,
-        athlete_name: `${p.first_name} ${p.last_name}`.trim(),
-        placement_rank: s.placement_rank || (idx + 1),
+        athlete_name: (p.player_name || `${p.first_name} ${p.last_name}`).trim() || 'Athlete',
+        placement_rank: s.placement_rank || s.rank || (idx + 1),
         distance_meters: distanceMeters,
         distance: distance,
         finish_time_ms: timeMs,
         formatted_finish_time: formattedTime,
         time: formattedTime,
-        split_times: s.split_times || [],
+        split_times: s.split_times || (s.split_time ? [s.split_time] : []),
         split_times_ms: s.split_times_ms || [],
         is_disqualified: Boolean(s.is_disqualified),
         calculated_player_efficiency: p.calculated_player_efficiency,
@@ -3071,7 +3128,7 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
 
     sportSpecificDetails = {
       sport_category: sportType,
-      event_name: matchData.event_name || (playerMetrics[0]?.sport_stats?.event_name) || `${playerMetrics[0]?.sport_stats?.distance_meters || 100}m Event`,
+      event_name: matchData.event_name || (playerMetrics[0]?.sport_stats?.event_name) || (playerMetrics[0]?.sport_stats?.event) || `${playerMetrics[0]?.sport_stats?.distance_meters || 100}m Event`,
       race_results: raceResults,
     };
   } else {

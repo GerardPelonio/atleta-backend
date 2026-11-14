@@ -213,25 +213,53 @@ export async function createOfficialMatchService(
 
   // Write Performance_Metrics for provided players
   if (Array.isArray(data.player_stats) && data.player_stats.length > 0) {
+    const sportLower = String(data.sport_type || '').toLowerCase();
+    const isTimedSport = sportLower.includes('swim') || sportLower.includes('track') || sportLower.includes('field') || sportLower.includes('run');
+
     for (let idx = 0; idx < data.player_stats.length; idx++) {
       const p = data.player_stats[idx];
-      const pName = p.player_name || `Player ${idx + 1}`;
+      const pName = p.player_name || p.name || p.athlete_name || p.full_name || 'Athlete';
       const pTeam = p.team_name || p.team || homeName;
       const athleteId = p.athlete_id || `ath_ocr_${matchId}_${idx + 1}`;
       const pJersey = p.jersey_number !== undefined ? Number(p.jersey_number) : (idx + 1);
-      const rawStats = p.stats || p.sport_stats || {
-        points: Number(p.points ?? p.pts ?? 0),
-        rebounds: Number(((p.offensive_rebounds || 0) + (p.defensive_rebounds || 0)) || (p.rebounds ?? p.reb ?? 0)),
-        assists: Number(p.assists ?? p.ast ?? 0),
-        steals: Number(p.steals ?? p.stl ?? 0),
-        blocks: Number(p.blocks ?? p.blk ?? 0),
-        turnovers: Number(p.turnovers ?? p.to ?? 0),
-        fouls: Number(p.fouls ?? p.pf ?? 0),
-        fg_made: Number(p.fg_made ?? p.fgm ?? 0),
-        fg_attempted: Number(p.fg_attempted ?? p.fga ?? 0),
-        ft_made: Number(p.ft_made ?? p.ftm ?? 0),
-        ft_attempted: Number(p.ft_attempted ?? p.fta ?? 0),
-      };
+
+      let rawStats = p.stats || p.sport_stats;
+      if (!rawStats) {
+        if (isTimedSport) {
+          const timeVal = p.time || p.finish_time || p.formatted_time || null;
+          const rankVal = p.rank ?? p.place ?? p.placement_rank ?? (idx + 1);
+          const eventVal = p.event || p.event_name || (data as any).event_name || null;
+          const splitVal = p.split_time || p.split || null;
+          const distVal = p.distance_m || p.distance_meters || p.distance || null;
+          rawStats = {
+            time: timeVal,
+            finish_time: timeVal,
+            formatted_time: timeVal,
+            event_name: eventVal,
+            event: eventVal,
+            rank: rankVal,
+            placement_rank: rankVal,
+            split_time: splitVal,
+            distance_meters: distVal,
+            lane: p.lane ?? 0,
+            heat: p.heat ?? 0,
+          };
+        } else {
+          rawStats = {
+            points: Number(p.points ?? p.pts ?? 0),
+            rebounds: Number(((p.offensive_rebounds || 0) + (p.defensive_rebounds || 0)) || (p.rebounds ?? p.reb ?? 0)),
+            assists: Number(p.assists ?? p.ast ?? 0),
+            steals: Number(p.steals ?? p.stl ?? 0),
+            blocks: Number(p.blocks ?? p.blk ?? 0),
+            turnovers: Number(p.turnovers ?? p.to ?? 0),
+            fouls: Number(p.fouls ?? p.pf ?? 0),
+            fg_made: Number(p.fg_made ?? p.fgm ?? 0),
+            fg_attempted: Number(p.fg_attempted ?? p.fga ?? 0),
+            ft_made: Number(p.ft_made ?? p.ftm ?? 0),
+            ft_attempted: Number(p.ft_attempted ?? p.fta ?? 0),
+          };
+        }
+      }
 
       const metricId = `metric_${matchId}_${athleteId}`;
       batch.set(db.collection('Performance_Metrics').doc(metricId), {
@@ -241,7 +269,7 @@ export async function createOfficialMatchService(
         player_name: pName,
         team_name: pTeam,
         jersey_number: pJersey,
-        position: p.position || 'G',
+        position: p.position || (sportLower.includes('swim') ? 'Swimmer' : (sportLower.includes('track') ? 'Runner' : 'G')),
         sport_category: data.sport_type || 'Basketball',
         sport_stats: rawStats,
         calculated_player_efficiency: p.calculated_efficiency || p.calculated_player_efficiency || 0,
