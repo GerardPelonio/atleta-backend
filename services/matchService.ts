@@ -924,6 +924,19 @@ export async function submitMatchSession(
   for (const metric of performanceMetrics) {
     const metricRef = db.collection('Performance_Metrics').doc(metric.metric_id);
     batch.set(metricRef, metric);
+    if (metric.athlete_id) {
+      const rawAid = String(metric.athlete_id).replace(/^ath_/, '');
+      const canAid = `ath_${rawAid}`;
+      batch.set(db.collection('Athlete_Profiles').doc(canAid).collection('match_history').doc(matchId), metric, { merge: true });
+      batch.set(db.collection('Athlete_Profiles').doc(rawAid).collection('match_history').doc(matchId), metric, { merge: true });
+    }
+  }
+
+  if (homeTeamId) {
+    batch.set(db.collection('Teams').doc(homeTeamId), {
+      total_matches: FieldValue.increment(1),
+      updated_at: now,
+    }, { merge: true });
   }
 
   const responsePayload = {
