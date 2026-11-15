@@ -178,6 +178,23 @@ export function calculateDynamicSportMetrics(stats: Record<string, any>): {
 
 // ─── Service Core Functions ──────────────────────────────────────────────────
 
+async function timedGet<T>(promise: Promise<T>, timeoutMs: number = 2000): Promise<T | null> {
+  let timer: any;
+  try {
+    const result = await Promise.race([
+      promise,
+      new Promise<null>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('READ_TIMEOUT')), timeoutMs);
+      }),
+    ]);
+    clearTimeout(timer);
+    return result as T;
+  } catch {
+    clearTimeout(timer);
+    return null;
+  }
+}
+
 /**
  * Submit live game log session and stats payload.
  * POST /api/v1/matches
@@ -198,7 +215,7 @@ export async function submitMatchSession(
 
   // Check idempotency cache in Firestore
   try {
-    const idempotencyDoc = await db.collection('Idempotency_Keys').doc(key).get();
+    const idempotencyDoc = await timedGet(db.collection('Idempotency_Keys').doc(key).get(), 1500);
     if (idempotencyDoc && idempotencyDoc.exists) {
       console.log(`ℹ️ [IDEMPOTENCY REPLAY] Returning cached result for key '${key}'`);
       return idempotencyDoc.data()!.response;
@@ -235,12 +252,12 @@ export async function submitMatchSession(
   // Resolve or create Home Team doc in Teams collection
   let homeTeamId = payload.team_id;
   try {
-    const homeTeamQuery = await db.collection('Teams')
+    const homeTeamQuery = await timedGet(db.collection('Teams')
       .where('team_name', '==', homeTeamName)
       .limit(1)
-      .get();
+      .get(), 1500);
 
-    if (!homeTeamQuery.empty) {
+    if (homeTeamQuery && !homeTeamQuery.empty) {
       homeTeamId = homeTeamQuery.docs[0].id;
     } else {
       homeTeamId = await generateStandardId('TEAM');
@@ -266,12 +283,12 @@ export async function submitMatchSession(
   let oppTeamId = (payload as any).away_team_id || '';
   if (oppTeamName) {
     try {
-      const oppTeamQuery = await db.collection('Teams')
+      const oppTeamQuery = await timedGet(db.collection('Teams')
         .where('team_name', '==', oppTeamName)
         .limit(1)
-        .get();
+        .get(), 1500);
 
-      if (!oppTeamQuery.empty) {
+      if (oppTeamQuery && !oppTeamQuery.empty) {
         oppTeamId = oppTeamQuery.docs[0].id;
       } else {
         oppTeamId = await generateStandardId('TEAM');
@@ -305,8 +322,8 @@ export async function submitMatchSession(
   // Pre-load coach's active team roster athlete profiles for robust matching by ID, name, or jersey number
   let homeTeamRosterProfiles: Array<{ id: string; ref: FirebaseFirestore.DocumentReference; data: any }> = [];
   try {
-    const teamDoc = await db.collection('Teams').doc(homeTeamId).get();
-    if (teamDoc.exists) {
+    const teamDoc = await timedGet(db.collection('Teams').doc(homeTeamId).get(), 1500);
+    if (teamDoc && teamDoc.exists) {
       const tData = teamDoc.data() || {};
       const map = new Map<string, { id: string; ref: FirebaseFirestore.DocumentReference; data: any }>();
 
@@ -327,11 +344,10 @@ export async function submitMatchSession(
       }
 
       // Single query for athletes by team_id
-      const byTeamSnap = await db.collection('Athlete_Profiles')
+      const byTeamSnap = await timedGet(db.collection('Athlete_Profiles')
         .where('team_id', '==', homeTeamId)
         .limit(50)
-        .get()
-        .catch(() => null);
+        .get(), 1500);
 
       if (byTeamSnap && !byTeamSnap.empty) {
         byTeamSnap.docs.forEach(d => {
@@ -608,12 +624,7 @@ export async function submitMatchSession(
 
     // Ensure Athlete Profile exists in Athlete_Profiles and update their career averages
     const athleteRef = db.collection('Athlete_Profiles').doc(athleteId);
-    let athleteDoc: any = null;
-    try {
-      athleteDoc = await athleteRef.get();
-    } catch (err: any) {
-      console.warn('⚠️ [SUBMIT MATCH] Athlete doc get fallback:', err?.message || err);
-    }
+    const athleteDoc: any = await timedGet(athleteRef.get(), 1500);
     
     const gamePts = Number(rawStats.points ?? rawStats.pts ?? (item as any).pts ?? (item as any).points ?? 0);
     const gameAst = Number(rawStats.assists ?? rawStats.ast ?? (item as any).ast ?? (item as any).assists ?? 0);
@@ -689,9 +700,9 @@ export async function submitMatchSession(
     if (!registeredAthleteDoc) {
       const rawUid = athleteId.replace(/^ath_/, '');
       const [altDoc1, altDoc2, userDoc] = await Promise.all([
-        db.collection('Athlete_Profiles').doc(rawUid).get().catch(() => null),
-        db.collection('Athlete_Profiles').doc(`ath_${rawUid}`).get().catch(() => null),
-        db.collection('Users').doc(rawUid).get().catch(() => null),
+        timedGet(db.collection('Athlete_Profiles').doc(rawUid).get(), 1000),
+        timedGet(db.collection('Athlete_Profiles').doc(`ath_${rawUid}`).get(), 1000),
+        timedGet(db.collection('Users').doc(rawUid).get(), 1000),
       ]);
 
       if (altDoc1 && altDoc1.exists) {
@@ -706,8 +717,8 @@ export async function submitMatchSession(
       } else if (pName && pName.trim().length > 0) {
         const trimmedName = pName.trim();
         const [profileByName, userByName] = await Promise.all([
-          db.collection('Athlete_Profiles').where('full_name', '==', trimmedName).limit(1).get().catch(() => null),
-          db.collection('Users').where('full_name', '==', trimmedName).limit(1).get().catch(() => null),
+          timedGet(db.collection('Athlete_Profiles').where('full_name', '==', trimmedName).limit(1).get(), 1000),
+          timedGet(db.collection('Users').where('full_name', '==', trimmedName).limit(1).get(), 1000),
         ]);
         if (profileByName && !profileByName.empty) {
           registeredAthleteDoc = profileByName.docs[0];
