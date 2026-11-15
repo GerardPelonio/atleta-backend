@@ -13,6 +13,7 @@ import {
 } from '../services/matchService';
 import { validateSubmitMatch, ServiceError } from '../validators/matchValidator';
 import { MatchSubmissionPayload } from '../models/matchModel';
+import { deleteMatchService } from '../services/validationService';
 
 export async function getAllMatchesHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
@@ -521,6 +522,61 @@ export async function getMatchDetailsHandler(req: AuthRequest, res: Response): P
       return;
     }
     console.error('getMatchDetailsHandler error:', error);
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
+  }
+}
+
+export async function clearMatchesHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    let coachId = req.user?.uid || (typeof req.query.coach_id === 'string' ? req.query.coach_id : undefined) || (typeof req.body?.coach_id === 'string' ? req.body.coach_id : undefined);
+    if (!coachId) {
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        try {
+          const tokenStr = authHeader.split(' ')[1];
+          const decoded: any = jwt.decode(tokenStr);
+          coachId = decoded?.uid || decoded?.user_id || decoded?.coach_id || decoded?.sub;
+        } catch (_) {}
+      }
+    }
+
+    const matchIds: string[] = Array.isArray(req.body?.match_ids) ? req.body.match_ids : [];
+    let deletedCount = 0;
+
+    if (matchIds.length > 0) {
+      for (const mId of matchIds) {
+        try {
+          await deleteMatchService(mId);
+          deletedCount++;
+        } catch (_) {}
+      }
+    }
+
+    if (coachId) {
+      const qStaff = await db.collection('Match_Logs').where('coaching_staff', 'array-contains', coachId).get().catch(() => null);
+      if (qStaff && !qStaff.empty) {
+        for (const doc of qStaff.docs) {
+          try {
+            await deleteMatchService(doc.id);
+            deletedCount++;
+          } catch (_) {}
+        }
+      }
+      const qCoach = await db.collection('Match_Logs').where('coach_id', '==', coachId).get().catch(() => null);
+      if (qCoach && !qCoach.empty) {
+        for (const doc of qCoach.docs) {
+          try {
+            await deleteMatchService(doc.id);
+            deletedCount++;
+          } catch (_) {}
+        }
+      }
+    }
+
+    serverCache.invalidateTags(['matches', 'dashboard', 'validations', 'schedules', 'audits']);
+    res.status(200).json({ success: true, message: `Cleared ${deletedCount} match(es).`, count: deletedCount });
+  } catch (error: any) {
+    console.error('clearMatchesHandler error:', error);
     res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
   }
 }

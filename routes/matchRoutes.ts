@@ -9,6 +9,7 @@ import {
   getBoxscore,
   getMatchDetailsHandler,
   getAllMatchesHandler,
+  clearMatchesHandler,
 } from '../controllers/matchController';
 import {
   submitAuditRequestController,
@@ -62,6 +63,8 @@ router.get('/:matchId/details', optionalAuth, getMatchDetailsHandler);
 router.get('/:matchId', optionalAuth, getMatchDetailsHandler);
 router.post('/:matchId/audit-request', authenticate, requireCoach, submitAuditRequestController);
 router.get('/:matchId/pdf', authenticate, exportMatchPdfController);
+router.post('/clear', optionalAuth, clearMatchesHandler);
+router.delete('/clear', optionalAuth, clearMatchesHandler);
 router.delete('/:matchId', authenticate, deleteMatchHandler);
 
 export default router;
