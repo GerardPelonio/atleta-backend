@@ -2992,8 +2992,8 @@ export async function getMatchBoxscore(matchId: string): Promise<BoxscoreRespons
  * 1. Requests referencing a non-existent match ID return HTTP 404 Not Found.
  */
 export async function getMatchResultDetails(matchId: string): Promise<any> {
-  const matchDoc = await db.collection('Match_Logs').doc(matchId).get();
-  if (!matchDoc.exists) {
+  const matchDoc = await timedGet(db.collection('Match_Logs').doc(matchId).get(), 2000);
+  if (!matchDoc || !matchDoc.exists) {
     throw new ServiceError(`Match with ID '${matchId}' was not found.`, 404);
   }
 
@@ -3004,8 +3004,8 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
 
   if (!scoresheetUrl || !resolvedNotes) {
     try {
-      const auditSnap = await db.collection('Official_Audits').where('match_id', '==', matchId).limit(1).get();
-      if (!auditSnap.empty) {
+      const auditSnap = await timedGet(db.collection('Official_Audits').where('match_id', '==', matchId).limit(1).get(), 1000);
+      if (auditSnap && !auditSnap.empty) {
         const auditData = auditSnap.docs[0].data();
         if (!scoresheetUrl) {
           scoresheetUrl = auditData?.scoresheet_url || '';
@@ -3020,62 +3020,74 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
   // Fetch team summary
   let teamName = matchData.home_team_name || 'Home Team';
   if (matchData.team_id && teamName === 'Home Team') {
-    const teamDoc = await db.collection('Teams').doc(matchData.team_id).get();
-    if (teamDoc.exists) {
-      teamName = teamDoc.data()!.team_name || teamName;
-    }
+    try {
+      const teamDoc = await timedGet(db.collection('Teams').doc(matchData.team_id).get(), 1000);
+      if (teamDoc && teamDoc.exists) {
+        teamName = teamDoc.data()!.team_name || teamName;
+      }
+    } catch (_) {}
   }
 
   // Fetch all player performance metrics for this match
-  const metricsSnapshot = await db
-    .collection('Performance_Metrics')
-    .where('match_id', '==', matchId)
-    .get();
+  let metricsSnapshot: any = null;
+  try {
+    metricsSnapshot = await timedGet(db
+      .collection('Performance_Metrics')
+      .where('match_id', '==', matchId)
+      .get(), 1500);
+  } catch (_) {}
 
   const playerMetrics: any[] = [];
-  for (const doc of metricsSnapshot.docs) {
-    const data = doc.data() as any;
-    const athleteId = data.athlete_id;
+  if (metricsSnapshot && !metricsSnapshot.empty) {
+    for (const doc of metricsSnapshot.docs) {
+      const data = doc.data() as any;
+      const athleteId = data.athlete_id;
 
-    const profileDoc = await db.collection('Athlete_Profiles').doc(athleteId).get();
-    const profileData = profileDoc.exists ? profileDoc.data()! : {};
+      let profileData: any = {};
+      try {
+        const profileDoc = await timedGet(db.collection('Athlete_Profiles').doc(athleteId).get(), 800);
+        profileData = profileDoc && profileDoc.exists ? profileDoc.data()! : {};
+      } catch (_) {}
 
-    let firstName = profileData.first_name || '';
-    let lastName = profileData.last_name || '';
+      let firstName = profileData.first_name || '';
+      let lastName = profileData.last_name || '';
 
-    if (!firstName || !lastName) {
-      const userDoc = await db.collection('Users').doc(profileData.user_id || athleteId).get();
-      if (userDoc.exists) {
-        const u = userDoc.data()!;
-        firstName = firstName || u.first_name || 'Athlete';
-        lastName = lastName || u.last_name || '';
+      if (!firstName || !lastName) {
+        try {
+          const userDoc = await timedGet(db.collection('Users').doc(profileData.user_id || athleteId).get(), 800);
+          if (userDoc && userDoc.exists) {
+            const u = userDoc.data()!;
+            firstName = firstName || u.first_name || 'Athlete';
+            lastName = lastName || u.last_name || '';
+          }
+        } catch (_) {}
       }
+
+      const pTeam = data.team_name || profileData.team_name || (data.team || '');
+      const pFullName = data.player_name || profileData.full_name || `${firstName} ${lastName}`.trim() || 'Athlete';
+      const pJersey = profileData.jersey_number ?? data.jersey_number ?? null;
+      const pPosition = profileData.position || data.position || 'Unassigned';
+
+      playerMetrics.push({
+        metric_id: data.metric_id,
+        athlete_id: athleteId,
+        user_id: profileData.user_id || athleteId,
+        player_name: pFullName,
+        first_name: firstName || data.player_name || 'Athlete',
+        last_name: lastName || '',
+        team_name: pTeam,
+        position: pPosition,
+        jersey_number: pJersey,
+        rank: data.rank ?? data.placement_rank ?? data.place ?? null,
+        placement_rank: data.placement_rank ?? data.rank ?? data.place ?? null,
+        place: data.place ?? data.placement_rank ?? data.rank ?? null,
+        finish_time: data.finish_time || data.time || data.sport_stats?.finish_time || data.sport_stats?.time || data.sport_stats?.formatted_time || null,
+        time: data.time || data.finish_time || data.sport_stats?.time || data.sport_stats?.finish_time || data.sport_stats?.formatted_time || null,
+        formatted_time: data.formatted_time || data.finish_time || data.time || data.sport_stats?.formatted_time || data.sport_stats?.finish_time || null,
+        sport_stats: data.sport_stats || {},
+        calculated_player_efficiency: data.calculated_player_efficiency || 0,
+      });
     }
-
-    const pTeam = data.team_name || profileData.team_name || (data.team || '');
-    const pFullName = data.player_name || profileData.full_name || `${firstName} ${lastName}`.trim() || 'Athlete';
-    const pJersey = profileData.jersey_number ?? data.jersey_number ?? null;
-    const pPosition = profileData.position || data.position || 'Unassigned';
-
-    playerMetrics.push({
-      metric_id: data.metric_id,
-      athlete_id: athleteId,
-      user_id: profileData.user_id || athleteId,
-      player_name: pFullName,
-      first_name: firstName || data.player_name || 'Athlete',
-      last_name: lastName || '',
-      team_name: pTeam,
-      position: pPosition,
-      jersey_number: pJersey,
-      rank: data.rank ?? data.placement_rank ?? data.place ?? null,
-      placement_rank: data.placement_rank ?? data.rank ?? data.place ?? null,
-      place: data.place ?? data.placement_rank ?? data.rank ?? null,
-      finish_time: data.finish_time || data.time || data.sport_stats?.finish_time || data.sport_stats?.time || data.sport_stats?.formatted_time || null,
-      time: data.time || data.finish_time || data.sport_stats?.time || data.sport_stats?.finish_time || data.sport_stats?.formatted_time || null,
-      formatted_time: data.formatted_time || data.finish_time || data.time || data.sport_stats?.formatted_time || data.sport_stats?.finish_time || null,
-      sport_stats: data.sport_stats || {},
-      calculated_player_efficiency: data.calculated_player_efficiency || 0,
-    });
   }
 
   // Fallback to matchData.player_stats or scoresheet_data if Performance_Metrics were not queried or written yet
@@ -3125,17 +3137,22 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
       let efficiency = 0;
 
       if (isTimedSport) {
-        const isValidTimeStr = (t: any) => t && typeof t === 'string' && t.trim() !== '' && t.trim() !== '-';
+        const isValidTimeStr = (t: any) => t && typeof t === 'string' && t.trim() !== '' && t.trim() !== '-' && t.trim() !== '--' && t.trim() !== '00:00.00';
         const timeVal = [
           item.finish_time,
           item.time,
           item.formatted_time,
+          item.mark,
+          item.distance_meters ? `${item.distance_meters}m` : null,
+          item.distance_m ? `${item.distance_m}m` : null,
           item.sport_stats?.finish_time,
           item.sport_stats?.time,
           item.sport_stats?.formatted_time,
+          item.sport_stats?.mark,
           item.stats?.finish_time,
           item.stats?.time,
           item.stats?.formatted_time,
+          item.stats?.mark,
           item.stats?.time_or_distance,
         ].find(isValidTimeStr) || null;
         const rankVal = item.rank ?? item.place ?? item.placement_rank ?? item.stats?.rank ?? item.stats?.place ?? item.sport_stats?.rank ?? item.sport_stats?.placement_rank ?? (idx + 1);
