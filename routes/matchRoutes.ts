@@ -23,30 +23,25 @@ import {
 const router = Router();
 
 router.get('/debug-diag', async (req, res) => {
-  const envKeys = Object.keys(process.env).filter(k => k.includes('FIREBASE') || k.includes('GOOGLE') || k.includes('ACCOUNT'));
-  const serviceAccountKeyV1Present = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_V1);
-  const serviceAccountPresent = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT);
-  const privateKeyPresent = Boolean(process.env.FIREBASE_PRIVATE_KEY);
-  const clientEmailPresent = Boolean(process.env.FIREBASE_CLIENT_EMAIL);
-  const projectId = process.env.FIREBASE_PROJECT_ID;
-
-  let credType = 'none';
-  try {
-    const { getFirebaseAdminCredential } = require('../utils/firebaseAdmin');
-    const cred = getFirebaseAdminCredential ? getFirebaseAdminCredential() : null;
-    credType = cred ? 'loaded' : 'null';
-  } catch (e: any) {
-    credType = 'err: ' + e?.message;
+  const { parseServiceAccount } = require('../utils/firebaseAdmin');
+  const envVal = process.env.FIREBASE_SERVICE_ACCOUNT_V1 || process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+  
+  let parsed: any = null;
+  if (envVal) {
+    try {
+      const raw = envVal.trim();
+      parsed = raw.startsWith('{') ? JSON.parse(raw) : JSON.parse(Buffer.from(raw, 'base64').toString('utf-8'));
+    } catch (e: any) {
+      parsed = { parseError: e?.message };
+    }
   }
 
   res.json({
-    envKeys,
-    serviceAccountKeyV1Present,
-    serviceAccountPresent,
-    privateKeyPresent,
-    clientEmailPresent,
-    projectId,
-    credType,
+    parsedProjectId: parsed?.project_id,
+    parsedClientEmail: parsed?.client_email,
+    rawClientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+    rawProjectId: process.env.FIREBASE_PROJECT_ID,
+    privateKeyLength: process.env.FIREBASE_PRIVATE_KEY?.length,
   });
 });
 
