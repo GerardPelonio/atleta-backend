@@ -27,18 +27,6 @@ const upload = multer({
   limits: { fileSize: 30 * 1024 * 1024 },
 });
 
-// SINGLE-FILE AND TEST ENDPOINTS
-router.get('/debug-firestore-test', async (req, res) => {
-  try {
-    const { db } = require('../utils/firebaseAdmin');
-    const testId = `diag_${Date.now()}`;
-    await db.collection('System_Counters').doc(testId).set({ test: true });
-    await db.collection('System_Counters').doc(testId).delete();
-    res.json({ ok: true, projectId: process.env.FIREBASE_PROJECT_ID });
-  } catch (err: any) {
-    res.status(500).json({ error: err?.message, code: err?.code, stack: err?.stack });
-  }
-});
 
 // Dedicated Multi-File Scoresheet Scanner Endpoints
 router.post('/multi/scan-scoresheet', optionalAuth, upload.any(), scanMultiScoresheetsHandler);

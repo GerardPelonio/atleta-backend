@@ -297,7 +297,7 @@ export async function submitMatch(req: AuthRequest, res: Response): Promise<void
       return;
     }
     console.error('submitMatch error:', error);
-    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error), stack: error?.stack });
+    res.status(500).json({ error: 'Internal server error.', details: error?.message || String(error) });
   }
 }
 

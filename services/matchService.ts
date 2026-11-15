@@ -253,25 +253,27 @@ export async function submitMatchSession(
 
   // Resolve or create Opponent / Away Team doc in Teams collection
   let oppTeamId = (payload as any).away_team_id || '';
-  const oppTeamQuery = await db.collection('Teams')
-    .where('team_name', '==', oppTeamName)
-    .limit(1)
-    .get();
+  if (oppTeamName) {
+    const oppTeamQuery = await db.collection('Teams')
+      .where('team_name', '==', oppTeamName)
+      .limit(1)
+      .get();
 
-  if (!oppTeamQuery.empty) {
-    oppTeamId = oppTeamQuery.docs[0].id;
-  } else {
-    oppTeamId = await generateStandardId('TEAM');
-    await db.collection('Teams').doc(oppTeamId).set({
-      team_id: oppTeamId,
-      team_name: oppTeamName,
-      sport_type: payload.sport_type,
-      division: 'Varsity Division',
-      coach_id: coachId,
-      season_record: { wins: (awayScore ?? 0) > (homeScore ?? 0) ? 1 : 0, losses: (awayScore ?? 0) <= (homeScore ?? 0) ? 1 : 0 },
-      roster_list: [],
-      created_at: now,
-    });
+    if (!oppTeamQuery.empty) {
+      oppTeamId = oppTeamQuery.docs[0].id;
+    } else {
+      oppTeamId = await generateStandardId('TEAM');
+      await db.collection('Teams').doc(oppTeamId).set({
+        team_id: oppTeamId,
+        team_name: oppTeamName,
+        sport_type: payload.sport_type,
+        division: 'Varsity Division',
+        coach_id: coachId,
+        season_record: { wins: (awayScore ?? 0) > (homeScore ?? 0) ? 1 : 0, losses: (awayScore ?? 0) <= (homeScore ?? 0) ? 1 : 0 },
+        roster_list: [],
+        created_at: now,
+      });
+    }
   }
 
   const performanceMetrics: any[] = [];
@@ -291,26 +293,36 @@ export async function submitMatchSession(
     const teamDoc = await db.collection('Teams').doc(homeTeamId).get();
     if (teamDoc.exists) {
       const tData = teamDoc.data() || {};
-      const rosterIds: string[] = [
-        ...(Array.isArray(tData.roster_list) ? tData.roster_list.map((r: any) => typeof r === 'string' ? r : (r?.athlete_id || r?.id)) : []),
-        ...(Array.isArray(tData.athletes) ? tData.athletes : []),
-        ...(Array.isArray(tData.rosterAthletes) ? tData.rosterAthletes : []),
-      ].filter(Boolean);
-
-      const [byTeamSnap, ...rosterDocs] = await Promise.all([
-        db.collection('Athlete_Profiles').where('team_id', '==', homeTeamId).get().catch(() => null),
-        ...rosterIds.map(id => db.collection('Athlete_Profiles').doc(id).get().catch(() => null)),
-      ]);
-
       const map = new Map<string, { id: string; ref: FirebaseFirestore.DocumentReference; data: any }>();
-      if (byTeamSnap && !byTeamSnap.empty) {
-        byTeamSnap.docs.forEach(d => map.set(d.id, { id: d.id, ref: d.ref, data: d.data() }));
-      }
-      rosterDocs.forEach(d => {
-        if (d && d.exists) {
-          map.set(d.id, { id: d.id, ref: d.ref, data: d.data() });
+
+      // Extract athletes already present in roster_list directly
+      if (Array.isArray(tData.roster_list)) {
+        for (const item of tData.roster_list) {
+          if (typeof item === 'object' && item) {
+            const athId = item.athlete_id || item.id || item.user_id;
+            if (athId && !map.has(athId)) {
+              map.set(athId, {
+                id: athId,
+                ref: db.collection('Athlete_Profiles').doc(athId),
+                data: item,
+              });
+            }
+          }
         }
-      });
+      }
+
+      // Single query for athletes by team_id
+      const byTeamSnap = await db.collection('Athlete_Profiles')
+        .where('team_id', '==', homeTeamId)
+        .limit(50)
+        .get()
+        .catch(() => null);
+
+      if (byTeamSnap && !byTeamSnap.empty) {
+        byTeamSnap.docs.forEach(d => {
+          map.set(d.id, { id: d.id, ref: d.ref, data: d.data() });
+        });
+      }
       homeTeamRosterProfiles = Array.from(map.values());
     }
   } catch (err: any) {
@@ -874,9 +886,9 @@ export async function submitMatchSession(
     coaching_staff: [cleanCoachRawId, canonicalCoachId].filter(Boolean),
     assigned_coaches: [cleanCoachRawId, canonicalCoachId].filter(Boolean),
     sport_type: payload.sport_type,
-    match_type: payload.match_type.trim(),
-    match_date: payload.match_date,
-    location: payload.location.trim(),
+    match_type: String(payload.match_type || 'Championship').trim(),
+    match_date: payload.match_date || now,
+    location: String(payload.location || 'Stadium').trim(),
     rank: bestRankSession !== null ? bestRankSession : ((payload as any).rank ?? null),
     place: bestRankSession !== null ? bestRankSession : ((payload as any).place ?? null),
     placement_rank: bestRankSession !== null ? bestRankSession : ((payload as any).placement_rank ?? null),
