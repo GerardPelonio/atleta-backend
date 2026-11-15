@@ -197,10 +197,14 @@ export async function submitMatchSession(
   const canonicalCoachId = cleanCoachRawId !== 'coach_default' ? `coach_${cleanCoachRawId}` : 'coach_default';
 
   // Check idempotency cache in Firestore
-  const idempotencyDoc = await db.collection('Idempotency_Keys').doc(key).get();
-  if (idempotencyDoc.exists) {
-    console.log(`ℹ️ [IDEMPOTENCY REPLAY] Returning cached result for key '${key}'`);
-    return idempotencyDoc.data()!.response;
+  try {
+    const idempotencyDoc = await db.collection('Idempotency_Keys').doc(key).get();
+    if (idempotencyDoc && idempotencyDoc.exists) {
+      console.log(`ℹ️ [IDEMPOTENCY REPLAY] Returning cached result for key '${key}'`);
+      return idempotencyDoc.data()!.response;
+    }
+  } catch (err: any) {
+    console.warn(`⚠️ [SUBMIT MATCH] Idempotency lookup note:`, err?.message || err);
   }
 
   const explicitMatchId = (payload as any).match_id;
@@ -230,49 +234,60 @@ export async function submitMatchSession(
 
   // Resolve or create Home Team doc in Teams collection
   let homeTeamId = payload.team_id;
-  const homeTeamQuery = await db.collection('Teams')
-    .where('team_name', '==', homeTeamName)
-    .limit(1)
-    .get();
+  try {
+    const homeTeamQuery = await db.collection('Teams')
+      .where('team_name', '==', homeTeamName)
+      .limit(1)
+      .get();
 
-  if (!homeTeamQuery.empty) {
-    homeTeamId = homeTeamQuery.docs[0].id;
-  } else {
-    homeTeamId = await generateStandardId('TEAM');
-    await db.collection('Teams').doc(homeTeamId).set({
-      team_id: homeTeamId,
-      team_name: homeTeamName,
-      sport_type: payload.sport_type,
-      division: 'Varsity Division',
-      coach_id: coachId,
-      season_record: { wins: (homeScore ?? 0) >= (awayScore ?? 0) ? 1 : 0, losses: (homeScore ?? 0) < (awayScore ?? 0) ? 1 : 0 },
-      roster_list: [],
-      created_at: now,
-    });
+    if (!homeTeamQuery.empty) {
+      homeTeamId = homeTeamQuery.docs[0].id;
+    } else {
+      homeTeamId = await generateStandardId('TEAM');
+      await db.collection('Teams').doc(homeTeamId).set({
+        team_id: homeTeamId,
+        team_name: homeTeamName,
+        sport_type: payload.sport_type,
+        division: 'Varsity Division',
+        coach_id: coachId,
+        season_record: { wins: (homeScore ?? 0) >= (awayScore ?? 0) ? 1 : 0, losses: (homeScore ?? 0) < (awayScore ?? 0) ? 1 : 0 },
+        roster_list: [],
+        created_at: now,
+      });
+    }
+  } catch (err: any) {
+    console.warn('⚠️ [SUBMIT MATCH] Home team query fallback:', err?.message || err);
+    if (!homeTeamId) {
+      homeTeamId = await generateStandardId('TEAM');
+    }
   }
 
   // Resolve or create Opponent / Away Team doc in Teams collection
   let oppTeamId = (payload as any).away_team_id || '';
   if (oppTeamName) {
-    const oppTeamQuery = await db.collection('Teams')
-      .where('team_name', '==', oppTeamName)
-      .limit(1)
-      .get();
+    try {
+      const oppTeamQuery = await db.collection('Teams')
+        .where('team_name', '==', oppTeamName)
+        .limit(1)
+        .get();
 
-    if (!oppTeamQuery.empty) {
-      oppTeamId = oppTeamQuery.docs[0].id;
-    } else {
-      oppTeamId = await generateStandardId('TEAM');
-      await db.collection('Teams').doc(oppTeamId).set({
-        team_id: oppTeamId,
-        team_name: oppTeamName,
-        sport_type: payload.sport_type,
-        division: 'Varsity Division',
-        coach_id: coachId,
-        season_record: { wins: (awayScore ?? 0) > (homeScore ?? 0) ? 1 : 0, losses: (awayScore ?? 0) <= (homeScore ?? 0) ? 1 : 0 },
-        roster_list: [],
-        created_at: now,
-      });
+      if (!oppTeamQuery.empty) {
+        oppTeamId = oppTeamQuery.docs[0].id;
+      } else {
+        oppTeamId = await generateStandardId('TEAM');
+        await db.collection('Teams').doc(oppTeamId).set({
+          team_id: oppTeamId,
+          team_name: oppTeamName,
+          sport_type: payload.sport_type,
+          division: 'Varsity Division',
+          coach_id: coachId,
+          season_record: { wins: (awayScore ?? 0) > (homeScore ?? 0) ? 1 : 0, losses: (awayScore ?? 0) <= (homeScore ?? 0) ? 1 : 0 },
+          roster_list: [],
+          created_at: now,
+        });
+      }
+    } catch (err: any) {
+      console.warn('⚠️ [SUBMIT MATCH] Opponent team query fallback:', err?.message || err);
     }
   }
 
@@ -593,7 +608,12 @@ export async function submitMatchSession(
 
     // Ensure Athlete Profile exists in Athlete_Profiles and update their career averages
     const athleteRef = db.collection('Athlete_Profiles').doc(athleteId);
-    const athleteDoc = await athleteRef.get();
+    let athleteDoc: any = null;
+    try {
+      athleteDoc = await athleteRef.get();
+    } catch (err: any) {
+      console.warn('⚠️ [SUBMIT MATCH] Athlete doc get fallback:', err?.message || err);
+    }
     
     const gamePts = Number(rawStats.points ?? rawStats.pts ?? (item as any).pts ?? (item as any).points ?? 0);
     const gameAst = Number(rawStats.assists ?? rawStats.ast ?? (item as any).ast ?? (item as any).assists ?? 0);
@@ -620,7 +640,7 @@ export async function submitMatchSession(
     }
 
     // Verify whether this player exists and is an officially registered athlete in Firestore
-    let registeredAthleteDoc = athleteDoc.exists ? athleteDoc : null;
+    let registeredAthleteDoc = (athleteDoc && athleteDoc.exists) ? athleteDoc : null;
     let targetAthleteRef = athleteRef;
 
     // 1. High-precision roster lookup against coach's managed home team

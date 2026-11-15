@@ -22,29 +22,6 @@ import {
 
 const router = Router();
 
-router.get('/debug-diag', async (req, res) => {
-  const { parseServiceAccount } = require('../utils/firebaseAdmin');
-  const envVal = process.env.FIREBASE_SERVICE_ACCOUNT_V1 || process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
-  
-  let parsed: any = null;
-  if (envVal) {
-    try {
-      const raw = envVal.trim();
-      parsed = raw.startsWith('{') ? JSON.parse(raw) : JSON.parse(Buffer.from(raw, 'base64').toString('utf-8'));
-    } catch (e: any) {
-      parsed = { parseError: e?.message };
-    }
-  }
-
-  res.json({
-    parsedProjectId: parsed?.project_id,
-    parsedClientEmail: parsed?.client_email,
-    rawClientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    rawProjectId: process.env.FIREBASE_PROJECT_ID,
-    privateKeyLength: process.env.FIREBASE_PRIVATE_KEY?.length,
-  });
-});
-
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 30 * 1024 * 1024 },
