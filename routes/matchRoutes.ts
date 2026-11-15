@@ -22,6 +22,21 @@ import {
 
 const router = Router();
 
+router.get('/debug-diag', async (req, res) => {
+  try {
+    const { db } = require('../utils/firebaseAdmin');
+    const doc = await db.collection('System_Counters').doc('MATCH').get();
+    res.json({
+      ok: true,
+      docExists: doc.exists,
+      data: doc.data(),
+      projectId: db.projectId,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message, code: err?.code, stack: err?.stack });
+  }
+});
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 30 * 1024 * 1024 },
