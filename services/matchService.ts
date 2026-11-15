@@ -939,6 +939,22 @@ export async function submitMatchSession(
     playerStats: (payload.playerStats && Array.isArray(payload.playerStats) && payload.playerStats.length > 0)
       ? payload.playerStats
       : enrichedPlayerStats,
+    score_or_time_summary: isTimedSport
+      ? `${(enrichedPlayerStats.length > 0 ? enrichedPlayerStats.length : homeRosterIds.length)} Athletes Logged`
+      : (homeScore !== null && awayScore !== null ? `${homeScore} - ${awayScore}` : 'Official'),
+    leaderboard_entries: Array.isArray((payload as any).leaderboard_entries) && (payload as any).leaderboard_entries.length > 0
+      ? (payload as any).leaderboard_entries
+      : enrichedPlayerStats.map((p: any, idx: number) => ({
+          rank: p.rank ?? p.placement_rank ?? p.place ?? (idx + 1),
+          athlete_id: p.athlete_id,
+          name: p.player_name || p.name || 'Athlete',
+          detail: p.event || p.event_name || p.team_name || homeTeamName,
+          time_or_score: p.time || p.finish_time || p.mark || (p.pts !== undefined ? `${p.pts} pts` : '-'),
+          time: p.time || p.finish_time || '',
+          finish_time: p.finish_time || p.time || '',
+          mark: p.mark || '',
+          distance_meters: p.distance_meters || 0,
+        })),
     scoresheet_url: payload.scoresheet_url || payload.scoresheetUrl || '',
     scoresheetUrl: payload.scoresheetUrl || payload.scoresheet_url || '',
     customGameTitle: (((payload as any).customGameTitle || (payload as any).custom_game_title || (payload as any).matchName || (payload as any).gameReferenceId || payload.match_name || payload.game_name || (payload as any).gameName || '') as string).trim() || undefined,
@@ -3363,6 +3379,7 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
     game_name: matchData.matchName || matchData.gameReferenceId || matchData.match_name || matchData.game_name || matchData.gameName || `${matchData.home_team_name || teamName} vs ${matchData.away_team_name || matchData.opponent_team_name || ''}`,
     gameReferenceId: matchData.gameReferenceId || matchData.matchName || undefined,
     player_stats: matchData.player_stats || [],
+    leaderboard_entries: matchData.leaderboard_entries || [],
     scoresheet_data: matchData.scoresheet_data || null,
     parsed_tables: matchData.parsed_tables || null,
     assigned_coaches: matchData.assigned_coaches || [],
