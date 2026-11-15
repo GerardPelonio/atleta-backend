@@ -413,9 +413,9 @@ export async function submitMatchSession(
       enrichedStats = computed.enrichedStats;
     }
 
-    const rawFinishTime = (item as any).finish_time || (item as any).time || rawStats.finish_time || rawStats.time || null;
+    const rawFinishTime = (item as any).finish_time || (item as any).time || (item as any).formatted_time || rawStats.finish_time || rawStats.time || rawStats.formatted_time || (rawStats.timer_seconds ? `${rawStats.timer_seconds}s` : null);
     const rawSplitTime = (item as any).split || (item as any).split_time || rawStats.split || rawStats.split_time || null;
-    const placementRank = (item as any).placement_rank ?? (item as any).rank ?? rawStats.placement_rank ?? rawStats.rank ?? null;
+    const placementRank = (item as any).placement_rank ?? (item as any).rank ?? (item as any).place ?? rawStats.placement_rank ?? rawStats.rank ?? rawStats.place ?? null;
     const heatVal = (item as any).heat ?? rawStats.heat ?? null;
     const laneVal = (item as any).lane ?? rawStats.lane ?? null;
 
@@ -424,16 +424,20 @@ export async function submitMatchSession(
       : null;
     const isTop3 = parsedRank !== null ? (parsedRank >= 1 && parsedRank <= 3) : true;
 
-    // In swimming and track & field, only record performances if in top 3; if not, just add the place!
-    const finishTime = (isTimedSport && !isTop3) ? null : rawFinishTime;
-    const splitTime = (isTimedSport && !isTop3) ? null : rawSplitTime;
-    const displayTime = (isTimedSport && !isTop3) ? '-' : (rawFinishTime || '-');
+    // Record all performances for all participating athletes
+    const finishTime = rawFinishTime;
+    const splitTime = rawSplitTime;
+    const displayTime = rawFinishTime || '-';
 
     const structuredSportStats: any = {
       pts: Number(rawStats.points ?? rawStats.pts ?? (item as any).pts ?? (item as any).points ?? 0),
       ast: Number(rawStats.assists ?? rawStats.ast ?? (item as any).ast ?? (item as any).assists ?? 0),
       reb: Number(rawStats.rebounds ?? rawStats.reb ?? (item as any).reb ?? (item as any).rebounds ?? 0),
       fg_pct: Number(rawStats.fg_pct ?? rawStats.field_goal_percentage ?? 0),
+      time: displayTime,
+      finish_time: finishTime,
+      formatted_time: finishTime,
+      split: splitTime,
       ...enrichedStats,
     };
 
@@ -456,21 +460,25 @@ export async function submitMatchSession(
       structuredSportStats.swimming = {
         eventType: String(eventName || rawStats.eventType || rawStats.event_type || '50m Freestyle'),
         event_type: String(eventName || rawStats.eventType || rawStats.event_type || '50m Freestyle'),
-        target_distance: Number(rawStats.target_distance ?? rawStats.distance ?? 0),
+        target_distance: Number(rawStats.target_distance ?? rawStats.distance ?? rawStats.distance_meters ?? 0),
         stroke_count: Number(rawStats.stroke_count ?? 0),
         stroke_rate: Number(rawStats.stroke_rate ?? 0),
         distance_per_stroke: Number(rawStats.distance_per_stroke ?? 0),
         reaction_time: Number(rawStats.reaction_time ?? 0),
-        lap_time: isTop3 ? Number(rawStats.lap_time ?? 0) : 0,
-        finish_time: isTop3 ? Number(rawStats.finish_time ?? 0) : 0,
+        lap_time: Number(rawStats.lap_time ?? 0),
+        finish_time: rawFinishTime || 0,
+        time: displayTime,
+        formatted_time: rawFinishTime || '',
       };
     } else if (sportLower.includes('track') || sportLower.includes('field') || sportLower.includes('run')) {
       structuredSportStats.track_and_field = {
         eventType: String(eventName || rawStats.eventType || rawStats.event_type || '100m Dash'),
         event_type: String(eventName || rawStats.eventType || rawStats.event_type || '100m Dash'),
-        target_distance: Number(rawStats.target_distance ?? rawStats.distance ?? 0),
-        lap_time: isTop3 ? Number(rawStats.lap_time ?? 0) : 0,
-        finish_time: isTop3 ? Number(rawStats.finish_time ?? 0) : 0,
+        target_distance: Number(rawStats.target_distance ?? rawStats.distance ?? rawStats.distance_meters ?? 0),
+        lap_time: Number(rawStats.lap_time ?? 0),
+        finish_time: rawFinishTime || 0,
+        time: displayTime,
+        formatted_time: rawFinishTime || '',
       };
     }
 
@@ -579,9 +587,9 @@ export async function submitMatchSession(
     const gameAst = Number(rawStats.assists ?? rawStats.ast ?? (item as any).ast ?? (item as any).assists ?? 0);
     const gameReb = Number(rawStats.rebounds ?? rawStats.reb ?? (item as any).reb ?? (item as any).rebounds ?? 0);
 
-    // Dynamic metrics for individual sports / athlete portfolio (top 3 athletes only)
+    // Dynamic metrics for individual sports / athlete portfolio
     const dynamicAverages: Record<string, any> = {};
-    if (finishTime && (!isTimedSport || isTop3)) {
+    if (finishTime) {
       if (eventSlug.includes('50') && (eventSlug.includes('free') || payload.sport_type.toLowerCase().includes('swim'))) {
         dynamicAverages.pb_50m_free = finishTime;
       }
@@ -595,7 +603,7 @@ export async function submitMatchSession(
         dynamicAverages.pb_200m = finishTime;
       }
     }
-    if ((!isTimedSport || isTop3) && (rawStats.reaction_time_s || rawStats.reaction_sec || rawStats.reaction_time_ms)) {
+    if (rawStats.reaction_time_s || rawStats.reaction_sec || rawStats.reaction_time_ms) {
       dynamicAverages.reaction_time_s = rawStats.reaction_time_s || rawStats.reaction_sec || rawStats.reaction_time_ms;
     }
 
@@ -3016,6 +3024,12 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
       team_name: pTeam,
       position: pPosition,
       jersey_number: pJersey,
+      rank: data.rank ?? data.placement_rank ?? data.place ?? null,
+      placement_rank: data.placement_rank ?? data.rank ?? data.place ?? null,
+      place: data.place ?? data.placement_rank ?? data.rank ?? null,
+      finish_time: data.finish_time || data.time || data.sport_stats?.finish_time || data.sport_stats?.time || data.sport_stats?.formatted_time || null,
+      time: data.time || data.finish_time || data.sport_stats?.time || data.sport_stats?.finish_time || data.sport_stats?.formatted_time || null,
+      formatted_time: data.formatted_time || data.finish_time || data.time || data.sport_stats?.formatted_time || data.sport_stats?.finish_time || null,
       sport_stats: data.sport_stats || {},
       calculated_player_efficiency: data.calculated_player_efficiency || 0,
     });
@@ -3068,11 +3082,23 @@ export async function getMatchResultDetails(matchId: string): Promise<any> {
       let efficiency = 0;
 
       if (isTimedSport) {
-        const timeVal = item.time || item.finish_time || item.formatted_time || item.sport_stats?.time || item.sport_stats?.finish_time || item.sport_stats?.formatted_time || null;
-        const rankVal = item.rank ?? item.place ?? item.placement_rank ?? item.sport_stats?.rank ?? item.sport_stats?.placement_rank ?? (idx + 1);
-        const eventVal = item.event || item.event_name || item.sport_stats?.event || item.sport_stats?.event_name || matchData.event_name || null;
-        const splitVal = item.split_time || item.split || item.sport_stats?.split_time || item.sport_stats?.split || null;
-        const distVal = item.distance_m || item.distance_meters || item.distance || item.sport_stats?.distance_meters || item.sport_stats?.distance || null;
+        const isValidTimeStr = (t: any) => t && typeof t === 'string' && t.trim() !== '' && t.trim() !== '-';
+        const timeVal = [
+          item.finish_time,
+          item.time,
+          item.formatted_time,
+          item.sport_stats?.finish_time,
+          item.sport_stats?.time,
+          item.sport_stats?.formatted_time,
+          item.stats?.finish_time,
+          item.stats?.time,
+          item.stats?.formatted_time,
+          item.stats?.time_or_distance,
+        ].find(isValidTimeStr) || null;
+        const rankVal = item.rank ?? item.place ?? item.placement_rank ?? item.stats?.rank ?? item.stats?.place ?? item.sport_stats?.rank ?? item.sport_stats?.placement_rank ?? (idx + 1);
+        const eventVal = item.event || item.event_name || item.stats?.event || item.stats?.event_name || item.sport_stats?.event || item.sport_stats?.event_name || matchData.event_name || null;
+        const splitVal = item.split_time || item.split || item.stats?.split_time || item.stats?.split || item.sport_stats?.split_time || item.sport_stats?.split || null;
+        const distVal = item.distance_m || item.distance_meters || item.distance || item.stats?.distance_meters || item.sport_stats?.distance_meters || item.sport_stats?.distance || null;
 
         let timeMs = Number(item.finish_time_ms || item.sport_stats?.finish_time_ms || 0);
         if (!timeMs && timeVal) {
