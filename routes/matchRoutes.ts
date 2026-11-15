@@ -23,18 +23,31 @@ import {
 const router = Router();
 
 router.get('/debug-diag', async (req, res) => {
+  const envKeys = Object.keys(process.env).filter(k => k.includes('FIREBASE') || k.includes('GOOGLE') || k.includes('ACCOUNT'));
+  const serviceAccountKeyV1Present = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_V1);
+  const serviceAccountPresent = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT);
+  const privateKeyPresent = Boolean(process.env.FIREBASE_PRIVATE_KEY);
+  const clientEmailPresent = Boolean(process.env.FIREBASE_CLIENT_EMAIL);
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+
+  let credType = 'none';
   try {
-    const { db } = require('../utils/firebaseAdmin');
-    const doc = await db.collection('System_Counters').doc('MATCH').get();
-    res.json({
-      ok: true,
-      docExists: doc.exists,
-      data: doc.data(),
-      projectId: db.projectId,
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err?.message, code: err?.code, stack: err?.stack });
+    const { getFirebaseAdminCredential } = require('../utils/firebaseAdmin');
+    const cred = getFirebaseAdminCredential ? getFirebaseAdminCredential() : null;
+    credType = cred ? 'loaded' : 'null';
+  } catch (e: any) {
+    credType = 'err: ' + e?.message;
   }
+
+  res.json({
+    envKeys,
+    serviceAccountKeyV1Present,
+    serviceAccountPresent,
+    privateKeyPresent,
+    clientEmailPresent,
+    projectId,
+    credType,
+  });
 });
 
 const upload = multer({
