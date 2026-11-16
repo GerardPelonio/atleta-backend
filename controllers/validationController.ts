@@ -118,7 +118,8 @@ export async function deleteMatchHandler(req: AuthRequest, res: Response): Promi
       return;
     }
 
-    const result = await deleteMatchService(matchId);
+    const isForced = req.query.force === 'true' || req.body?.force === true;
+    const result = await deleteMatchService(matchId, isForced);
     serverCache.invalidateTags(['matches', 'dashboard', 'validations', 'schedules', 'audits', `match_${matchId}`]);
     res.status(200).json(result);
   } catch (error: any) {

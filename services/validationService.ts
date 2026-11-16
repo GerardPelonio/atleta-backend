@@ -657,7 +657,7 @@ export async function certifyValidationService(
 /**
  * Completely removes a match record and all associated collections from Firestore.
  */
-export async function deleteMatchService(matchId: string) {
+export async function deleteMatchService(matchId: string, force: boolean = false) {
   const cleanId = String(matchId).replace(/^#/, '').trim();
   const idVariants = Array.from(new Set([
     matchId,
@@ -669,21 +669,23 @@ export async function deleteMatchService(matchId: string) {
 
   const databases = [db];
 
-  // IMMUTABILITY CHECK: Certified and locked scoresheets are strictly immutable
-  for (const currentDb of databases) {
-    for (const variant of idVariants) {
-      const matchDoc = await currentDb.collection('Match_Logs').doc(variant).get().catch(() => null);
-      if (matchDoc && matchDoc.exists) {
-        const d = matchDoc.data();
-        if (d?.is_certified || d?.is_locked || d?.verification_status === 'Certified') {
-          throw new ServiceError('Match record is certified and locked. Certified records are immutable and cannot be deleted.', 409);
+  // IMMUTABILITY CHECK: Certified and locked scoresheets are strictly immutable unless force is specified
+  if (!force) {
+    for (const currentDb of databases) {
+      for (const variant of idVariants) {
+        const matchDoc = await currentDb.collection('Match_Logs').doc(variant).get().catch(() => null);
+        if (matchDoc && matchDoc.exists) {
+          const d = matchDoc.data();
+          if (d?.is_certified || d?.is_locked || d?.verification_status === 'Certified') {
+            throw new ServiceError('Match record is certified and locked. Certified records are immutable and cannot be deleted.', 409);
+          }
         }
-      }
-      const matchQuery = await currentDb.collection('Match_Logs').where('match_id', '==', variant).limit(1).get().catch(() => null);
-      if (matchQuery && !matchQuery.empty) {
-        const d = matchQuery.docs[0].data();
-        if (d?.is_certified || d?.is_locked || d?.verification_status === 'Certified') {
-          throw new ServiceError('Match record is certified and locked. Certified records are immutable and cannot be deleted.', 409);
+        const matchQuery = await currentDb.collection('Match_Logs').where('match_id', '==', variant).limit(1).get().catch(() => null);
+        if (matchQuery && !matchQuery.empty) {
+          const d = matchQuery.docs[0].data();
+          if (d?.is_certified || d?.is_locked || d?.verification_status === 'Certified') {
+            throw new ServiceError('Match record is certified and locked. Certified records are immutable and cannot be deleted.', 409);
+          }
         }
       }
     }
@@ -749,6 +751,21 @@ export async function deleteMatchService(matchId: string) {
         console.warn(`⚠️ [DELETE MATCH] Warning in ${colName}:`, colErr);
       }
     }
+
+    // 4. Athlete subcollection match_history cleanup
+    try {
+      for (const variant of idVariants) {
+        const athSnap = await currentDb.collectionGroup('match_history').where('match_id', '==', variant).get().catch(() => null);
+        if (athSnap && !athSnap.empty) {
+          const batch = currentDb.batch();
+          athSnap.docs.forEach((d) => {
+            batch.delete(d.ref);
+            totalDeleted++;
+          });
+          await batch.commit().catch(() => {});
+        }
+      }
+    } catch (_) {}
   }
 
   return {

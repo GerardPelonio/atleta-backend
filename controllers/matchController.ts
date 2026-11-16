@@ -544,25 +544,47 @@ export async function clearMatchesHandler(req: AuthRequest, res: Response): Prom
     let deletedCount = 0;
 
     if (matchIds.length > 0) {
-      await Promise.all(matchIds.map(mId => deleteMatchService(mId).catch(() => null)));
+      await Promise.all(matchIds.map(async (mId) => {
+        try {
+          await deleteMatchService(mId, true);
+          const cleanId = String(mId).replace(/^#/, '').trim();
+          const idVariants = Array.from(new Set([mId, cleanId, `match_${cleanId}`, `MATCH_${cleanId}`])).filter(Boolean);
+          for (const variant of idVariants) {
+            await db.collection('Match_Logs').doc(variant).delete().catch(() => null);
+            await db.collection('Matches').doc(variant).delete().catch(() => null);
+          }
+        } catch (_) {}
+      }));
       deletedCount += matchIds.length;
     }
 
     if (coachId) {
-      const [qStaff, qCoach] = await Promise.all([
-        db.collection('Match_Logs').where('coaching_staff', 'array-contains', coachId).get().catch(() => null),
-        db.collection('Match_Logs').where('coach_id', '==', coachId).get().catch(() => null),
+      const cleanCoachId = String(coachId).replace(/^coach_/, '');
+      const possibleIds = Array.from(new Set([coachId, cleanCoachId, `coach_${cleanCoachId}`])).filter(Boolean);
+
+      const [qStaff, qCoach, qLogged, qAssigned, qCreated] = await Promise.all([
+        db.collection('Match_Logs').where('coaching_staff', 'array-contains-any', possibleIds).get().catch(() => null),
+        db.collection('Match_Logs').where('coach_id', 'in', possibleIds).get().catch(() => null),
+        db.collection('Match_Logs').where('logged_by_coach_id', 'in', possibleIds).get().catch(() => null),
+        db.collection('Match_Logs').where('assigned_coaches', 'array-contains-any', possibleIds).get().catch(() => null),
+        db.collection('Match_Logs').where('created_by', 'in', possibleIds).get().catch(() => null),
       ]);
       const coachDocs = new Set<string>();
-      if (qStaff && !qStaff.empty) qStaff.docs.forEach(d => coachDocs.add(d.id));
-      if (qCoach && !qCoach.empty) qCoach.docs.forEach(d => coachDocs.add(d.id));
+      [qStaff, qCoach, qLogged, qAssigned, qCreated].forEach((snap) => {
+        if (snap && !snap.empty) snap.docs.forEach((d) => coachDocs.add(d.id));
+      });
       if (coachDocs.size > 0) {
-        await Promise.all(Array.from(coachDocs).map(id => deleteMatchService(id).catch(() => null)));
+        await Promise.all(Array.from(coachDocs).map((id) => deleteMatchService(id, true).catch(() => null)));
         deletedCount += coachDocs.size;
       }
     }
 
     serverCache.invalidateTags(['matches', 'dashboard', 'validations', 'schedules', 'audits']);
+    serverCache.delete('all_matches_raw');
+    if (coachId) {
+      serverCache.delete(`coach_teams_${coachId}`);
+      serverCache.delete(`coach_athletes_${coachId}`);
+    }
     res.status(200).json({ success: true, message: `Cleared ${deletedCount} match(es).`, count: deletedCount });
   } catch (error: any) {
     console.error('clearMatchesHandler error:', error);
