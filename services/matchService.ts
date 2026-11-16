@@ -1744,29 +1744,23 @@ function parseScoresheetWithTesseract(file?: Express.Multer.File): string {
     return JSON.stringify(fallbackJson);
 }
 
-const FALLBACK_BACKEND_KEY = Buffer.from('QVEuQWI4Uk42S0c2TERYSVVJMERoc2xRNHlTTm9VdzRqZDlkSzVmaXBDeTlFaFZENmQ0b3c=', 'base64').toString('utf-8');
-
 export function sanitizeGeminiKey(raw?: string): string {
-  if (!raw) return FALLBACK_BACKEND_KEY;
-  let k = String(raw).trim().replace(/^["']|["']$/g, '');
-  if (k.includes('LDXYIUI0')) {
-    k = k.replace('LDXYIUI0', 'LDXIUI0');
-  }
-  return k || FALLBACK_BACKEND_KEY;
-}
-
-async function callGeminiWithWaterfall(requestBody: any, rawKey?: string, file?: Express.Multer.File): Promise<string> {
-  let geminiKey = sanitizeGeminiKey(
-    rawKey ||
+  const envKey = (
     process.env.GEMINI_API_KEY ||
     process.env.GOOGLE_GEMINI_API_KEY ||
     process.env.GOOGLE_API_KEY ||
     process.env.GEMINI_KEY ||
-    FALLBACK_BACKEND_KEY
-  );
+    ''
+  ).trim();
+  if (!raw) return envKey;
+  let k = String(raw).trim().replace(/^["']|["']$/g, '');
+  return k || envKey;
+}
+
+async function callGeminiWithWaterfall(requestBody: any, rawKey?: string, file?: Express.Multer.File): Promise<string> {
+  let geminiKey = sanitizeGeminiKey(rawKey);
 
   let lastErrorMsg = '';
-  let triedFallback = false;
 
   for (let i = 0; i < OCR_MODEL_WATERFALL.length; i++) {
     const model = OCR_MODEL_WATERFALL[i];
@@ -1787,14 +1781,6 @@ async function callGeminiWithWaterfall(requestBody: any, rawKey?: string, file?:
           signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(28000) : undefined,
         }
       );
-
-      if (response.status === 401 && !triedFallback && geminiKey !== FALLBACK_BACKEND_KEY) {
-        console.warn(`⚠️ [OCR WATERFALL] Gemini key returned 401 Unauthorized. Auto-switching to verified fallback key...`);
-        geminiKey = FALLBACK_BACKEND_KEY;
-        triedFallback = true;
-        i--;
-        continue;
-      }
 
       if (response.ok) {
         const jsonRes: any = await response.json();
@@ -1891,14 +1877,7 @@ export async function processScoresheetOCR(matchId: string, file?: Express.Multe
     require('dotenv').config();
   } catch {}
 
-  const geminiKey = sanitizeGeminiKey(
-    customKey ||
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.GEMINI_KEY ||
-    FALLBACK_BACKEND_KEY
-  );
+  const geminiKey = sanitizeGeminiKey(customKey);
 
   try {
     if (!geminiKey) {
@@ -2219,14 +2198,7 @@ export async function scanScoresheetStandalone(file?: Express.Multer.File, custo
     require('dotenv').config();
   } catch {}
 
-  const geminiKey = sanitizeGeminiKey(
-    customKey ||
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.GEMINI_KEY ||
-    FALLBACK_BACKEND_KEY
-  );
+  const geminiKey = sanitizeGeminiKey(customKey);
 
   if (!geminiKey) {
     throw new Error('GEMINI_API_KEY is not configured in environment');
@@ -2519,14 +2491,7 @@ export async function scanMultipleScoresheetsStandalone(
     require('dotenv').config();
   } catch {}
 
-  const geminiKey = sanitizeGeminiKey(
-    customKey ||
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.GEMINI_KEY ||
-    FALLBACK_BACKEND_KEY
-  );
+  const geminiKey = sanitizeGeminiKey(customKey);
 
   if (!geminiKey) {
     throw new Error('GEMINI_API_KEY is not configured in environment');
