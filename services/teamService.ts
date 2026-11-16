@@ -713,10 +713,23 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
 
   const rawManagedAthletes = await Promise.all(profileFetchPromises);
   const seenAthIds = new Set<string>();
+  const coachSport = String(coachData?.sports_focus || coachData?.sport_type || '').toUpperCase().trim();
+
   const managedAthletes = rawManagedAthletes.filter((a) => {
     const k = (a.athlete_id || a.user_id || '').replace(/^ath_/, '');
     if (!k || seenAthIds.has(k)) return false;
     seenAthIds.add(k);
+
+    if (coachSport) {
+      const athSport = String(a.sport_category || a.sport_type || a.sport || '').toUpperCase().trim();
+      if (coachSport.includes('BASKET')) return athSport.includes('BASKET');
+      if (coachSport.includes('VOLLEY')) return athSport.includes('VOLLEY');
+      if (coachSport.includes('SWIM')) return athSport.includes('SWIM');
+      if (coachSport.includes('TRACK') || coachSport.includes('FIELD')) {
+        return athSport.includes('TRACK') || athSport.includes('FIELD');
+      }
+      return athSport === coachSport;
+    }
     return true;
   });
   coachManagedAthletesCache.set(coachId, { data: managedAthletes, cachedAt: Date.now() });
