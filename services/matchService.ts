@@ -1594,7 +1594,7 @@ function parseScoresheetWithTesseract(file?: Express.Multer.File): string {
     else if (upperAll.includes('BADMINTON')) sportType = 'BADMINTON';
     else if (upperAll.includes('VOLLEY')) sportType = 'VOLLEYBALL';
     else if (upperAll.includes('SWIM')) sportType = 'SWIMMING';
-    else if (upperAll.includes('TRACK') || upperAll.includes('FIELD')) sportType = 'TRACK AND FIELD';
+    else if (/\b(?:TRACK\s*AND\s*FIELD|ATHLETICS?|100MD|200MD|400MD|800MD|1500MD|DASH|SPRINT|LONG\s*JUMP|SHOT\s*PUT|DISCUS|JAVELIN|HURDLES?|POLE\s*VAULT|RELAY)\b/i.test(upperAll)) sportType = 'TRACK AND FIELD';
     else if (upperAll.includes('PICKLE')) sportType = 'PICKLEBALL';
 
     let homeTeam = 'Home Team';
@@ -1852,6 +1852,79 @@ export async function uploadScoresheetFileToStorage(matchId: string, file: Expre
 }
 
 /**
+ * Accurately resolves sport type from OCR data using strong player attribute signatures
+ * and explicit event keywords, avoiding false-positive keyword overrides.
+ */
+export function resolveDetectedSport(rawSport: string = '', rawPlayers: any[] = [], eventName: string = ''): string {
+  const normRaw = String(rawSport || '').trim().toUpperCase();
+
+  // 1. Unequivocal player stat signatures from boxscores
+  const hasBasketballStats = rawPlayers.some((p: any) =>
+    Number(p.rebounds || 0) > 0 ||
+    Number(p.assists || 0) > 0 ||
+    Number(p.steals || 0) > 0 ||
+    Number(p.blocks || 0) > 0 ||
+    Number(p.turnovers || 0) > 0 ||
+    Number(p.fg_made || 0) > 0 ||
+    Number(p.three_made || 0) > 0 ||
+    Number(p.ft_made || 0) > 0 ||
+    Number(p.personal_fouls || 0) > 0
+  );
+  if (hasBasketballStats) return 'BASKETBALL';
+
+  const hasVolleyballStats = rawPlayers.some((p: any) =>
+    Number(p.kills || 0) > 0 ||
+    Number(p.digs || 0) > 0 ||
+    Number(p.service_aces || 0) > 0 ||
+    Number(p.attack_attempts || 0) > 0 ||
+    Number(p.sets_played || 0) > 0
+  );
+  if (hasVolleyballStats) return 'VOLLEYBALL';
+
+  const hasSoccerStats = rawPlayers.some((p: any) =>
+    Number(p.goals || 0) > 0 ||
+    Number(p.saves || 0) > 0 ||
+    Number(p.tackles || 0) > 0 ||
+    Number(p.yellow_cards || 0) > 0
+  );
+  if (hasSoccerStats) return 'SOCCER';
+
+  const hasBaseballStats = rawPlayers.some((p: any) =>
+    Number(p.at_bats || 0) > 0 ||
+    Number(p.runs || 0) > 0 ||
+    Number(p.hits || 0) > 0 ||
+    Number(p.innings_pitched || 0) > 0
+  );
+  if (hasBaseballStats) return 'BASEBALL';
+
+  // 2. Disambiguate individual timed events (Swim vs Track) based on event labels (strictly ignoring team names)
+  const playerEvents = rawPlayers.map((p: any) => `${p.event || ''} ${p.event_name || ''}`).join(' ').toUpperCase();
+  const allEvents = `${eventName || ''} ${playerEvents}`.toUpperCase();
+
+  const hasSwimKeywords = /FREESTYLE|BUTTERFLY|BREASTSTROKE|BACKSTROKE|\bIM\b|MEDLEY|50M\s*FREE|100M\s*FREE|POOL|\bHEAT\b|\bLANE\b/i.test(allEvents) ||
+    rawPlayers.some((p: any) => p.stroke_count || p.split_time);
+
+  const hasTrackKeywords = /\b(?:100MD|200MD|400MD|800MD|1500MD|DASH|SPRINT|LONG\s*JUMP|LONGJUMP|SHOT\s*PUT|SHOTPUT|DISCUS|JAVELIN|HURDLES?|POLE\s*VAULT|TRIPLE\s*JUMP|HIGH\s*JUMP|RELAY|4X100|4X400)\b/i.test(allEvents) ||
+    rawPlayers.some((p: any) => p.distance_m || p.qts);
+
+  if (hasSwimKeywords && !hasTrackKeywords) return 'SWIMMING';
+  if (hasTrackKeywords && !hasSwimKeywords) return 'TRACK AND FIELD';
+
+  // 3. Honor AI detected sport if provided
+  if (normRaw.includes('VOLLEY')) return 'VOLLEYBALL';
+  if (normRaw.includes('BASKET')) return 'BASKETBALL';
+  if (normRaw.includes('SWIM')) return 'SWIMMING';
+  if (normRaw.includes('TRACK') || normRaw.includes('ATHLETIC')) return 'TRACK AND FIELD';
+  if (normRaw.includes('SOCCER') || normRaw.includes('FOOTBALL')) return 'SOCCER';
+  if (normRaw.includes('BADMINTON')) return 'BADMINTON';
+  if (normRaw.includes('PICKLE')) return 'PICKLEBALL';
+  if (normRaw.includes('BASE') || normRaw.includes('SOFT')) return 'BASEBALL';
+  if (normRaw.includes('TENNIS')) return 'TENNIS';
+
+  return normRaw || 'BASKETBALL';
+}
+
+/**
  * Process scoresheet image/PDF upload via OCR.
  * POST /api/v1/matches/:matchId/scoresheet
  */
@@ -2079,13 +2152,17 @@ export async function processScoresheetOCR(matchId: string, file?: Express.Multe
     });
 
     // Save scoresheet_url, scoresheet_data, and parsed_tables directly onto Match_Logs (without polluting Performance_Metrics)
-    const nonSportContextMatch = `${aiParsed.match_info?.event_name || matchData.event_name || ''} ${rawPlayerSummary.map((p: any) => `${p.event || ''} ${p.event_name || ''} ${p.team_name || ''} ${p.player_name || ''}`).join(' ')}`.toUpperCase();
-    const isExplicitTrackMatch = /DASH|100MD|200MD|400MD|800MD|1500MD|RELAY|4X100|4X400|LONG\s*JUMP|LONGJUMP|SHOT\s*PUT|SHOTPUT|DISCUS|JAVELIN|HURDLE|TRACK|FIELD|RUNNERS?|ATHLETICS?|POLE\s*VAULT|TRIPLE\s*JUMP|HIGH\s*JUMP/i.test(nonSportContextMatch);
-    const hasSwimStrokesMatch = /FREESTYLE|BUTTERFLY|BREASTSTROKE|BACKSTROKE|\bIM\b|MEDLEY|POOL|STROKE/i.test(nonSportContextMatch);
+    const detectedSportMatch = resolveDetectedSport(
+      aiParsed.match_info?.sport_type || matchData.sport_type,
+      rawPlayerSummary,
+      aiParsed.match_info?.event_name || matchData.event_name
+    );
 
     const updatePayload: any = {
       scoresheet_url: scoresheetUrl,
       scoresheetUrl: scoresheetUrl,
+      sport_type: detectedSportMatch,
+      sportType: detectedSportMatch,
       player_stats: formattedPlayerStats,
       playerStats: formattedPlayerStats,
       roster_athletes: [...ocrHomeRosterIds, ...ocrAwayRosterIds],
@@ -2103,15 +2180,11 @@ export async function processScoresheetOCR(matchId: string, file?: Express.Multe
       updated_at: now,
     };
 
-    if (isExplicitTrackMatch && !hasSwimStrokesMatch) {
-      if (!aiParsed.match_info) aiParsed.match_info = {};
-      aiParsed.match_info.sport_type = 'TRACK AND FIELD';
-      updatePayload.sport_type = 'TRACK AND FIELD';
-      updatePayload.sportType = 'TRACK AND FIELD';
-    }
+    if (!aiParsed.match_info) aiParsed.match_info = {};
+    aiParsed.match_info.sport_type = detectedSportMatch;
 
-    const currentSportUpper = String(updatePayload.sport_type || matchData.sport_type || '').toUpperCase();
-    const isTimedSportLocal = isExplicitTrackMatch || currentSportUpper.includes('SWIM') || currentSportUpper.includes('TRACK') || currentSportUpper.includes('FIELD');
+    const currentSportUpper = String(detectedSportMatch).toUpperCase();
+    const isTimedSportLocal = currentSportUpper.includes('SWIM') || currentSportUpper.includes('TRACK') || currentSportUpper.includes('RUN') || currentSportUpper.includes('ATHLETIC');
     if (teamScores.length >= 2 && !isTimedSportLocal) {
       updatePayload.home_score = Number(teamScores[0].score);
       updatePayload.away_score = Number(teamScores[1].score);
@@ -2304,19 +2377,17 @@ export async function scanScoresheetStandalone(file?: Express.Multer.File, custo
       }
     }
 
-    let detectedSport = parsedData.match_info?.sport_type || parsedData.sport_type || 'Basketball';
-    const nonSportContextStandalone = `${parsedData.match_info?.event_name || ''} ${rawPlayerSummary.map((p: any) => `${p.event || ''} ${p.event_name || ''} ${p.team_name || ''} ${p.player_name || ''}`).join(' ')}`.toUpperCase();
-    const isExplicitTrackStandalone = /DASH|100MD|200MD|400MD|800MD|1500MD|RELAY|4X100|4X400|LONG\s*JUMP|LONGJUMP|SHOT\s*PUT|SHOTPUT|DISCUS|JAVELIN|HURDLE|TRACK|FIELD|RUNNERS?|ATHLETICS?|POLE\s*VAULT|TRIPLE\s*JUMP|HIGH\s*JUMP/i.test(nonSportContextStandalone);
-    const hasSwimStrokesStandalone = /FREESTYLE|BUTTERFLY|BREASTSTROKE|BACKSTROKE|\bIM\b|MEDLEY|POOL|STROKE/i.test(nonSportContextStandalone);
-    if (isExplicitTrackStandalone && !hasSwimStrokesStandalone) {
-      detectedSport = 'TRACK AND FIELD';
-      if (!parsedData.match_info) parsedData.match_info = {};
-      parsedData.match_info.sport_type = 'TRACK AND FIELD';
-      parsedData.sport_type = 'TRACK AND FIELD';
-    }
+    const detectedSport = resolveDetectedSport(
+      parsedData.match_info?.sport_type || parsedData.sport_type,
+      rawPlayerSummary,
+      parsedData.match_info?.event_name
+    );
+    if (!parsedData.match_info) parsedData.match_info = {};
+    parsedData.match_info.sport_type = detectedSport;
+    parsedData.sport_type = detectedSport;
 
     const isBasketball = String(detectedSport).toLowerCase().includes('basket');
-    const isIndividual = String(detectedSport).toLowerCase().includes('swim') || String(detectedSport).toLowerCase().includes('track') || String(detectedSport).toLowerCase().includes('field');
+    const isIndividual = String(detectedSport).toLowerCase().includes('swim') || String(detectedSport).toLowerCase().includes('track') || String(detectedSport).toLowerCase().includes('run');
 
     const resolvedMatchInfo = parsedData.match_info || {};
     resolvedMatchInfo.sport_type = detectedSport;
