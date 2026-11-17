@@ -636,15 +636,20 @@ export async function respondToRecruitmentInquiry(
     if (coachId) {
       const canonicalCoachId = String(coachId).startsWith('coach_') ? coachId : `coach_${coachId}`;
       const rawCoachId = String(coachId).replace(/^coach_/, '');
+      const canonicalAthId = athleteId.startsWith('ath_') ? athleteId : `ath_${athleteId}`;
 
       const updateCoachDoc = async (ref: FirebaseFirestore.DocumentReference) => {
         const snap = await ref.get().catch(() => null);
         if (snap && snap.exists) {
-          const currentManaged: any[] = Array.isArray(snap.data()?.athletes_managed) ? snap.data()!.athletes_managed : [];
-          const exists = currentManaged.some((m: any) => (m.athlete_id && m.athlete_id === athleteId) || m === athleteId || (m.user_id && m.user_id === rawAthUid));
+          const data = snap.data() || {};
+          const currentAthletesManaged: any[] = Array.isArray(data.athletes_managed) ? data.athletes_managed : [];
+          const currentAthleteManaged: any[] = Array.isArray(data.athlete_managed) ? data.athlete_managed : [];
+          const exists = currentAthletesManaged.some((m: any) => (m.athlete_id && (m.athlete_id === athleteId || m.athlete_id === canonicalAthId)) || m === athleteId || (m.user_id && m.user_id === rawAthUid) || m === canonicalAthId) ||
+                         currentAthleteManaged.some((m: any) => m === canonicalAthId || m === athleteId || m === rawAthUid);
           if (!exists) {
             await ref.set({
-              athletes_managed: [...currentManaged, athleteEntry],
+              athletes_managed: [...currentAthletesManaged, athleteEntry],
+              athlete_managed: Array.from(new Set([...currentAthleteManaged, canonicalAthId])),
               updated_at: now,
             }, { merge: true }).catch(() => null);
           }
@@ -668,7 +673,31 @@ export async function respondToRecruitmentInquiry(
         .catch(() => null);
 
       if (teamsSnap && !teamsSnap.empty) {
-        const teamDoc = teamsSnap.docs[0];
+        // Find best target team:
+        // 1. Specified team in inqData
+        // 2. Matching sport type (prefer active varsity team over mock/varsity placeholder)
+        // 3. Fallback
+        let targetTeamDoc = inqData.team_id
+          ? teamsSnap.docs.find((d) => d.id === inqData.team_id || d.data().team_id === inqData.team_id)
+          : null;
+
+        if (!targetTeamDoc) {
+          const matchingSportDocs = teamsSnap.docs.filter((d) => {
+            const tSport = String(d.data().sport_type || '').toUpperCase();
+            const aSport = String(sportType || '').toUpperCase();
+            return tSport.includes(aSport) || aSport.includes(tSport);
+          });
+          if (matchingSportDocs.length > 0) {
+            targetTeamDoc = matchingSportDocs.find((d) => {
+              const name = String(d.data().team_name || '').toLowerCase();
+              return !name.includes('atleta varsity') && Array.isArray(d.data().roster_list) && d.data().roster_list.length > 0;
+            }) || matchingSportDocs[0];
+          } else {
+            targetTeamDoc = teamsSnap.docs[0];
+          }
+        }
+
+        const teamDoc = targetTeamDoc;
         coachTeamId = teamDoc.id;
         const teamData = teamDoc.data();
         coachTeamName = teamData.team_name || teamData.name || '';
@@ -677,12 +706,18 @@ export async function respondToRecruitmentInquiry(
         const currentRoster: any[] = Array.isArray(teamData.roster_list) ? teamData.roster_list : [];
         const inRoster = currentRoster.some((r: any) => {
           const rId = typeof r === 'string' ? r : (r.athlete_id || r.user_id || r.id);
-          return rId === athleteId || rId === rawAthUid || rId === `ath_${rawAthUid}`;
+          return rId === athleteId || rId === rawAthUid || rId === canonicalAthId;
         });
         if (!inRoster) {
+          const formattedAthleteEntry = {
+            ...athleteEntry,
+            athlete_id: canonicalAthId,
+            user_id: rawAthUid,
+          };
           await teamDoc.ref.set({
-            roster_list: [...currentRoster, athleteEntry],
-            roster_athletes: Array.isArray(teamData.roster_athletes) ? [...teamData.roster_athletes, athleteId] : [athleteId],
+            roster_list: [...currentRoster, formattedAthleteEntry],
+            roster_athletes: Array.from(new Set([...(teamData.roster_athletes || []), canonicalAthId, rawAthUid])),
+            athlete_count: currentRoster.length + 1,
             updated_at: now,
           }, { merge: true }).catch(() => null);
         }

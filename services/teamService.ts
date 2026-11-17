@@ -529,12 +529,13 @@ export async function getCoachManagedAthletes(coachId: string): Promise<any[]> {
   }
 
   const scoutedAthleteMap = new Map<string, any>();
-  // 3. From Scouting Proposals / Inquiries (Active proposals: Sent, Pending, Accepted)
+  // 3. From Scouting Proposals / Inquiries (Only explicitly Accepted offers)
   if (acceptedOffersSnapshot && !acceptedOffersSnapshot.empty) {
     for (const doc of acceptedOffersSnapshot.docs) {
       const inq = doc.data();
       const status = String(inq.offer_status || inq.status || '').toLowerCase();
-      if (status === 'declined' || status === 'rejected' || status === 'revoked') continue;
+      // Only include athletes whose inquiry or scout proposal has been explicitly accepted
+      if (status !== 'accepted') continue;
       const norm = normalizeAthId(inq.athlete_id);
       if (norm) {
         athleteIdSet.add(norm);
