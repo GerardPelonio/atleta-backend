@@ -69,6 +69,7 @@ export interface RosterAthlete {
   sport_type: string;
   sport_category?: string;
   avatar_url?: string;
+  profile_image?: string;
   eligibility_documents: string[];
   is_eligibility_verified: boolean; // Computed based on submitted documents
   recruitment_status?: string;
