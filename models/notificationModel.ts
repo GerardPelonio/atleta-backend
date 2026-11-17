@@ -10,6 +10,9 @@ export interface Notification {
   is_read: boolean;
   action_url?: string | null;
   created_at: string;
+  metadata?: Record<string, any>;
+  offer_status?: string;
+  status?: string;
 }
 
 export interface PerformanceMetric {

@@ -435,6 +435,7 @@ export async function registerUserService(
   const now = new Date();
 
   const passwordHash = hashPassword(password);
+  const avatar_url = (data.avatar_url || data.profile_image || data.photo_url || null) as string | null;
 
   // 2. Build Base Identity document (Users collection) - COMPLETE MASTER DATA (NO PREFIX)
   const userData: Record<string, unknown> = {
@@ -447,6 +448,8 @@ export async function registerUserService(
     password_hash: passwordHash,
     contact_number,
     role: firestoreRole,
+    avatar_url: avatar_url || null,
+    profile_image: avatar_url || null,
     account_status: (firestoreRole === 'Coach' || firestoreRole === 'Official') ? 'Pending' : 'Active',
     status: (firestoreRole === 'Coach' || firestoreRole === 'Official') ? 'pending' : 'active',
     is_approved: !(firestoreRole === 'Coach' || firestoreRole === 'Official'),
@@ -537,7 +540,8 @@ export async function registerUserService(
     profileData.jersey_number = jerseyNumber !== undefined ? jerseyNumber : null;
     profileData.height_cm = heightCm || null;
     profileData.weight_kg = weightKg || null;
-    profileData.avatar_url = userData.avatar_url || null;
+    profileData.avatar_url = avatar_url || null;
+    profileData.profile_image = avatar_url || null;
     profileData.recruitment_status = recruitmentStatus;
     profileData.leaderboard_rank = Number(rank || 0);
     profileData.rank = rank;
@@ -626,8 +630,8 @@ export async function registerUserService(
     profileData.matches_logged = 0;
     profileData.total_matches_logged = 0;
     profileData.professional_documents = profDocs;
-    profileData.profile_image = userData.avatar_url || null;
-    profileData.avatar_url = userData.avatar_url || null;
+    profileData.profile_image = avatar_url || null;
+    profileData.avatar_url = avatar_url || null;
     profileData.quote = quote;
     profileData.system_statistics = {
       metric_logs: 0,
@@ -697,6 +701,8 @@ export async function registerUserService(
     profileData.is_active = true;
     profileData.is_elevated = true;
     profileData.permissions = ['all'];
+    profileData.avatar_url = avatar_url || null;
+    profileData.profile_image = avatar_url || null;
     const rawKey = String(data.admin_security_key || '');
     profileData.admin_security_key = hashAdminSecurityKey(rawKey);
     profileData.created_at = now.toISOString();
@@ -1285,16 +1291,27 @@ export async function socialLoginService(
 
     // Record / update login timestamp and provider in Users collection
     try {
-      const updatePayload = {
+      const resolvedAvatar = avatarUrl || userData.avatar_url || userData.profile_image || null;
+      const updatePayload: Record<string, any> = {
         uid,
         provider,
         auth_provider: provider,
         authProvider: provider,
-        avatar_url: avatarUrl || userData.avatar_url || null,
+        avatar_url: resolvedAvatar,
+        profile_image: resolvedAvatar,
         updated_at: new Date(),
         updatedAt: new Date(),
       };
       await db.collection('Users').doc(uid).set(updatePayload, { merge: true });
+      if (resolvedAvatar) {
+        if (userRole === 'Athlete') {
+          await db.collection('Athlete_Profiles').doc(uid).set({ avatar_url: resolvedAvatar, profile_image: resolvedAvatar }, { merge: true }).catch(() => null);
+          await db.collection('Athlete_Profiles').doc(`ath_${uid}`).set({ avatar_url: resolvedAvatar, profile_image: resolvedAvatar }, { merge: true }).catch(() => null);
+        } else if (userRole === 'Coach') {
+          await db.collection('Coach_Profiles').doc(uid).set({ avatar_url: resolvedAvatar, profile_image: resolvedAvatar }, { merge: true }).catch(() => null);
+          await db.collection('Coach_Profiles').doc(`coach_${uid}`).set({ avatar_url: resolvedAvatar, profile_image: resolvedAvatar }, { merge: true }).catch(() => null);
+        }
+      }
     } catch (updateErr) {
       console.error('Error updating login metadata in Users collection:', updateErr);
     }
@@ -1457,6 +1474,7 @@ export async function socialLoginService(
     }
 
     const userFullName = `${firstName} ${lastName}`.trim();
+    const resolvedSocialAvatar = avatarUrl || additionalData?.avatar_url || additionalData?.profile_image || null;
     const userData: Record<string, any> = {
       uid,
       user_id: uid,
@@ -1471,7 +1489,8 @@ export async function socialLoginService(
       provider,
       authProvider: provider,
       auth_provider: provider,
-      avatar_url: avatarUrl || null,
+      avatar_url: resolvedSocialAvatar,
+      profile_image: resolvedSocialAvatar,
       account_status: userRole === 'Coach' ? 'Pending' : 'Pending',
       status: 'pending',
       is_approved: userRole !== 'Coach',
@@ -1489,7 +1508,8 @@ export async function socialLoginService(
       first_name: firstName,
       last_name: lastName,
       email: cleanEmail,
-      avatar_url: avatarUrl || null,
+      avatar_url: resolvedSocialAvatar,
+      profile_image: resolvedSocialAvatar,
       created_at: now,
       updated_at: now,
     };
@@ -1497,6 +1517,8 @@ export async function socialLoginService(
     if (userRole === 'Athlete') {
       const athleteId = `ath_${uid}`;
       profileData.athlete_id = athleteId;
+      profileData.avatar_url = resolvedSocialAvatar;
+      profileData.profile_image = resolvedSocialAvatar;
       profileData.birthdate = additionalData?.birthdate || '2001-01-01';
       profileData.gender = additionalData?.gender || 'Male';
       profileData.province = additionalData?.province || 'Camarines Sur';
@@ -1509,6 +1531,8 @@ export async function socialLoginService(
     } else if (userRole === 'Coach') {
       const coachId = `coach_${uid}`;
       profileData.coach_id = coachId;
+      profileData.avatar_url = resolvedSocialAvatar;
+      profileData.profile_image = resolvedSocialAvatar;
       profileData.sport_type = additionalData?.sport_type || 'Basketball';
       profileData.coach_role = additionalData?.coach_role || 'Head Coach';
       profileData.current_institution = additionalData?.current_institution || 'Independent';

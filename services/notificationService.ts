@@ -157,6 +157,37 @@ export async function getAthleteNotifications(recipientUserId: string): Promise<
         }
       });
 
+      // Cross-reference any RECRUITMENT_INQUIRY notifications with Scouting_Registry to ensure status is up-to-date
+      const inquiryIds = notifications
+        .filter((n) => n.type === 'RECRUITMENT_INQUIRY' && n.metadata?.scout_id)
+        .map((n) => String(n.metadata!.scout_id));
+
+      if (inquiryIds.length > 0) {
+        try {
+          const inqSnap = await db.collection('Scouting_Registry')
+            .where('__name__', 'in', inquiryIds.slice(0, 30))
+            .get()
+            .catch(() => null);
+          if (inqSnap && !inqSnap.empty) {
+            const inqMap = new Map<string, any>();
+            inqSnap.forEach((d) => inqMap.set(d.id, d.data()));
+            notifications.forEach((n: any) => {
+              if (n.metadata?.scout_id && inqMap.has(n.metadata.scout_id)) {
+                const inq = inqMap.get(n.metadata.scout_id);
+                const s = (inq.offer_status || inq.status || '').toUpperCase();
+                if (s === 'ACCEPTED' || s === 'DECLINED') {
+                  n.offer_status = s;
+                  n.status = s;
+                  n.is_read = true;
+                  if (!n.metadata) n.metadata = {};
+                  n.metadata.offer_status = s;
+                }
+              }
+            });
+          }
+        } catch {}
+      }
+
       // Sort descending by created_at
       return notifications.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     },

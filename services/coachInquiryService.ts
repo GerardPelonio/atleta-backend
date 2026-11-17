@@ -1,4 +1,5 @@
 import { db } from '../utils/firebaseAdmin';
+import { serverCache } from '../utils/cache';
 import {
   CoachPublicProfile,
   RecruitmentInquiry,
@@ -580,13 +581,32 @@ export async function respondToRecruitmentInquiry(
   let docRef = db.collection('Scouting_Registry').doc(inquiryId);
   let doc = await docRef.get();
   if (!doc.exists) {
+    // If a notification ID was passed, look up the real scout inquiry ID
+    if (inquiryId.startsWith('notif_')) {
+      const notifDoc = await db.collection('Notifications').doc(inquiryId).get();
+      if (notifDoc.exists) {
+        const notifData = notifDoc.data() || {};
+        const realScoutId = notifData.metadata?.scout_id || notifData.inquiry_id || notifData.scout_id;
+        if (realScoutId && realScoutId !== inquiryId) {
+          return respondToRecruitmentInquiry(realScoutId, userId, responseStatus, declineReason);
+        }
+      }
+    }
+
     const fallbackRef = db.collection('Recruitment_Inquiries').doc(inquiryId);
     const fallbackDoc = await fallbackRef.get();
     if (fallbackDoc.exists) {
       docRef = fallbackRef;
       doc = fallbackDoc;
     } else {
-      throw new ServiceError(`Inquiry '${inquiryId}' not found.`, 404);
+      const inqRef = db.collection('inquiries').doc(inquiryId);
+      const inqDoc = await inqRef.get();
+      if (inqDoc.exists) {
+        docRef = inqRef;
+        doc = inqDoc;
+      } else {
+        throw new ServiceError(`Inquiry '${inquiryId}' not found.`, 404);
+      }
     }
   }
 
@@ -600,6 +620,31 @@ export async function respondToRecruitmentInquiry(
   };
 
   await docRef.set(updates, { merge: true });
+
+  // Sync status to any related notification documents in Firestore
+  try {
+    const notifsSnap = await db.collection('Notifications')
+      .where('metadata.scout_id', '==', inquiryId)
+      .get()
+      .catch(() => null);
+    if (notifsSnap && !notifsSnap.empty) {
+      const batch = db.batch();
+      notifsSnap.forEach((d) => {
+        batch.set(d.ref, {
+          status: responseStatus.toUpperCase(),
+          offer_status: responseStatus.toUpperCase(),
+          is_read: true,
+          updated_at: now,
+        }, { merge: true });
+      });
+      await batch.commit().catch(() => null);
+    }
+    const rawAth = String(inqData.athlete_id || '').replace(/^ath_/, '');
+    const rawCoach = String(inqData.coach_scout_id || inqData.coach_id || '').replace(/^coach_/, '');
+    serverCache.invalidateTags([`notifs_${rawAth}`, `notifs_${rawCoach}`, `notifs_list_${rawAth}`, `notifs_list_${rawCoach}`]);
+  } catch (notifSyncErr) {
+    console.warn('Failed syncing notification status:', notifSyncErr);
+  }
 
   // If accepted, update Coach's athletes_managed array and trigger real-time notification
   if (responseStatus === 'Accepted') {
