@@ -249,17 +249,73 @@ export async function submitMatchSession(
         ? Number((payload as any).away_score)
         : 103);
 
-  // Resolve or create Home Team doc in Teams collection
+  // Resolve or create Home Team doc in Teams collection (with case-insensitive matching & coach team reuse)
   let homeTeamId = payload.team_id;
   try {
-    const homeTeamQuery = await timedGet(db.collection('Teams')
-      .where('team_name', '==', homeTeamName)
-      .limit(1)
-      .get(), 1500);
+    // 1. If payload.team_id is provided, verify it exists in Teams
+    if (homeTeamId) {
+      const explicitTeamDoc = await timedGet(db.collection('Teams').doc(homeTeamId).get(), 3000);
+      if (!explicitTeamDoc || !explicitTeamDoc.exists) {
+        homeTeamId = '';
+      }
+    }
 
-    if (homeTeamQuery && !homeTeamQuery.empty) {
-      homeTeamId = homeTeamQuery.docs[0].id;
-    } else {
+    // 2. Look for existing coach teams first (scoped to coach's managed teams)
+    if (!homeTeamId) {
+      const possibleCoachIds = Array.from(new Set([coachId, canonicalCoachId, cleanCoachRawId].filter(Boolean)));
+      const coachTeamsSnap = await timedGet(
+        db.collection('Teams').where('coach_id', 'in', possibleCoachIds).get(),
+        3500
+      );
+
+      if (coachTeamsSnap && !coachTeamsSnap.empty) {
+        const normHomeName = homeTeamName.toLowerCase().trim();
+        const normSport = String(payload.sport_type || '').toLowerCase().trim();
+
+        // Best match: exact case-insensitive name match
+        const exactMatch = coachTeamsSnap.docs.find((d: any) => {
+          const tName = String(d.data().team_name || '').toLowerCase().trim();
+          return tName === normHomeName;
+        });
+
+        // Secondary match: same sport match for coach if homeTeamName matches or is default
+        const sportMatch = coachTeamsSnap.docs.find((d: any) => {
+          const tSport = String(d.data().sport_type || '').toLowerCase().trim();
+          const tName = String(d.data().team_name || '').toLowerCase().trim();
+          return tSport === normSport && (normHomeName.includes(tName) || tName.includes(normHomeName));
+        });
+
+        const chosen = exactMatch || sportMatch;
+        if (chosen) {
+          homeTeamId = chosen.id;
+        }
+      }
+    }
+
+    // 3. Fallback: Search all teams case-insensitively before generating a new team
+    if (!homeTeamId) {
+      const allTeamsSnap = await timedGet(
+        db.collection('Teams').get(),
+        4000
+      );
+
+      if (allTeamsSnap && !allTeamsSnap.empty) {
+        const normHomeName = homeTeamName.toLowerCase().trim();
+        const normSport = String(payload.sport_type || '').toLowerCase().trim();
+        const matchedDoc = allTeamsSnap.docs.find((d: any) => {
+          const tName = String(d.data().team_name || '').toLowerCase().trim();
+          const tSport = String(d.data().sport_type || '').toLowerCase().trim();
+          return tName === normHomeName && (tSport === normSport || !normSport || !tSport);
+        });
+
+        if (matchedDoc) {
+          homeTeamId = matchedDoc.id;
+        }
+      }
+    }
+
+    // 4. Only if no matching team exists in database, create a new team document
+    if (!homeTeamId) {
       homeTeamId = await generateStandardId('TEAM');
       await db.collection('Teams').doc(homeTeamId).set({
         team_id: homeTeamId,
@@ -283,14 +339,28 @@ export async function submitMatchSession(
   let oppTeamId = (payload as any).away_team_id || '';
   if (oppTeamName) {
     try {
-      const oppTeamQuery = await timedGet(db.collection('Teams')
-        .where('team_name', '==', oppTeamName)
-        .limit(1)
-        .get(), 1500);
+      if (oppTeamId) {
+        const explicitOppDoc = await timedGet(db.collection('Teams').doc(oppTeamId).get(), 2500);
+        if (!explicitOppDoc || !explicitOppDoc.exists) {
+          oppTeamId = '';
+        }
+      }
 
-      if (oppTeamQuery && !oppTeamQuery.empty) {
-        oppTeamId = oppTeamQuery.docs[0].id;
-      } else {
+      if (!oppTeamId) {
+        const allTeamsSnap = await timedGet(db.collection('Teams').get(), 3500);
+        if (allTeamsSnap && !allTeamsSnap.empty) {
+          const normOppName = oppTeamName.toLowerCase().trim();
+          const matchedOpp = allTeamsSnap.docs.find((d: any) => {
+            const tName = String(d.data().team_name || '').toLowerCase().trim();
+            return tName === normOppName;
+          });
+          if (matchedOpp) {
+            oppTeamId = matchedOpp.id;
+          }
+        }
+      }
+
+      if (!oppTeamId) {
         oppTeamId = await generateStandardId('TEAM');
         await db.collection('Teams').doc(oppTeamId).set({
           team_id: oppTeamId,

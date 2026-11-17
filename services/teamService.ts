@@ -322,7 +322,7 @@ export async function getCoachTeams(coachId: string): Promise<TeamSummary[]> {
     }
   }
 
-  const teams: TeamSummary[] = [];
+  const rawTeams: TeamSummary[] = [];
 
   for (const doc of docsMap.values()) {
     const data = doc.data() as Team;
@@ -330,7 +330,7 @@ export async function getCoachTeams(coachId: string): Promise<TeamSummary[]> {
     const enrichedRoster = await enrichRoster(data.roster_list || []);
     const coachName = data.coach_name || coach.full_name || 'Coach';
 
-    teams.push({
+    rawTeams.push({
       team_id: data.team_id,
       team_name: data.team_name,
       sport_type: data.sport_type,
@@ -344,6 +344,27 @@ export async function getCoachTeams(coachId: string): Promise<TeamSummary[]> {
       roster_list: enrichedRoster,
     });
   }
+
+  // Deduplicate teams by normalized name + sport, prioritizing teams with active rosters or in managedIds
+  const dedupedMap = new Map<string, TeamSummary>();
+  for (const t of rawTeams) {
+    const key = `${(t.team_name || '').trim().toLowerCase()}___${(t.sport_type || '').trim().toUpperCase()}`;
+    if (!dedupedMap.has(key)) {
+      dedupedMap.set(key, t);
+    } else {
+      const existing = dedupedMap.get(key)!;
+      const isExistingManaged = managedIds.includes(existing.team_id);
+      const isCurrentManaged = managedIds.includes(t.team_id);
+      const existingRosterLen = existing.roster_list?.length || 0;
+      const currentRosterLen = t.roster_list?.length || 0;
+
+      if ((!isExistingManaged && isCurrentManaged) || (currentRosterLen > existingRosterLen)) {
+        dedupedMap.set(key, t);
+      }
+    }
+  }
+
+  const teams = Array.from(dedupedMap.values());
 
   coachTeamsCache.set(coachId, { data: teams, cachedAt: Date.now() });
   return teams;
