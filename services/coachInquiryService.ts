@@ -390,14 +390,6 @@ export async function submitRecruitmentInquiry(
     },
   }).catch(() => {});
 
-  // Emit push notification to coach with the full message
-  eventBus.emit(EVENTS.PUSH_NOTIFICATION, {
-    recipient_id: coachProfile.user_id,
-    type: 'RECRUITMENT_INQUIRY',
-    title: 'New Recruitment Inquiry Received',
-    message: `${athleteName} sent you a recruitment inquiry. Message: "${message ? message.trim() : 'No message attached'}"`,
-  });
-
   // Dispatch email notification to coach asynchronously
   if (coachProfile.email) {
     sendRecruitmentInquiryEmailService(

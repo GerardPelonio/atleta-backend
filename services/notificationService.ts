@@ -3,6 +3,8 @@ import { Notification, NotificationType } from '../models/notificationModel';
 import { eventBus, EVENTS } from '../utils/eventBus';
 import { serverCache } from '../utils/cache';
 
+const recentNotificationTimes = new Map<string, number>();
+
 /**
  * Event-driven Push Alert engine.
  * Listens for system events (RECRUITMENT_INQUIRY, ACTION_REQUIRED, SYSTEM) and triggers push alerts (< 2s).
@@ -10,6 +12,12 @@ import { serverCache } from '../utils/cache';
 eventBus.on(EVENTS.PUSH_NOTIFICATION, async (payload: { recipient_id: string; title: string; message: string; type?: NotificationType }) => {
   const startTime = Date.now();
   try {
+    const dedupeKey = `${payload.recipient_id}_${payload.type || 'SYSTEM'}_${payload.title}`;
+    const lastTime = recentNotificationTimes.get(dedupeKey);
+    if (lastTime && Date.now() - lastTime < 15000) {
+      console.log(`[PUSH ALERT ENGINE] Skipped duplicate push notification for ${payload.recipient_id}`);
+      return;
+    }
     await createNotification({
       recipient_id: payload.recipient_id,
       title: payload.title,
@@ -34,9 +42,6 @@ export async function createNotification(params: {
   action_url?: string;
   metadata?: Record<string, any>;
 }): Promise<Notification> {
-  const notificationId = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  const now = new Date().toISOString();
-
   let targetRecipientId = (params.recipient_id || '').trim();
   let targetEmail = (params.recipient_email || '').trim().toLowerCase();
 
@@ -49,6 +54,45 @@ export async function createNotification(params: {
       }
     } catch {}
   }
+
+  // Deduplication check: prevent multiple notifications for the exact same inquiry or identical message within 15s
+  const dedupeKey = `${targetRecipientId}_${params.type || 'SYSTEM'}_${params.metadata?.scout_id || params.title}`;
+  const nowMs = Date.now();
+  if (recentNotificationTimes.has(dedupeKey)) {
+    const lastTime = recentNotificationTimes.get(dedupeKey)!;
+    if (nowMs - lastTime < 15000) {
+      console.log(`[NOTIFICATION SERVICE] Suppressed duplicate notification for key: ${dedupeKey}`);
+      return {
+        notification_id: `dup_${nowMs}`,
+        recipient_id: targetRecipientId,
+        title: params.title,
+        message: params.message,
+        is_read: false,
+        created_at: new Date().toISOString(),
+      } as Notification;
+    }
+  }
+  recentNotificationTimes.set(dedupeKey, nowMs);
+
+  // If in-memory map gets too large, prune keys older than 60 seconds
+  if (recentNotificationTimes.size > 200) {
+    for (const [k, time] of recentNotificationTimes.entries()) {
+      if (nowMs - time > 60000) {
+        recentNotificationTimes.delete(k);
+      }
+    }
+  }
+
+  // Deterministic ID for inquiry-linked notifications to guarantee storage-layer idempotency
+  let notificationId = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  if (params.metadata?.scout_id) {
+    const cleanScoutId = String(params.metadata.scout_id).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const statusKey = String(params.metadata.offer_status || params.type || 'INQUIRY').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const cleanRecipient = targetRecipientId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    notificationId = `notif_${cleanScoutId}_${statusKey}_${cleanRecipient}`;
+  }
+
+  const now = new Date().toISOString();
 
   const notificationData: any = {
     notification_id: notificationId,
