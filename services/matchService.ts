@@ -1189,10 +1189,10 @@ export function extractJsonFromAiText(content: string): any {
 
 const OCR_MODEL_WATERFALL = [
   'gemini-3.5-flash-lite',
+  'gemini-flash-lite-latest',
+  'gemini-3.1-flash-lite',
   'gemini-3.5-flash',
   'gemini-3.8-flash',
-  'gemini-3.7-flash',
-  'gemini-3.6-flash',
   'gemini-flash-latest',
 ];
 
@@ -1836,10 +1836,13 @@ async function callGeminiWithWaterfall(requestBody: any, rawKey?: string, file?:
     const model = OCR_MODEL_WATERFALL[i];
     try {
       const payloadToSend = JSON.parse(JSON.stringify(requestBody));
+      if (!payloadToSend.generationConfig) {
+        payloadToSend.generationConfig = {};
+      }
       if (model.includes('flash-lite')) {
-        if (payloadToSend.generationConfig?.thinkingConfig) {
-          delete payloadToSend.generationConfig.thinkingConfig;
-        }
+        delete payloadToSend.generationConfig.thinkingConfig;
+      } else {
+        payloadToSend.generationConfig.thinkingConfig = { thinkingBudget: 0 };
       }
 
       const response = await fetch(
@@ -1848,7 +1851,7 @@ async function callGeminiWithWaterfall(requestBody: any, rawKey?: string, file?:
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payloadToSend),
-          signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(28000) : undefined,
+          signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(20000) : undefined,
         }
       );
 
@@ -1911,8 +1914,8 @@ export async function uploadScoresheetFileToStorage(matchId: string, file: Expre
     const sharp = require('sharp');
     if (mime.startsWith('image/')) {
       bufferToEncode = await sharp(file.buffer)
-        .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true })
-        .jpeg({ quality: 75 })
+        .resize({ width: 1000, height: 1000, fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 65 })
         .toBuffer();
       encodeMime = 'image/jpeg';
     }
